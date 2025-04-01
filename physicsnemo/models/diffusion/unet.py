@@ -77,9 +77,9 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
     See Also
     --------
     For information on model types and their usage:
-    :class:`~modulus.models.diffusion.SongUNet`: Basic U-Net for diffusion models
-    :class:`~modulus.models.diffusion.SongUNetPosEmbd`: U-Net with positional embeddings
-    :class:`~modulus.models.diffusion.SongUNetPosLtEmbd`: U-Net with positional and lead-time embeddings
+    :class:`~physicsnemo.models.diffusion.SongUNet`: Basic U-Net for diffusion models
+    :class:`~physicsnemo.models.diffusion.SongUNetPosEmbd`: U-Net with positional embeddings
+    :class:`~physicsnemo.models.diffusion.SongUNetPosLtEmbd`: U-Net with positional and lead-time embeddings
 
     Please refer to the documentation of these classes for details on how to call
     and use these models directly.

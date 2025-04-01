@@ -24,7 +24,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from modulus.utils.patching import RandomPatching2D
+from physicsnemo.utils.patching import RandomPatching2D
 
 
 class VPLoss:
@@ -523,7 +523,7 @@ class ResidualLoss:
             img_shape_y, img_shape_x).
         patching : Optional[RandomPatching2D], optional
             Patching strategy for processing large images, by default None. See
-            :class:`modulus.utils.patching.RandomPatching2D` for details.
+            :class:`physicsnemo.utils.patching.RandomPatching2D` for details.
             When provided, the patching strategy is used for both image patches
             and positional embeddings selection in the model `net`.
         labels : Optional[Tensor], optional
@@ -795,7 +795,7 @@ class RegressionLossCE:
     """
     A regression loss function for the GEFS-HRRR model with probability
     channels. Adapted from
-    :class:`modulus.metrics.diffusion.loss.RegressionLoss` to train
+    :class:`physicsnemo.metrics.diffusion.loss.RegressionLoss` to train
     deterministic regression model. In this version,
     probability channels are evaluated using CrossEntropyLoss instead of
     squared error.

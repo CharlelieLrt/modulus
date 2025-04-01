@@ -489,8 +489,8 @@ class SongUNetPosEmbd(SongUNet):
     Example
     --------
     >>> import torch
-    >>> from modulus.models.diffusion.song_unet import SongUNetPosEmbd
-    >>> from modulus.utils.patching import GridPatching2D
+    >>> from physicsnemo.models.diffusion.song_unet import SongUNetPosEmbd
+    >>> from physicsnemo.utils.patching import GridPatching2D
     >>>
     >>> # Model initialization - in_channels must include both original input channels (2)
     >>> # and the positional embedding channels (N_grid_channels=4 by default)
@@ -641,7 +641,7 @@ class SongUNetPosEmbd(SongUNet):
         Example
         -------
         >>> # Create global indices using patching utility:
-        >>> from modulus.utils.patching import GridPatching2D
+        >>> from physicsnemo.utils.patching import GridPatching2D
         >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
         >>> global_index = patching.global_index(batch_size=3)
         >>> print(global_index.shape)
@@ -649,9 +649,9 @@ class SongUNetPosEmbd(SongUNet):
 
         See Also
         --------
-        :meth:`modulus.utils.patching.RandomPatching2D.global_index`
+        :meth:`physicsnemo.utils.patching.RandomPatching2D.global_index`
             For generating random patch indices.
-        :meth:`modulus.utils.patching.GridPatching2D.global_index`
+        :meth:`physicsnemo.utils.patching.GridPatching2D.global_index`
             For generating deterministic grid-based patch indices.
             See these methods for possible ways to generate the global_index parameter.
         """
@@ -709,7 +709,7 @@ class SongUNetPosEmbd(SongUNet):
             Each selected embedding should correspond to the positional
             information of each batch element in x.
             For patch-based processing, typically this should be based on
-            :meth:`modulus.utils.patching.BasePatching2D.apply` method to
+            :meth:`physicsnemo.utils.patching.BasePatching2D.apply` method to
             maintain consistency with patch extraction.
 
         Returns
@@ -721,7 +721,7 @@ class SongUNetPosEmbd(SongUNet):
         Example
         -------
         >>> # Define a selector function with a patching utility:
-        >>> from modulus.utils.patching import GridPatching2D
+        >>> from physicsnemo.utils.patching import GridPatching2D
         >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
         >>> batch_size = 4
         >>> def embedding_selector(emb):
@@ -730,7 +730,7 @@ class SongUNetPosEmbd(SongUNet):
 
         See Also
         --------
-        :meth:`modulus.utils.patching.BasePatching2D.apply`
+        :meth:`physicsnemo.utils.patching.BasePatching2D.apply`
             For the base patching method typically used in embedding_selector.
         """
         return embedding_selector(
@@ -878,8 +878,8 @@ class SongUNetPosLtEmbd(SongUNet):
     Example
     --------
     >>> import torch
-    >>> from modulus.models.diffusion.song_unet import SongUNetPosLtEmbd
-    >>> from modulus.utils.patching import GridPatching2D
+    >>> from physicsnemo.models.diffusion.song_unet import SongUNetPosLtEmbd
+    >>> from physicsnemo.utils.patching import GridPatching2D
     >>>
     >>> # Model initialization - in_channels must include original input channels (2),
     >>> # positional embedding channels (N_grid_channels=4 by default) and
@@ -1082,7 +1082,7 @@ class SongUNetPosLtEmbd(SongUNet):
         Example
         -------
         >>> # Create global indices using patching utility:
-        >>> from modulus.utils.patching import GridPatching2D
+        >>> from physicsnemo.utils.patching import GridPatching2D
         >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
         >>> global_index = patching.global_index(batch_size=1)
         >>> global_index.shape
@@ -1090,9 +1090,9 @@ class SongUNetPosLtEmbd(SongUNet):
 
         See Also
         --------
-        :meth:`modulus.utils.patching.RandomPatching2D.global_index`
+        :meth:`physicsnemo.utils.patching.RandomPatching2D.global_index`
             For generating random patch indices.
-        :meth:`modulus.utils.patching.GridPatching2D.global_index`
+        :meth:`physicsnemo.utils.patching.GridPatching2D.global_index`
             For generating deterministic grid-based patch indices.
         See these methods for possible ways to generate the global_index parameter.
         """
@@ -1145,7 +1145,7 @@ class SongUNetPosLtEmbd(SongUNet):
             Each selected embedding should correspond to the positional
             information of each batch element in x.
             For patch-based processing, typically this should be based on
-            :meth:`modulus.utils.patching.BasePatching2D.apply` method to
+            :meth:`physicsnemo.utils.patching.BasePatching2D.apply` method to
             maintain consistency with patch extraction.
 
         Returns
@@ -1157,7 +1157,7 @@ class SongUNetPosLtEmbd(SongUNet):
         Example
         -------
         >>> # Define a selector function with a patching utility:
-        >>> from modulus.utils.patching import GridPatching2D
+        >>> from physicsnemo.utils.patching import GridPatching2D
         >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
         >>> batch_size = 4
         >>> def embedding_selector(emb):
@@ -1166,7 +1166,7 @@ class SongUNetPosLtEmbd(SongUNet):
 
         See Also
         --------
-        :meth:`modulus.utils.patching.BasePatching2D.apply`
+        :meth:`physicsnemo.utils.patching.BasePatching2D.apply`
             For the base patching method typically used in embedding_selector.
         """
         return embedding_selector(embeds.to(x.dtype).to(x.device))  # (B, N_pe, H, W)

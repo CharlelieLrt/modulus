@@ -138,9 +138,9 @@ def test_diffusion_step(device, pytestconfig):
 @import_or_fail("cftime")
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 def test_diffusion_step_rectangle(device, pytestconfig):
-    from modulus.utils.corrdiff import diffusion_step
-    from modulus.utils.generative import stochastic_sampler
-    from modulus.utils.patching import GridPatching2D
+    from physicsnemo.utils.corrdiff import diffusion_step
+    from physicsnemo.utils.generative import stochastic_sampler
+    from physicsnemo.utils.patching import GridPatching2D
 
     img_shape_y, img_shape_x = 32, 16
     seed_batch_size = 4

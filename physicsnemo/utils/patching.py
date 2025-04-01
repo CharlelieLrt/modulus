@@ -170,9 +170,9 @@ class RandomPatching2D(BasePatching2D):
 
     See Also
     --------
-    :class:`modulus.utils.patching.BasePatching2D`
+    :class:`physicsnemo.utils.patching.BasePatching2D`
         The base class providing the patching interface.
-    :class:`modulus.utils.patching.GridPatching2D`
+    :class:`physicsnemo.utils.patching.GridPatching2D`
         Alternative patching strategy using deterministic patch locations.
     """
 
@@ -345,9 +345,9 @@ class GridPatching2D(BasePatching2D):
 
     See Also
     --------
-    :class:`modulus.utils.patching.BasePatching2D`
+    :class:`physicsnemo.utils.patching.BasePatching2D`
         The base class providing the patching interface.
-    :class:`modulus.utils.patching.RandomPatching2D`
+    :class:`physicsnemo.utils.patching.RandomPatching2D`
         Alternative patching strategy using random patch locations.
     """
 
@@ -405,7 +405,7 @@ class GridPatching2D(BasePatching2D):
 
         See Also
         --------
-        :func:`modulus.utils.patching.image_batching`
+        :func:`physicsnemo.utils.patching.image_batching`
             The underlying function used to perform the patching operation.
         """
         if additional_input is not None:
@@ -448,7 +448,7 @@ class GridPatching2D(BasePatching2D):
 
         See Also
         --------
-        :func:`modulus.utils.patching.image_fuse`
+        :func:`physicsnemo.utils.patching.image_fuse`
             The underlying function used to perform the fusion operation.
         """
         out = image_fuse(
@@ -641,7 +641,7 @@ def image_fuse(
 
     See Also
     --------
-    :func:`modulus.utils.patching.image_batching`
+    :func:`physicsnemo.utils.patching.image_batching`
         The function this reverses, which splits images into patches.
     """
 
