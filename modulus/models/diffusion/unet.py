@@ -74,27 +74,15 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
     **model_kwargs : dict
         Keyword arguments to create the underlying model.
 
-    Examples
-    ---------
-    The model forward pass can be called with:
-    >>> model(x, img_lr, force_fp32=False, **forward_kwargs)
-    where:
-        x, img_lr: torch.Tensor
-            Passed as positional arguments to the underlying model. Refer
-            to the documentation for the class specified by `model_type`.
-        force_fp32: bool, optional
-            If True, force conversion of inputs to torch.float32. Defaults to
-            `False`.
-        **forward_kwargs: dict, optional
-            Additional keyword arguments to be passed to the underlying
-            model's forward pass.
-
     See Also
     --------
-    For possible `model_type` and their accepted `model_kwargs` and
-    `forward_kwargs`, see fo example:
-    :class:`~modulus.models.diffusion.SongUNetPosEmbd` or
-    :class:`modulus.models.diffusion.SongUNetPosLtEmbd`.
+    For information on model types and their usage:
+    :class:`~modulus.models.diffusion.SongUNet`: Basic U-Net for diffusion models
+    :class:`~modulus.models.diffusion.SongUNetPosEmbd`: U-Net with positional embeddings
+    :class:`~modulus.models.diffusion.SongUNetPosLtEmbd`: U-Net with positional and lead-time embeddings
+
+    Please refer to the documentation of these classes for details on how to call
+    and use these models directly.
 
     Reference
     ----------
