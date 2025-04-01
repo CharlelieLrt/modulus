@@ -488,31 +488,41 @@ class SongUNetPosEmbd(SongUNet):
 
     Example
     --------
-    >>> # Basic usage without positional embedding selection
-    >>> model = SongUNetPosEmbd(img_resolution=16, in_channels=2, out_channels=2)
+    >>> import torch
+    >>> from modulus.models.diffusion.song_unet import SongUNetPosEmbd
+    >>> from modulus.utils.patching import GridPatching2D
+    >>>
+    >>> # Model initialization - in_channels must include both original input channels (2)
+    >>> # and the positional embedding channels (N_grid_channels=4 by default)
+    >>> model = SongUNetPosEmbd(img_resolution=16, in_channels=2+4, out_channels=2)
     >>> noise_labels = torch.randn([1])
     >>> class_labels = torch.randint(0, 1, (1, 1))
+    >>> # The input has only the original 2 channels - positional embeddings are
+    >>> # added automatically inside the forward method
     >>> input_image = torch.ones([1, 2, 16, 16])
     >>> output_image = model(input_image, noise_labels, class_labels)
     >>> output_image.shape
     torch.Size([1, 2, 16, 16])
-
-    >>> # Using global_index for patch-based processing
-    >>> from modulus.utils.patching import GridPatching2D
-    >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
-    >>> global_index = patching.global_index(batch_size=1)  # Get indices for patches
+    >>>
+    >>> # Using a global index to select all positional embeddings
+    >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(16, 16))
+    >>> global_index = patching.global_index(batch_size=1)
     >>> output_image = model(
     ...     input_image, noise_labels, class_labels,
     ...     global_index=global_index
     ... )
-
-    >>> # Using embedding_selector with patch-based processing
+    >>> output_image.shape
+    torch.Size([1, 2, 16, 16])
+    >>>
+    >>> # Using a custom embedding selector to select all positional embeddings
     >>> def patch_embedding_selector(emb):
     ...     return patching.apply(emb[None].expand(1, -1, -1, -1))
     >>> output_image = model(
     ...     input_image, noise_labels, class_labels,
     ...     embedding_selector=patch_embedding_selector
     ... )
+    >>> output_image.shape
+    torch.Size([1, 2, 16, 16])
     """
 
     def __init__(
@@ -595,7 +605,9 @@ class SongUNetPosEmbd(SongUNet):
         return super().forward(x, noise_labels, class_labels, augment_labels)
 
     def positional_embedding_indexing(
-        self, x: torch.Tensor, global_index: Optional[torch.Tensor] = None
+        self,
+        x: torch.Tensor,
+        global_index: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Select positional embeddings using global indices.
 
@@ -621,9 +633,19 @@ class SongUNetPosEmbd(SongUNet):
         -------
         torch.Tensor
             Selected positional embeddings with shape:
-            - If global_index is None: (B, N_pe, H, W)
             - If global_index provided: (B, N_pe, H, W)
-            where N_pe is the number of positional embedding channels.
+            - If global_index is None: (B, N_pe, H_pe, W_pe)
+            where N_pe is the number of positional embedding channels, and H_pe
+            and W_pe are the height and width of the positional embedding grid.
+
+        Example
+        -------
+        >>> # Create global indices using patching utility:
+        >>> from modulus.utils.patching import GridPatching2D
+        >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
+        >>> global_index = patching.global_index(batch_size=3)
+        >>> print(global_index.shape)
+        torch.Size([12, 2, 8, 8])
 
         See Also
         --------
@@ -679,11 +701,11 @@ class SongUNetPosEmbd(SongUNet):
         Arguments
         ---------
         x : torch.Tensor
-            Input tensor of shape (B, C, H, W) used to determine batch
-            size and device.
+            Input tensor of shape (B, C, H, W) only used to determine dtype and
+            device.
         embedding_selector : Callable
             Function that takes as input an embedding tensor of shape (N_pe,
-            H_pe, W_pe) and returns selected embeddings with shape (B, N_pe, H, W).
+            H_pe, W_pe) and returns selected embeddings with shape (batch_size, N_pe, H, W).
             Each selected embedding should correspond to the positional
             information of each batch element in x.
             For patch-based processing, typically this should be based on
@@ -698,11 +720,13 @@ class SongUNetPosEmbd(SongUNet):
 
         Example
         -------
-        A typical embedding selector function looks like:
-        ```python
-        def patch_embedding_selector(emb):
-            return patching.apply(emb[None].expand(batch_size, -1, -1, -1))
-        ```
+        >>> # Define a selector function with a patching utility:
+        >>> from modulus.utils.patching import GridPatching2D
+        >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
+        >>> batch_size = 4
+        >>> def embedding_selector(emb):
+        ...     return patching.apply(emb[None].expand(batch_size, -1, -1, -1))
+        >>>
 
         See Also
         --------
@@ -726,7 +750,9 @@ class SongUNetPosEmbd(SongUNet):
             x = np.meshgrid(np.linspace(-1, 1, self.img_shape_y))
             y = np.meshgrid(np.linspace(-1, 1, self.img_shape_x))
             grid_x, grid_y = np.meshgrid(y, x)
-            grid = torch.from_numpy(np.stack((grid_x, grid_y), axis=0))
+            grid = torch.from_numpy(
+                np.stack((grid_x, grid_y), axis=0)
+            )  # (2, img_shape_y, img_shape_x)
             grid.requires_grad = False
         elif self.gridtype == "sinusoidal" and self.N_grid_channels == 4:
             # print('sinusuidal grid added ......')
@@ -851,13 +877,21 @@ class SongUNetPosLtEmbd(SongUNet):
 
     Example
     --------
-    >>> # Basic usage with lead time labels
+    >>> import torch
+    >>> from modulus.models.diffusion.song_unet import SongUNetPosLtEmbd
+    >>> from modulus.utils.patching import GridPatching2D
+    >>>
+    >>> # Model initialization - in_channels must include original input channels (2),
+    >>> # positional embedding channels (N_grid_channels=4 by default) and
+    >>> # lead time embedding channels (4)
     >>> model = SongUNetPosLtEmbd(
-    ...     img_resolution=16, in_channels=2, out_channels=2,
+    ...     img_resolution=16, in_channels=2+4+4, out_channels=2,
     ...     lead_time_channels=4, lead_time_steps=9
     ... )
     >>> noise_labels = torch.randn([1])
     >>> class_labels = torch.randint(0, 1, (1, 1))
+    >>> # The input has only the original 2 channels - positional embeddings and
+    >>> # lead time embeddings are added automatically inside the forward method
     >>> input_image = torch.ones([1, 2, 16, 16])
     >>> lead_time_label = torch.tensor([3])
     >>> output_image = model(
@@ -866,26 +900,28 @@ class SongUNetPosLtEmbd(SongUNet):
     ... )
     >>> output_image.shape
     torch.Size([1, 2, 16, 16])
-
-    >>> # Using global_index for patch-based processing
-    >>> from modulus.utils.patching import GridPatching2D
-    >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
-    >>> global_index = patching.global_index(batch_size=1)  # Get indices for patches
+    >>>
+    >>> # Using global_index to select all the positional and lead time embeddings
+    >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(16, 16))
+    >>> global_index = patching.global_index(batch_size=1)
     >>> output_image = model(
     ...     input_image, noise_labels, class_labels,
     ...     lead_time_label=lead_time_label,
     ...     global_index=global_index
     ... )
-
-    >>> # Using embedding_selector with patch-based processing
+    >>> output_image.shape
+    torch.Size([1, 2, 16, 16])
+    >>>
+    >>> # Using custom embedding selector to select all the positional and lead time embeddings
     >>> def patch_embedding_selector(emb):
-    ...     # emb: (N_pe + N_lt, image_shape_y, image_shape_x)
     ...     return patching.apply(emb[None].expand(1, -1, -1, -1))
     >>> output_image = model(
     ...     input_image, noise_labels, class_labels,
     ...     lead_time_label=lead_time_label,
     ...     embedding_selector=patch_embedding_selector
     ... )
+    >>> output_image.shape
+    torch.Size([1, 2, 16, 16])
     """
 
     def __init__(
@@ -1043,6 +1079,15 @@ class SongUNetPosLtEmbd(SongUNet):
             Selected embeddings with shape (B, N_pe, H, W) where N_pe is the
             total number of embedding channels (positional + lead time).
 
+        Example
+        -------
+        >>> # Create global indices using patching utility:
+        >>> from modulus.utils.patching import GridPatching2D
+        >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
+        >>> global_index = patching.global_index(batch_size=1)
+        >>> global_index.shape
+        torch.Size([12, 2, 8, 8])
+
         See Also
         --------
         :meth:`modulus.utils.patching.RandomPatching2D.global_index`
@@ -1111,11 +1156,13 @@ class SongUNetPosLtEmbd(SongUNet):
 
         Example
         -------
-        A typical embedding selector function looks like:
-        ```python
-        def patch_embedding_selector(emb):
-            return patching.apply(emb[None].expand(batch_size, -1, -1, -1))
-        ```
+        >>> # Define a selector function with a patching utility:
+        >>> from modulus.utils.patching import GridPatching2D
+        >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
+        >>> batch_size = 4
+        >>> def embedding_selector(emb):
+        ...     return patching.apply(emb[None].expand(batch_size, -1, -1, -1))
+        >>>
 
         See Also
         --------

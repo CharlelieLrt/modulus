@@ -611,8 +611,8 @@ class ResidualLoss:
             # Function to select the correct positional embedding for each
             # patch
             def patch_embedding_selector(emb):
-                # emb: (N_pe, image_shape_y, image_shape_x) or
-                # (batch_size * patch_num, N_pe, patch_shape_y, patch_shape_x)
+                # emb: (N_pe, image_shape_y, image_shape_x)
+                # return: (batch_size * patch_num, N_pe, patch_shape_y, patch_shape_x)
                 return patching.apply(emb[None].expand(batch_size, -1, -1, -1))
 
             y = y_patched
