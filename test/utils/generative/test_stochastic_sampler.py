@@ -47,7 +47,7 @@ class MockNet:
 @import_or_fail("cftime")
 def test_stochastic_sampler(pytestconfig):
 
-    from modulus.utils.generative import stochastic_sampler
+    from physicsnemo.utils.generative import stochastic_sampler
 
     net = MockNet()
     latents = torch.randn(2, 3, 448, 448)  # Mock latents
@@ -119,8 +119,8 @@ def test_stochastic_sampler(pytestconfig):
 # The test function for edm_sampler with rectangular domain and patching
 @import_or_fail("cftime")
 def test_stochastic_sampler_rectangle_patching(pytestconfig):
-    from modulus.utils.generative import stochastic_sampler
-    from modulus.utils.patching import GridPatching2D
+    from physicsnemo.utils.generative import stochastic_sampler
+    from physicsnemo.utils.patching import GridPatching2D
 
     net = MockNet()
 

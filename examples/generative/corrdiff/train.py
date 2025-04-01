@@ -19,19 +19,21 @@ from hydra.utils import to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.tensorboard import SummaryWriter
-from modulus import Module
-from modulus.models.diffusion import UNet, EDMPrecondSR
-from modulus.distributed import DistributedManager
-from modulus.metrics.diffusion import RegressionLoss, ResidualLoss, RegressionLossCE
-from modulus.utils.patching import RandomPatching2D
-from modulus.launch.logging import (
+
+from physicsnemo import Module
+from physicsnemo.models.diffusion import UNet, EDMPrecondSR
+from physicsnemo.distributed import DistributedManager
+from physicsnemo.metrics.diffusion import RegressionLoss, ResidualLoss, RegressionLossCE
+from physicsnemo.utils.patching import RandomPatching2D
+from physicsnemo.launch.logging import (
     PythonLogger,
     RankZeroLoggingWrapper,
     initialize_wandb,
 )
 import wandb
-from modulus.launch.utils import load_checkpoint, save_checkpoint
+from physicsnemo.launch.utils import load_checkpoint, save_checkpoint
 from datasets.dataset import init_train_valid_datasets_from_config, register_dataset
+
 from helpers.train_helpers import (
     set_patch_shape,
     set_seed,

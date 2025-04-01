@@ -20,8 +20,8 @@ import torch
 import importlib.util
 from pathlib import Path
 
-from modulus.utils.generative import InfiniteSampler
-from modulus.distributed import DistributedManager
+from physicsnemo.utils.generative import InfiniteSampler
+from physicsnemo.distributed import DistributedManager
 
 from . import base, cwb, hrrrmini, gefs_hrrr
 

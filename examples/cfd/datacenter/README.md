@@ -22,7 +22,18 @@ rate and rack exit temperature (max load condition). Steady state simulations
 are used and the resulting OpenFOAM data is exported in VTK format for training
 of the AI surrogate. The dataset is then normalized using the mean and standard
 deviation statistics of the dataset. The normalized dataset, along with a sample
-OpenFOAM configuration, can be downloaded using the NGC link: [Link to be added].
+OpenFOAM configuration, can be downloaded from NGC link
+[here](https://catalog.ngc.nvidia.com/orgs/nvidia/teams/physicsnemo/resources/physicsnemo_datacenter_cfd_dataset)
+
+After downloading, place the datasets directory into the current directory.
+Running below commands should setup the directory structure required to run the
+training
+([Requires NGC CLI](https://docs.ngc.nvidia.com/cli/index.html)).
+
+```bash
+ngc registry resource download-version "nvidia/physicsnemo/physicsnemo_datacenter_cfd_dataset:v1"
+mv physicsnemo_datacenter_cfd_dataset_vv1/datasets .
+```
 
 **Note:** Access to NVAIE is required to download the dataset
 and the reference OpenFOAM configuration.
@@ -58,7 +69,7 @@ mpirun -np <#GPUs> python train.py
 
 Once the model is trained, you can use the inference.py script to compute the
 model inference. For generating the Signed Distance Field and geometry for the
-inference, we make use of the utilities from Modulus-Sym.
+inference, we make use of the utilities from PhysicsNeMo-Sym.
 
 ### Training of Physics-Informed model
 
@@ -80,5 +91,5 @@ This example was developed as a part of collaboration between NVIDIA and Wistron
 
 ## Resources
 
-1. [Wistron Uses NVIDIA Omniverse and NVIDIA Modulus to Build Digital Twin Platform, Transforming Factory Planning and Operations](https://www.wistron.com/en/Newsroom/2024-03-19-1)
-2. [Model Innovators: How Digital Twins Are Making Industries More Efficient](https://blogs.nvidia.com/blog/digital-twins-modulus-wistron/)
+1. [Wistron Uses NVIDIA Omniverse and NVIDIA PhysicsNeMo to Build Digital Twin Platform, Transforming Factory Planning and Operations](https://www.wistron.com/en/Newsroom/2024-03-19-1)
+2. [Model Innovators: How Digital Twins Are Making Industries More Efficient](https://blogs.nvidia.com/blog/digital-twins-nvidia-physicsnemo-wistron/)

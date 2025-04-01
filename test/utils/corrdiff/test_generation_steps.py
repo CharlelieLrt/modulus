@@ -48,8 +48,8 @@ class MockNet:
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 def test_regression_step(device, pytestconfig):
 
-    from modulus.models.diffusion import UNet
-    from modulus.utils.corrdiff import regression_step
+    from physicsnemo.models.diffusion import UNet
+    from physicsnemo.utils.corrdiff import regression_step
 
     # define the net
     mock_unet = UNet(
@@ -76,9 +76,9 @@ def test_regression_step(device, pytestconfig):
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 def test_diffusion_step(device, pytestconfig):
 
-    from modulus.models.diffusion import EDMPrecondSR
-    from modulus.utils.corrdiff import diffusion_step
-    from modulus.utils.generative import deterministic_sampler, stochastic_sampler
+    from physicsnemo.models.diffusion import EDMPrecondSR
+    from physicsnemo.utils.corrdiff import diffusion_step
+    from physicsnemo.utils.generative import deterministic_sampler, stochastic_sampler
 
     # Define the preconditioner
     mock_precond = EDMPrecondSR(

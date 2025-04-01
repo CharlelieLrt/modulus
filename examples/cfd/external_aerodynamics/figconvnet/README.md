@@ -41,7 +41,7 @@ and represents efficient storage of the original meshes as
 partitioned graphs.
 For more details on how to convert the original DrivAerML dataset
 to partitioned dataset, refer to
-[XAeroNet example README](https://github.com/NVIDIA/modulus/tree/main/examples/cfd/external_aerodynamics/xaeronet#training-the-xaeronet-s-model),
+[XAeroNet example README](https://github.com/NVIDIA/physicsnemo/tree/main/examples/cfd/external_aerodynamics/xaeronet#training-the-xaeronet-s-model),
 steps 1 to 5.
 
 The binary dataset should have the following structure:
@@ -49,7 +49,7 @@ The binary dataset should have the following structure:
 ```text
 ├─ partitions
 │  ├─ graph_partitions_1.bin
-│  ├─ graph_partitions_1.bin
+│  ├─ graph_partitions_2.bin
 │  ├─ ...
 ├─ test_partitions
 │  ├─ graph_partitions_100.bin
@@ -73,8 +73,8 @@ FIGConvUNet dependencies can be installed with `pip install`, for example:
 pip install -e .[figconv]
 ```
 
-It is recommended to install these dependencies in a Modulus Docker container,
-which provides a simple way to run Modulus.
+It is recommended to install these dependencies in a PhysicsNeMo Docker container,
+which provides a simple way to run PhysicsNeMo.
 
 ## Training
 
@@ -148,7 +148,7 @@ mpirun -np 2 python train.py \
 
 ## References
 
-1. [Factorized Implicit Global Convolution for Automotive Computational Fluid Dynamics Prediction](https://arxiv.org/abs/TODO)
+1. [Factorized Implicit Global Convolution for Automotive Computational Fluid Dynamics Prediction](https://arxiv.org/abs/2502.04317)
 2. [Some Salient Features Of The Time-Averaged Ground Vehicle Wake](https://doi.org/10.4271/840300)
 3. [Ahmed body wiki](https://www.cfd-online.com/Wiki/Ahmed_body)
 4. [DrivAerNet: A Parametric Car Dataset for Data-Driven Aerodynamic Design and Graph-Based Drag Prediction](https://arxiv.org/abs/2403.08055)

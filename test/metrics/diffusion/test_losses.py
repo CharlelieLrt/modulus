@@ -17,7 +17,8 @@
 import pytest
 import torch
 
-from modulus.metrics.diffusion import (
+from modulus.utils.patching import RandomPatching2D
+from physicsnemo.metrics.diffusion import (
     EDMLoss,
     RegressionLossCE,
     ResidualLoss,
@@ -25,7 +26,6 @@ from modulus.metrics.diffusion import (
     VELoss_dfsr,
     VPLoss,
 )
-from modulus.utils.patching import RandomPatching2D
 
 # VPLoss tests
 
