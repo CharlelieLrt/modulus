@@ -23,6 +23,7 @@ from torch.utils.tensorboard import SummaryWriter
 from physicsnemo import Module
 from physicsnemo.models.diffusion import UNet, EDMPrecondSR
 from physicsnemo.distributed import DistributedManager
+
 from physicsnemo.metrics.diffusion import RegressionLoss, ResidualLoss, RegressionLossCE
 from physicsnemo.utils.patching import RandomPatching2D
 from physicsnemo.launch.logging import (
@@ -31,7 +32,11 @@ from physicsnemo.launch.logging import (
     initialize_wandb,
 )
 import wandb
-from physicsnemo.launch.utils import load_checkpoint, save_checkpoint
+from physicsnemo.launch.utils import (
+    load_checkpoint,
+    save_checkpoint,
+    get_checkpoint_dir,
+)
 from datasets.dataset import init_train_valid_datasets_from_config, register_dataset
 
 from helpers.train_helpers import (
@@ -102,8 +107,8 @@ def main(cfg: DictConfig) -> None:
     enable_amp = fp_optimizations.startswith("amp")
     amp_dtype = torch.float16 if (fp_optimizations == "amp-fp16") else torch.bfloat16
     logger.info(f"Saving the outputs in {os.getcwd()}")
-    checkpoint_dir = os.path.join(
-        cfg.training.io.get("checkpoint_dir", "."), f"checkpoints_{cfg.model.name}"
+    checkpoint_dir = get_checkpoint_dir(
+        str(cfg.training.io.get("checkpoint_dir", ".")), cfg.model.name
     )
     if cfg.training.hp.batch_size_per_gpu == "auto":
         cfg.training.hp.batch_size_per_gpu = (
