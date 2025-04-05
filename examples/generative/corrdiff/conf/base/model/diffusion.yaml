@@ -31,7 +31,3 @@ model_args:
   embedding_type: "zero"
   # Type of timestep embedding: 'positional' for DDPM++, 'fourier' for NCSN++,
   # 'zero' for none
-  model_type: "SongUNetPosEmbd"
-  # Type of model architecture: 'SongUNetPosLtEmbd' for lead-time aware UNet
-  # with positional embeddings, 'SongUNetPosEmbd' for UNet with positional
-  # embeddings, 'DhariwalUNet' for UNet with Fourier embeddings

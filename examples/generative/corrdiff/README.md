@@ -103,7 +103,7 @@ The top-level configuration file `config_training_hrrr_mini_regression.yaml` con
 - `model`: Model architecture type (`regression`, `diffusion`, etc.)
 - `model_size`: Model capacity (`normal` or `mini` for faster experiments)
 - `training`: High-level training parameters (duration, batch size, IO settings)
-- `wandb`: Weights & Biases logging configuration
+- `wandb`: Weights & Biases logging settings (`mode`, `results_dir`, `watch_model`)
 
 This configuration automatically loads these specific files from `conf/base`:
 - `dataset/hrrr_mini.yaml`: HRRR-Mini dataset parameters (data paths, variables)
@@ -265,31 +265,36 @@ TensorBoard provides real-time monitoring of training metrics when running in a 
 4. Access the dashboard at `http://localhost:6006`
 
 **Weights & Biases Integration:**
-CorrDiff also supports experiment tracking through Weights & Biases. To enable wandb logging:
+CorrDiff includes integration with Weights & Biases for experiment tracking. The following parameters are hardcoded in the code:
 
-1. Configure your wandb settings in [`conf/config_training_taiwan_diffusion.yaml`](conf/config_training_taiwan_diffusion.yaml):
-   ```yaml
-   wandb:
-     mode: online           # Options: "online", "offline", "disabled"
-     key: <your_api_key>   # Your wandb API key
-     project: <project>     # Project name
-     entity: <entity>      # Your wandb username or team
-     name: <experiment>    # Experiment name
-     watch_model: true     # Enable parameter tracking
-   ```
+- Project name: "Modulus-Launch"
+- Entity: "Modulus" 
+- Run name: Generated based on configuration job name
+- Group: "CorrDiff-DDP-Group"
 
-2. Initialize wandb (first time only):
+You can configure the following wandb parameters in the configuration files:
+
+```yaml
+wandb:
+  mode: offline       # Options: "online", "offline", "disabled"
+  results_dir: "./wandb"  # Directory to store wandb results
+  watch_model: true  # Whether to track model parameters and gradients
+```
+
+To use wandb:
+
+1. Initialize wandb (first time only):
    ```bash
    wandb login
    ```
 
-3. Training runs will automatically log to your wandb project, tracking:
+2. Training runs will automatically log to the wandb project, tracking:
    - Training and validation metrics
    - Model architecture details
    - System resource usage
    - Hyperparameters
 
-You can access your experiment dashboard at `https://wandb.ai/<entity>/<project>`.
+You can access your experiment dashboard at Weights & Biases website.
 
 ## Training CorrDiff on a Custom Dataset
 
@@ -312,17 +317,19 @@ To train CorrDiff on a custom dataset, you need to implement a custom dataset cl
 
 The most important method is `__getitem__`, which must return a tuple of tensors:
 ```python
-def __getitem__(self, idx: int) -> Tuple[torch.Tensor, ...]:
+def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
     """
     Returns:
         Tuple containing:
         - img_clean: Target high-resolution data [output_channels, height, width]
         - img_lr: Input low-resolution data [input_channels, height, width]
-        - labels: Additional labels/conditions [label_dim]
         - lead_time_label: (Optional) Lead time information [1]
     """
     # Your implementation here
-    return img_clean, img_lr, labels, lead_time_label  # lead_time_label is optional
+    # For basic implementation without lead time:
+    return img_clean, img_lr
+    # If including lead time information:
+    # return img_clean, img_lr, lead_time_label
 ```
 
 2. Configure your dataset in the YAML configuration file. Any parameters below
@@ -364,7 +371,7 @@ This file serves as your primary interface for configuring the training process.
 - `dataset`: Configuration for your custom dataset implementation, including paths and variables
 - `model`: Core model settings, including type selection (`regression` or `diffusion`)
 - `training`: High-level training parameters like batch size and duration
-- `wandb`: Settings for experiment tracking and monitoring
+- `wandb`: Weights & Biases logging settings (`mode`, `results_dir`, `watch_model`)
 
 **Fine-grained Control**:
 The base configuration files in `conf/base/` provide detailed control over specific components. These files are automatically loaded based on your top-level choices:

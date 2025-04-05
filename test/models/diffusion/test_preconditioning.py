@@ -35,7 +35,6 @@ def test_EDMPrecondSR_forward(scale_cond_input):
     # Create an instance of the preconditioner
     model = EDMPrecondSR(
         img_resolution=x,
-        img_channels=c_target,
         img_in_channels=c_cond,
         img_out_channels=c_target,
         use_fp16=False,
@@ -63,7 +62,7 @@ def test_EDMPrecondSR_serialization(tmp_path, pytestconfig):
 
     from physicsnemo.launch.utils import load_checkpoint, save_checkpoint
 
-    module = EDMPrecondSR(8, 1, 1, 1, scale_cond_input=False)
+    module = EDMPrecondSR(8, 1, 1, scale_cond_input=False)
     model_path = tmp_path / "output.mdlus"
     module.save(model_path.as_posix())
     loaded = Module.from_checkpoint(model_path.as_posix())

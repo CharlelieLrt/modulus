@@ -351,13 +351,13 @@ class EDMLossSR:
 
 class RegressionLoss:
     """
-    Regression loss function for the U-Net for deterministic predictions.
+    Regression loss function for the deterministic predictions.
     Note: this loss does not apply any reduction.
 
-    Parameters
+    Attributes
     ----------
-    sigma_data: float, optional
-        Standard deviation for data. Deprecated and ignored. By default 0.5.
+    sigma_data: float
+        Standard deviation for data. Deprecated and ignored.
 
     Note
     ----
@@ -367,42 +367,65 @@ class RegressionLoss:
     arXiv preprint arXiv:2309.15214.
     """
 
-    def __init__(self, sigma_data: float = 0.5):
-        self.sigma_data = sigma_data
-
-    def __call__(self, net, img_clean, img_lr, labels=None, augment_pipe=None):
+    def __init__(self):
         """
-        Calculate and return the regression loss for the U-Net for
+        Arguments
+        ----------
+        """
+        return
+
+    def __call__(
+        self,
+        net: torch.nn.Module,
+        img_clean: torch.Tensor,
+        img_lr: torch.Tensor,
+        augment_pipe: Optional[
+            Callable[[torch.Tensor], Tuple[torch.Tensor, Optional[torch.Tensor]]]
+        ] = None,
+    ) -> torch.Tensor:
+        """
+        Calculate and return the regression loss for
         deterministic predictions.
 
-        Parameters:
+        Parameters
         ----------
-        net: torch.nn.Module
+        net : torch.nn.Module
             The neural network model that will make predictions.
+            Expected signature: `net(x, img_lr,
+            augment_labels=augment_labels)`, where:
+                x (torch.Tensor): Tensor of shape (B, C_hr, H, W). Is zero-filled.
+                img_lr (torch.Tensor): Low-resolution input of shape (B, C_lr, H, W)
+                augment_labels (torch.Tensor, optional): Optional augmentation
+                labels, returned by `augment_pipe`.
+            Returns:
+                torch.Tensor: Predictions of shape (B, C_hr, H, W)
 
-        img_clean: torch.Tensor
-            Input images (high resolution). Used as ground truth and for data
-            augmentation if 'augment_pipe' is provided.
+        img_clean : torch.Tensor
+            High-resolution input images of shape (B, C_hr, H, W).
+            Used as ground truth and for data augmentation if 'augment_pipe' is provided.
 
-        img_lr: torch.Tensor
-            Input images (low resolution). Used as input to the neural network.
+        img_lr : torch.Tensor
+            Low-resolution input images of shape (B, C_lr, H, W).
+            Used as input to the neural network.
 
-        labels: torch.Tensor
-            Not used. Only present for compatibility with other loss functions.
+        augment_pipe : callable, optional
+            An optional data augmentation function.
+            Expected signature:
+                img_tot (torch.Tensor): Concatenated high and low resolution
+                    images of shape (B, C_hr+C_lr, H, W)
+            Returns:
+                Tuple[torch.Tensor, Optional[torch.Tensor]]:
+                    - Augmented images of shape (B, C_hr+C_lr, H, W)
+                    - Optional augmentation labels
 
-        augment_pipe: callable, optional
-            An optional data augmentation function that takes concatenated high
-            and low resolution images as input and returns augmented images. If
-            not provided, no data augmentation is applied.
-
-        Returns:
+        Returns
         -------
         torch.Tensor
             A tensor representing the per-sample element-wise squared
-            difference between the network's  predictions and the (possibly
-            data-augmented by 'augment_pipe') high resolution images. This
-            tensor can then be used to compute the loss by sum, mean, or other
-            appropriate reduction function.
+            difference between the network's predictions and the high
+            resolution images `img_clean` (possibly data-augmented by
+            `augment_pipe`).
+            Shape: (B, C_hr, H, W), same as `img_clean`.
         """
         weight = (
             1.0  # (sigma ** 2 + self.sigma_data ** 2) / (sigma * self.sigma_data) ** 2
@@ -429,30 +452,12 @@ class ResidualLoss:
     Mixture loss function for denoising score matching.
 
     This class implements a loss function that combines deterministic
-    regression with denoising score matching for improved super-resolution. It
-    uses a pre-trained regression network to compute residuals before applying
-    the diffusion process.
-
-    Parameters
-    ----------
-    regression_net : torch.nn.Module
-        Pre-trained regression network used to compute residuals.
-    img_shape_y : int
-        Height of the input images.
-    img_shape_x : int
-        Width of the input images.
-    P_mean : float, optional
-        Mean value for noise level computation, by default 0.0.
-    P_std : float, optional
-        Standard deviation for noise level computation, by default 1.2.
-    sigma_data : float, optional
-        Standard deviation for data weighting, by default 0.5.
-    hr_mean_conditioning : bool, optional
-        Whether to use high-resolution mean for conditioning, by default False.
+    regression with denoising score matching. It uses a pre-trained regression
+    network to compute residuals before applying the diffusion process.
 
     Attributes
     ----------
-    unet : torch.nn.Module
+    regression_net : torch.nn.Module
         The regression network used for computing residuals.
     P_mean : float
         Mean value for noise level computation.
@@ -460,10 +465,6 @@ class ResidualLoss:
         Standard deviation for noise level computation.
     sigma_data : float
         Standard deviation for data weighting.
-    img_shape_x : int
-        Width of the input images.
-    img_shape_y : int
-        Height of the input images.
     hr_mean_conditioning : bool
         Flag indicating whether to use high-resolution mean for conditioning.
 
@@ -478,19 +479,44 @@ class ResidualLoss:
     def __init__(
         self,
         regression_net: torch.nn.Module,
-        img_shape_y: int,
-        img_shape_x: int,
         P_mean: float = 0.0,
         P_std: float = 1.2,
         sigma_data: float = 0.5,
         hr_mean_conditioning: bool = False,
     ):
-        self.unet = regression_net
+        """
+        Arguments
+        ----------
+        regression_net : torch.nn.Module
+            Pre-trained regression network used to compute residuals.
+            Expected signature: `net(zero_input, y_lr,
+            lead_time_label=lead_time_label, augment_labels=augment_labels)` or
+            `net(zero_input, y_lr, augment_labels=augment_labels)`, where:
+                zero_input (torch.Tensor): Zero tensor of shape (B, C_hr, H, W)
+                y_lr (torch.Tensor): Low-resolution input of shape (B, C_lr, H, W)
+                lead_time_label (torch.Tensor, optional): Optional lead time labels
+                augment_labels (torch.Tensor, optional): Optional augmentation labels
+            Returns:
+                torch.Tensor: Predictions of shape (B, C_hr, H, W)
+
+        P_mean : float, optional
+            Mean value for noise level computation, by default 0.0.
+
+        P_std : float, optional
+            Standard deviation for noise level computation, by default 1.2.
+
+        sigma_data : float, optional
+            Standard deviation for data weighting, by default 0.5.
+
+        hr_mean_conditioning : bool, optional
+            Whether to use high-resolution mean for conditioning predicted, by default False.
+            When True, the mean prediction from `regression_net` is channel-wise
+            concatenated with `img_lr` for conditioning.
+        """
+        self.regression_net = regression_net
         self.P_mean = P_mean
         self.P_std = P_std
         self.sigma_data = sigma_data
-        self.img_shape_x = img_shape_x
-        self.img_shape_y = img_shape_y
         self.hr_mean_conditioning = hr_mean_conditioning
 
     def __call__(
@@ -499,10 +525,11 @@ class ResidualLoss:
         img_clean: Tensor,
         img_lr: Tensor,
         patching: Optional[RandomPatching2D] = None,
-        labels: Optional[Tensor] = None,
         lead_time_label: Optional[Tensor] = None,
-        augment_pipe: Optional[Callable[[Tensor], Tuple[Tensor, Tensor]]] = None,
-    ):
+        augment_pipe: Optional[
+            Callable[[Tensor], Tuple[Tensor, Optional[Tensor]]]
+        ] = None,
+    ) -> Tensor:
         """
         Calculate and return the loss for denoising score matching.
 
@@ -511,39 +538,92 @@ class ResidualLoss:
         using the regression network, then applies the diffusion process to
         these residuals.
 
+        In addition to the standard denoising score matching loss, this method
+        also supports optional patching for multi-diffusion. In this case, the spatial
+        dimensions of the input are decomposed into `P` smaller patches of shape
+        (H_patch, W_patch), that are grouped along the batch dimension, and the
+        model is applied to each patch individually. In the following, if `patching`
+        is not provided, then the input is not patched and `P=1` and `(H_patch,
+        W_patch) = (H, W)`. When patching is used, the original non-patched conditioning is
+        interpolated onto a spatial grid of shape `(H_patch, W_patch)` and channel-wise
+        concatenated to the patched conditioning. This ensures that each patch
+        maintains global information from the entire domain.
+
+        The diffusion model `net` is expected to be conditioned on an input with
+        `C_cond` channels, which should be:
+            - `C_cond = C_lr` if `hr_mean_conditioning` is `False` and
+              `patching` is None.
+            - `C_cond = C_hr + C_lr` if `hr_mean_conditioning` is `True` and
+              `patching` is None.
+            - `C_cond = C_hr + 2*C_lr` if `hr_mean_conditioning` is `True` and
+              `patching` is not None.
+            - `C_cond = 2*C_lr` if `hr_mean_conditioning` is `False` and
+              `patching` is not None.
+
+        Note: this loss function does not apply any reduction.
+
         Parameters
         ----------
         net : torch.nn.Module
-            The neural network model that will make predictions.
-        img_clean : Tensor
-            High-resolution input images of shape (batch_size, c_hr,
-            img_shape_y, img_shape_x).
-        img_lr : Tensor
-            Low-resolution input images of shape (batch_size, c_lr,
-            img_shape_y, img_shape_x).
+            The neural network model for the diffusion process.
+            Expected signature: `net(latent, y_lr, sigma,
+            embedding_selector=embedding_selector, lead_time_label=lead_time_label,
+            augment_labels=augment_labels)`, where:
+                latent (torch.Tensor): Noisy input of shape (B[*P], C_hr, H_patch, W_patch)
+                y_lr (torch.Tensor): Conditioning of shape (B[*P], C_cond, H_patch, W_patch)
+                sigma (torch.Tensor): Noise level of shape (B[*P], 1, 1, 1)
+                embedding_selector (callable, optional): Function to select
+                    positional embeddings. Only used if `patching` is provided.
+                lead_time_label (torch.Tensor, optional): Lead time labels.
+                augment_labels (torch.Tensor, optional): Augmentation labels
+            Returns:
+                torch.Tensor: Predictions of shape (B[*P], C_hr, H_patch, W_patch)
+
+        img_clean : torch.Tensor
+            High-resolution input images of shape (B, C_hr, H, W).
+            Used as ground truth and for data augmentation if 'augment_pipe' is provided.
+
+        img_lr : torch.Tensor
+            Low-resolution input images of shape (B, C_lr, H, W).
+            Used as input to the regression network and conditioning for the
+            diffusion process.
+
         patching : Optional[RandomPatching2D], optional
             Patching strategy for processing large images, by default None. See
             :class:`physicsnemo.utils.patching.RandomPatching2D` for details.
             When provided, the patching strategy is used for both image patches
-            and positional embeddings selection in the model `net`.
-        labels : Optional[Tensor], optional
-            Ground truth labels for the input images, by default None.
-        lead_time_label : Optional[Tensor], optional
-            Lead time labels for temporal predictions, by default None.
-        augment_pipe : Optional[Callable[[Tensor], Tuple[Tensor, Tensor]]]
-            Data augmentation function that takes images as input and returns
-            augmented images and labels, by default None.
+            and positional embeddings selection in the diffusion model `net`.
+            Transforms tensors from shape (B, C, H, W) to (B*P, C, H_patch,
+            W_patch).
+
+        lead_time_label : Optional[torch.Tensor], optional
+            Labels for lead-time aware predictions, by default None.
+            Shape can vary based on model requirements, typically (B,) or scalar.
+
+        augment_pipe : Optional[Callable[[torch.Tensor], Tuple[torch.Tensor, Optional[torch.Tensor]]]]
+            Data augmentation function.
+            Expected signature:
+                img_tot (torch.Tensor): Concatenated high and low resolution images
+                    of shape (B, C_hr+C_lr, H, W)
+            Returns:
+                Tuple[torch.Tensor, Optional[torch.Tensor]]:
+                    - Augmented images of shape (B, C_hr+C_lr, H, W)
+                    - Optional augmentation labels
 
         Returns
         -------
-        Tensor
-            A tensor representing the computed loss with shape (batch_size [*
-            patch_num], c_hr, patch_shape_y, patch_shape_x).
+        torch.Tensor
+            If patching is not used:
+                A tensor of shape (B, C_hr, H, W) representing the per-sample loss.
+            If patching is used:
+                A tensor of shape (B*P, C_hr, H_patch, W_patch) representing
+                the per-patch loss.
 
         Raises
         ------
         ValueError
             If patching is provided but is not an instance of RandomPatching2D.
+            If shapes of img_clean and img_lr are incompatible.
         """
 
         # Safety check: enforce patching object
@@ -576,20 +656,16 @@ class ResidualLoss:
 
         # form residual
         if lead_time_label is not None:
-            y_mean = self.unet(
+            y_mean = self.regression_net(
                 torch.zeros_like(y, device=img_clean.device),
                 y_lr_res,
-                sigma,
-                labels,
                 lead_time_label=lead_time_label,
                 augment_labels=augment_labels,
             )
         else:
-            y_mean = self.unet(
+            y_mean = self.regression_net(
                 torch.zeros_like(y, device=img_clean.device),
                 y_lr_res,
-                sigma,
-                labels,
                 augment_labels=augment_labels,
             )
 
@@ -633,7 +709,6 @@ class ResidualLoss:
                 latent,
                 y_lr,
                 sigma,
-                labels,
                 embedding_selector=patch_embedding_selector,
                 lead_time_label=lead_time_label,
                 augment_labels=augment_labels,
@@ -643,7 +718,6 @@ class ResidualLoss:
                 latent,
                 y_lr,
                 sigma,
-                labels,
                 embedding_selector=patch_embedding_selector,
                 augment_labels=augment_labels,
             )
@@ -793,24 +867,19 @@ class VELoss_dfsr:
 
 class RegressionLossCE:
     """
-    A regression loss function for the GEFS-HRRR model with probability
-    channels. Adapted from
-    :class:`physicsnemo.metrics.diffusion.loss.RegressionLoss` to train
-    deterministic regression model. In this version,
+    A regression loss function for deterministic predictions with probability
+    channels and lead time labels. Adapted from
+    :class:`physicsnemo.metrics.diffusion.loss.RegressionLoss`. In this version,
     probability channels are evaluated using CrossEntropyLoss instead of
     squared error.
     Note: this loss does not apply any reduction.
 
-    Parameters
+    Attributes
     ----------
-    P_mean: float, optional
-        Mean value for `sigma` computation, by default -1.2.
-    P_std: float, optional:
-        Standard deviation for `sigma` computation, by default 1.2.
-    sigma_data: float, optional
-        Standard deviation for data, by default 0.5.
-    prob_channels: list, optional
-        A index list of output probability channels.
+    entropy : torch.nn.CrossEntropyLoss
+        Cross entropy loss function used for probability channels.
+    prob_channels : list[int]
+        List of channel indices to be treated as probability channels.
 
     Note
     ----
@@ -822,58 +891,76 @@ class RegressionLossCE:
 
     def __init__(
         self,
-        prob_channels: list = [4, 5, 6, 7, 8],
+        prob_channels: list[int] = [4, 5, 6, 7, 8],
     ):
+        """
+        Arguments
+        ----------
+        prob_channels: list[int], optional
+            List of channel indices to be treated as probability channels.
+            By default, [4, 5, 6, 7, 8].
+        """
         self.entropy = torch.nn.CrossEntropyLoss(reduction="none")
         self.prob_channels = prob_channels
 
     def __call__(
         self,
-        net,
-        img_clean,
-        img_lr,
-        lead_time_label=None,
-        labels=None,
-        augment_pipe=None,
-    ):
+        net: torch.nn.Module,
+        img_clean: torch.Tensor,
+        img_lr: torch.Tensor,
+        lead_time_label: Optional[torch.Tensor] = None,
+        augment_pipe: Optional[
+            Callable[[torch.Tensor], Tuple[torch.Tensor, Optional[torch.Tensor]]]
+        ] = None,
+    ) -> torch.Tensor:
         """
-        Calculate and return the loss for the U-Net for deterministic
-        predictions.
+        Calculate and return the loss for deterministic
+        predictions, treating specific channels as probability distributions.
 
-        Parameters:
+        Parameters
         ----------
-        net: torch.nn.Module
+        net : torch.nn.Module
             The neural network model that will make predictions.
+            Expected signature: `net(input, img_lr, lead_time_label=lead_time_label, augment_labels=augment_labels)`,
+            where:
+                input (torch.Tensor): Tensor of shape (B, C_hr, H, W). Zero-filled.
+                y_lr (torch.Tensor): Low-resolution input of shape (B, C_lr, H, W)
+                lead_time_label (torch.Tensor, optional): Optional lead time
+                labels. If provided, should be of shape (B,).
+                augment_labels (torch.Tensor, optional): Optional augmentation
+                labels, returned by `augment_pipe`.
+            Returns:
+                torch.Tensor: Predictions of shape (B, C_hr, H, W)
 
-        img_clean: torch.Tensor
-            Input images (high resolution). Used as ground truth and for data
-            augmentation if 'augment_pipe' is provided.
+        img_clean : torch.Tensor
+            High-resolution input images of shape (B, C_hr, H, W).
+            Used as ground truth and for data augmentation if `augment_pipe` is provided.
 
-        img_lr: torch.Tensor
-            Input images (low resolution). Used as input to the neural network.
+        img_lr : torch.Tensor
+            Low-resolution input images of shape (B, C_lr, H, W).
+            Used as input to the neural network.
 
-        lead_time_label: torch.Tensor
-            Lead time labels for input batches.
+        lead_time_label : Optional[torch.Tensor], optional
+            Lead time labels for temporal predictions, by default None.
+            Shape can vary based on model requirements, typically (B,) or scalar.
 
-        labels: torch.Tensor
-            Not used. Only present for compatibility with other loss functions.
+        augment_pipe : Optional[Callable[[torch.Tensor], Tuple[torch.Tensor, Optional[torch.Tensor]]]]
+            Data augmentation function.
+            Expected signature:
+                img_tot (torch.Tensor): Concatenated high and low resolution
+                    images of shape (B, C_hr+C_lr, H, W).
+            Returns:
+                Tuple[torch.Tensor, Optional[torch.Tensor]]:
+                    - Augmented images of shape (B, C_hr+C_lr, H, W)
+                    - Optional augmentation labels
 
-        augment_pipe: callable, optional
-            An optional data augmentation function that takes concatenated high
-            and low resolution images as input and returns augmented images. If
-            not provided, no data augmentation is applied.
-
-        Returns:
+        Returns
         -------
         torch.Tensor
-            A tensor representing the per-sample element-wise loss between the
-            network's predictions and the (possibly
-            data-augmented by `augment_pipe`) high resolution images. Loss for
-            the probability channels is computed using cross entropy, and loss
-            for the scalar channels is computed using squared error. Both are
-            then concatenated along the channel dimension. This tensor can then
-            be used to compute the loss by sum, mean, or other appropriate
-            reduction function.
+            A tensor of shape (B, C_hr, H, W) representing the per-sample loss.
+            The channels corresponding to `prob_channels` use cross entropy loss,
+            while the remaining scalar channels use squared error.
+            Both types of losses are concatenated along the channel dimension.
         """
         all_channels = list(range(img_clean.shape[1]))  # [0, 1, 2, ..., 10]
         scalar_channels = [

@@ -16,7 +16,7 @@
 
 hydra:
     job:
-          chdir: true
+          chdir: false
           name: taiwan_diffusion
     run:
           dir: ./output/${hydra:job.name}
@@ -59,7 +59,7 @@ defaults:
 # Modify or add below parameters that should be passed as argument to the
 # user-defined dataset class.
 dataset:
-    data_path: /code/2023-01-24-cwb-4years.zarr
+    data_path: ./data/2023-01-24-cwb-4years.zarr
 
 model:
     scale_cond_input: True
@@ -85,16 +85,10 @@ validation:
     all_times: false    
 
 # Parameters for wandb logging
-wanbd:
-    mode: online
-    # Logging mode. Accepted values: "offline", "online" or "disabled"
-    key: <your_api_key>
-    # You wandb API key
-    project: <your_project_name>
-    # Your wanb project name
-    entity: <your_entity_name>
-    # Name of your wandb enity
-    name: <your_experiment_name>
-    # Name of your experiment
-    watch_model: true
-    # Bool: if true, then wandb logs statistics about your model parameters
+wandb:
+    mode: offline
+    # Configure whether to use wandb: "offline", "online", "disabled"
+    results_dir: "./wandb"
+    # Directory to store wandb results
+    watch_model: false
+    # If true, wandb will track model parameters and gradients

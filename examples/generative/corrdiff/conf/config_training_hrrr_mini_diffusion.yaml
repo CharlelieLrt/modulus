@@ -16,7 +16,7 @@
 
 hydra:
     job:
-          chdir: true
+          chdir: false
           name: hrrr_mini_diffusion
     run:
           dir: ./output/${hydra:job.name}
@@ -59,32 +59,26 @@ defaults:
 # Modify or add below parameters that should be passed as argument to the
 # user-defined dataset class.
 dataset:
-    data_path: /data/corrdiff-mini/hrrr_mini_train.nc
+    data_path: ./data/corrdiff-mini/hrrr_mini_train.nc
     # Path to .nc data file
-    stats_path: /data/corrdiff-mini/stats.json
+    stats_path: ./data/corrdiff-mini/stats.json
     # Path to json stats file
 
 # Training parameters
 training:
     hp:
-        training_duration: 8000000
+        training_duration: 500  # DEBUG
         # Training duration based on the number of processed samples
     io:
-        print_progress_freq: 10000
-        regression_checkpoint_path: <path/to/checkpoint.mdlus>
+        print_progress_freq: 100  # DEBUG
+        regression_checkpoint_path: ./checkpoints_regression/UNet.0.400.mdlus # DEBUG
         # Path to load the regression checkpoint
 
 # Parameters for wandb logging
-wanbd:
-    mode: online
-    # Logging mode. Accepted values: "offline", "online" or "disabled"
-    key: <your_api_key>
-    # You wandb API key
-    project: <your_project_name>
-    # Your wanb project name
-    entity: <your_entity_name>
-    # Name of your wandb enity
-    name: <your_experiment_name>
-    # Name of your experiment
-    watch_model: true
-    # Bool: if true, then wandb logs statistics about your model parameters
+wandb:
+    mode: offline
+    # Configure whether to use wandb: "offline", "online", "disabled"
+    results_dir: "./wandb"
+    # Directory to store wandb results
+    watch_model: false
+    # If true, wandb will track model parameters and gradients

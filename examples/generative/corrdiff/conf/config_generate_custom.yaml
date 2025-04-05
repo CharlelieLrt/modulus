@@ -16,7 +16,7 @@
 
 hydra:
     job:
-          chdir: true
+          chdir: false
           name: <my_job_name> # Change `my_job_name`
     run:
           dir: ./<my_output_dir>/${hydra:job.name} # Change `my_output_dir`
@@ -79,3 +79,8 @@ generation:
         # Path to checkpoint file for the diffusion model  
         reg_ckpt_filename: <regression_checkpoint.mdlus>
         # Path to checkpoint filename for the mean predictor model
+
+# Parameters for wandb logging
+wandb:
+    mode: offline
+    # Configure whether to use wandb: "offline", "online", "disabled"

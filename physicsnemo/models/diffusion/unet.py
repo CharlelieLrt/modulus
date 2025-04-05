@@ -53,20 +53,14 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
     img_resolution : Union[int, Tuple[int, int]]
         The resolution of the input/output image. If a single int is provided,
         then the image is assumed to be square.
-    img_channels : int
-         Number of color channels.
     img_in_channels : int
-        Number of input color channels.
+        Number of input channels to the underlying model architecture specified
+        by `model_type` .
     img_out_channels : int
-        Number of output color channels.
+        Number of output channels to the underlying model architecture specified
+        by `model_type`.
     use_fp16: bool, optional
         Execute the underlying model at FP16 precision, by default False.
-    sigma_min: float, optional
-        Minimum supported noise level, by default 0.
-    sigma_max: float, optional
-        Maximum supported noise level, by default float('inf').
-    sigma_data: float, optional
-        Expected standard deviation of the training data, by default 0.5.
     model_type: str, optional
         Class name of the underlying model. Must be one of the following:
         'SongUNet', 'SongUNetPosEmbd', 'SongUNetPosLtEmbd', 'DhariwalUNet'.
@@ -95,21 +89,15 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
     def __init__(
         self,
         img_resolution: Union[int, Tuple[int, int]],
-        img_channels: int,
         img_in_channels: int,
         img_out_channels: int,
         use_fp16: bool = False,
-        sigma_min: float = 0,
-        sigma_max: float = float("inf"),
-        sigma_data: float = 0.5,
         model_type: Literal[
             "SongUNetPosEmbd", "SongUNetPosLtEmbd", "SongUNet", "DhariwalUNet"
         ] = "SongUNetPosEmbd",
         **model_kwargs: dict,
     ):
         super().__init__(meta=MetaData)
-
-        self.img_channels = img_channels
 
         # for compatibility with older versions that took only 1 dimension
         if isinstance(img_resolution, int):
@@ -122,9 +110,6 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
         self.img_out_channels = img_out_channels
 
         self.use_fp16 = use_fp16
-        self.sigma_min = sigma_min
-        self.sigma_max = sigma_max
-        self.sigma_data = sigma_data
         model_class = getattr(network_module, model_type)
         self.model = model_class(
             img_resolution=img_resolution,

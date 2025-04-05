@@ -722,8 +722,6 @@ class EDMPrecondSR(Module):
     ----------
     img_resolution : int
         Image resolution.
-    img_channels : int
-        Number of color channels.
     img_in_channels : int
         Number of input color channels.
     img_out_channels : int
@@ -756,7 +754,6 @@ class EDMPrecondSR(Module):
     def __init__(
         self,
         img_resolution,
-        img_channels,
         img_in_channels,
         img_out_channels,
         use_fp16=False,
@@ -769,7 +766,6 @@ class EDMPrecondSR(Module):
     ):
         super().__init__(meta=EDMPrecondSRMetaData)
         self.img_resolution = img_resolution
-        self.img_channels = img_channels  # TODO: this is not used, remove it
         self.img_in_channels = img_in_channels
         self.img_out_channels = img_out_channels
         self.use_fp16 = use_fp16

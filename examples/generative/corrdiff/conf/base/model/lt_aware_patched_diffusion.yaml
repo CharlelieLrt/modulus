@@ -33,6 +33,8 @@ model_args:
   lead_time_steps: 9
   # Number of lead-time steps
   model_type: "SongUNetPosLtEmbd"
-  # Type of model architecture: 'SongUNetPosLtEmbd' for lead-time aware UNet
-  # with positional embeddings, 'SongUNetPosEmbd' for UNet with positional
-  # embeddings, 'DhariwalUNet' for UNet with Fourier embeddings
+  # Type of model architecture: 'SongUNetPosLtEmbd' for lead-time aware UNet with
+  # positional embeddings, 'SongUNetPosEmbd' for UNet with positional
+  # embeddings, 'SongUNet' for UNet without positional embeddings,
+  # 'DhariwalUNet' for UNet with Fourier embeddings. If not provided, default
+  # to 'SongUNetPosEmbd'.

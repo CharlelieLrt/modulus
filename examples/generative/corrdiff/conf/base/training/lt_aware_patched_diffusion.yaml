@@ -45,7 +45,9 @@ perf:
     # Gradient checkpointing level, value is number of layers to checkpoint
 
 # I/O
-io: 
+io:
+    regression_checkpoint_path: ???
+    # Where to load the regression checkpoint. Must be overridden.
     print_progress_freq: 1
     # How often to print progress
     save_checkpoint_freq: 5

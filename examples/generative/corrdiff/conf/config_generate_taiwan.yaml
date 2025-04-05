@@ -16,7 +16,7 @@
 
 hydra:
     job:
-          chdir: true
+          chdir: false
           name: generate_taiwan
     run:
           dir: ./outputs/${hydra:job.name}
@@ -45,7 +45,7 @@ defaults:
 # Modify or add below parameters that should be passed as argument to the
 # user-defined dataset class.
 dataset:
-    data_path: /code/2023-01-24-cwb-4years.zarr
+    data_path: ./data/2023-01-24-cwb-4years.zarr
     train: False
     all_times: True
 
@@ -72,3 +72,8 @@ generation:
         # Path to checkpoint file for the diffusion model  
         reg_ckpt_filename: <regression_checkpoint.mdlus>
         # Path to checkpoint filename for the mean predictor model
+
+# Parameters for wandb logging
+wandb:
+    mode: offline
+    # Configure whether to use wandb: "offline", "online", "disabled"

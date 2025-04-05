@@ -50,6 +50,8 @@ def register_dataset(dataset_spec: str) -> None:
     ImportError
         If the dataset class cannot be imported
     """
+    if dataset_spec in known_datasets:
+        return  # Dataset already registered
     try:
         file_path, class_name = dataset_spec.split("::")
     except ValueError:
@@ -57,7 +59,6 @@ def register_dataset(dataset_spec: str) -> None:
             "Invalid dataset specification. Expected format: "
             "'path_to_file.py::dataset_class'"
         )
-
     if class_name in known_datasets:
         return  # Dataset already registered
 

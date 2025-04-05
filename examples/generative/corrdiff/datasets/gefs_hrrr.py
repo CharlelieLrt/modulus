@@ -482,10 +482,11 @@ class HrrrForecastGEFSDataset(DownscalingDataset):
         return ((y0, y1), (x0, x1))
 
     def __getitem__(self, global_idx):
+        """Return a tuple of:
+        - hrrr_field: High-resolution HRRR output data
+        - gefs_field: Low-resolution GEFS input data
+        - lead_time_label: Lead time
         """
-        Return data as a dict (so we can potentially add extras, metadata, etc if desired
-        """
-        torch.cuda.nvtx.range_push("hrrr_dataloader:get")
         if self.overfit:
             global_idx = 42
         time_index = self._global_idx_to_datetime(global_idx)
@@ -507,7 +508,7 @@ class HrrrForecastGEFSDataset(DownscalingDataset):
         )
         gefs_sample = self.normalize_input(gefs_sample)
         torch.cuda.nvtx.range_pop()
-        return hrrr_sample, gefs_sample, global_idx, int(time_index[-2:]) // 3
+        return hrrr_sample, gefs_sample, int(time_index[-2:]) // 3
 
     def _global_idx_to_datetime(self, global_idx):
         """

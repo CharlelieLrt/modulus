@@ -35,6 +35,8 @@ hp:
 
 # I/O
 io:
+    regression_checkpoint_path: ???
+    # Where to load the regression checkpoint. Must be overridden.
     save_checkpoint_freq: 500000
     # How often to save the checkpoints, measured in number of processed samples
     validation_freq: 50000

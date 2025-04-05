@@ -16,3 +16,7 @@
 
 defaults:
     - base_all
+
+io:
+    regression_checkpoint_path: ???
+    # Where to load the regression checkpoint. Must be overridden.
