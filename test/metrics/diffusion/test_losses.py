@@ -26,7 +26,7 @@ from physicsnemo.metrics.diffusion import (
     VELoss_dfsr,
     VPLoss,
 )
-from physicsnemo.models.diffusion import EDMPrecondSR, UNet
+from physicsnemo.models.diffusion import EDMPrecondSuperResolution, UNet
 from physicsnemo.utils.patching import RandomPatching2D
 
 # VPLoss tests
@@ -387,7 +387,7 @@ def test_call_method_residualloss_with_unet(device):
         N_grid_channels=N_pos,
         gridtype="test",
     ).to(device)
-    diffusion_model = EDMPrecondSR(
+    diffusion_model = EDMPrecondSuperResolution(
         img_resolution=res,
         img_in_channels=inc + N_pos,
         img_out_channels=outc,
@@ -421,7 +421,7 @@ def test_call_method_residualloss_with_unet_hr_mean_conditioning(device):
         N_grid_channels=N_pos,
         gridtype="test",
     ).to(device)
-    diffusion_model = EDMPrecondSR(
+    diffusion_model = EDMPrecondSuperResolution(
         img_resolution=res,
         img_in_channels=inc + N_pos + outc,
         img_out_channels=outc,
@@ -456,7 +456,7 @@ def test_call_method_residualloss_with_lt_unet_hr_mean_conditioning(device):
         lead_time_channels=lead_time_channels,
         prob_channels=prob_channels,
     ).to(device)
-    diffusion_model = EDMPrecondSR(
+    diffusion_model = EDMPrecondSuperResolution(
         img_resolution=res,
         img_in_channels=inc + outc + N_pos + lead_time_channels,
         img_out_channels=outc,

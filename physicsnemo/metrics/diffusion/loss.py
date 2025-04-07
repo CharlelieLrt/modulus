@@ -559,6 +559,8 @@ class ResidualLoss:
               `patching` is not None.
             - `C_cond = 2*C_lr` if `hr_mean_conditioning` is `False` and
               `patching` is not None.
+        Additionally, `C_cond` should also include any embedding channels,
+        such as positional embeddings or time embeddings.
 
         Note: this loss function does not apply any reduction.
 

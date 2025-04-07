@@ -23,7 +23,7 @@ import wandb
 from hydra.core.hydra_config import HydraConfig
 
 from physicsnemo import Module
-from physicsnemo.models.diffusion import UNet, EDMPrecondSR
+from physicsnemo.models.diffusion import UNet, EDMPrecondSuperResolution
 from physicsnemo.distributed import DistributedManager
 
 from physicsnemo.metrics.diffusion import RegressionLoss, ResidualLoss, RegressionLossCE
@@ -211,19 +211,19 @@ def main(cfg: DictConfig) -> None:
             **model_args,
         )
     elif cfg.model.name == "lt_aware_patched_diffusion":
-        model = EDMPrecondSR(
+        model = EDMPrecondSuperResolution(
             img_in_channels=img_in_channels
             + model_args["N_grid_channels"]
             + model_args["lead_time_channels"],
             **model_args,
         )
     elif cfg.model.name == "diffusion":
-        model = EDMPrecondSR(
+        model = EDMPrecondSuperResolution(
             img_in_channels=img_in_channels + model_args["N_grid_channels"],
             **model_args,
         )
     elif cfg.model.name == "patched_diffusion":
-        model = EDMPrecondSR(
+        model = EDMPrecondSuperResolution(
             img_in_channels=img_in_channels + model_args["N_grid_channels"],
             **model_args,
         )

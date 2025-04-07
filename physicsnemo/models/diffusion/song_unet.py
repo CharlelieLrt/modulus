@@ -803,8 +803,8 @@ class SongUNetPosEmbd(SongUNet):
 class SongUNetPosLtEmbd(SongUNet):
     """
     This model is adapted from SongUNetPosEmbd, with the incorporation of lead-time aware
-    embedding for the GEFS-HRRR model. The lead-time embedding is activated by setting the
-    lead_time_channels and lead_time_steps parameters.
+    embeddings. The lead-time embedding is activated by setting the
+    `lead_time_channels` and `lead_time_steps` parameters.
 
     Like SongUNetPosEmbd, this model provides two methods for selecting positional embeddings:
     1. Using a selector function (preferred method). See

@@ -16,7 +16,7 @@
 
 import importlib
 from dataclasses import dataclass
-from typing import Literal, Tuple, Union
+from typing import List, Literal, Tuple, Union
 
 import torch
 
@@ -54,11 +54,9 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
         The resolution of the input/output image. If a single int is provided,
         then the image is assumed to be square.
     img_in_channels : int
-        Number of input channels to the underlying model architecture specified
-        by `model_type` .
+        Number of channels in the input image.
     img_out_channels : int
-        Number of output channels to the underlying model architecture specified
-        by `model_type`.
+        Number of channels in the output image.
     use_fp16: bool, optional
         Execute the underlying model at FP16 precision, by default False.
     model_type: str, optional
@@ -66,7 +64,7 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
         'SongUNet', 'SongUNetPosEmbd', 'SongUNetPosLtEmbd', 'DhariwalUNet'.
         Defaults to 'SongUNetPosEmbd'.
     **model_kwargs : dict
-        Keyword arguments to create the underlying model.
+        Keyword arguments passed to the underlying model `__init__` method.
 
     See Also
     --------
@@ -118,7 +116,42 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
             **model_kwargs,
         )
 
-    def forward(self, x, img_lr, force_fp32=False, **model_kwargs):
+    def forward(
+        self,
+        x: torch.Tensor,
+        img_lr: torch.Tensor,
+        force_fp32: bool = False,
+        **model_kwargs: dict,
+    ) -> torch.Tensor:
+        """
+        Forward pass of the UNet wrapper model.
+
+        This method concatenates the input tensor with the low-resolution conditioning tensor
+        and passes the result through the underlying model.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            The input tensor, typically zero-filled, of shape (B, C_hr, H, W).
+        img_lr : torch.Tensor
+            Low-resolution conditioning image of shape (B, C_lr, H, W).
+        force_fp32 : bool, optional
+            Whether to force FP32 precision regardless of the `use_fp16` attribute,
+            by default False.
+        **model_kwargs : dict
+            Additional keyword arguments to pass to the underlying model
+            `self.model` forward method.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor (prediction) of shape (B, C_hr, H, W).
+
+        Raises
+        ------
+        ValueError
+            If the model output dtype doesn't match the expected dtype.
+        """
         # SR: concatenate input channels
         if img_lr is not None:
             x = torch.cat((x, img_lr), dim=1)
@@ -145,13 +178,13 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
         D_x = F_x.to(torch.float32)
         return D_x
 
-    def round_sigma(self, sigma):
+    def round_sigma(self, sigma: Union[float, List, torch.Tensor]) -> torch.Tensor:
         """
         Convert a given sigma value(s) to a tensor representation.
 
         Parameters
         ----------
-        sigma : Union[float list, torch.Tensor]
+        sigma : Union[float, List, torch.Tensor]
             The sigma value(s) to convert.
 
         Returns

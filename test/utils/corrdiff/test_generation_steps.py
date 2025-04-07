@@ -76,16 +76,13 @@ def test_regression_step(device, pytestconfig):
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 def test_diffusion_step(device, pytestconfig):
 
-    from physicsnemo.models.diffusion import EDMPrecondSR
+    from physicsnemo.models.diffusion import EDMPrecondSuperResolution
     from physicsnemo.utils.corrdiff import diffusion_step
     from physicsnemo.utils.generative import deterministic_sampler, stochastic_sampler
 
     # Define the preconditioner
-    mock_precond = EDMPrecondSR(
-        img_resolution=[16, 16],
-        img_in_channels=8,
-        img_out_channels=2,
-        scale_cond_input=False,
+    mock_precond = EDMPrecondSuperResolution(
+        img_resolution=[16, 16], img_in_channels=8, img_out_channels=2
     ).to(device)
 
     # Define the input parameters
