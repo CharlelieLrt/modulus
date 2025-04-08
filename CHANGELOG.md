@@ -15,7 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New positional embedding selection strategy for CorrDiff SongUNet models
 - Added Multi-Storage Client to allow checkpointing to/from Object Storage
 
-
 ### Changed
 
 - Simplified CorrDiff config files, updated default values
