@@ -1086,7 +1086,7 @@ class SongUNetPosLtEmbd(SongUNet):
         >>> patching = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
         >>> global_index = patching.global_index(batch_size=1)
         >>> global_index.shape
-        torch.Size([12, 2, 8, 8])
+        torch.Size([4, 2, 8, 8])
 
         See Also
         --------
