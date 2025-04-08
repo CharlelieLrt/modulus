@@ -456,18 +456,30 @@ The generated samples are saved in a NetCDF file with three main components:
 
 ### FAQs
 
-1. **Is it preferable to re-train from a pre-trained checkpoint or train from scratch?**  
-   Pre-trained checkpoints are available through NVIDIA AI Enterprise. For example, a trained model for the continental United States on the GEFS-HRRR dataset is available [here](https://build.nvidia.com/nvidia/corrdiff/modelcard). It is generally recommended to start training from a checkpoint rather than from scratch if the following conditions are met:
+1. **Are there pre-trained checkpoints available and when should they be used for training/inference?**  
+   Pre-trained checkpoints are available through NVIDIA AI Enterprise. For
+   example, a trained model for the continental United States on the GEFS-HRRR
+   dataset is available
+   [here](https://build.nvidia.com/nvidia/corrdiff/modelcard). However, note
+   that these checkpoints are not necessarily compatible with the current
+   implementation of `train.py` and `generate.py` in CorrDiff. Typically, these
+   checkpoints should only be used for inference in
+   [Earth2Studio](https://github.com/NVIDIA/earth2studio). It is therefore generally
+   recommended to start training CorrDiff models from a scratch. If you do have
+  a checkpoint compatible with the current implementation of `train.py` and
+  `generate.py` (e.g. from one of your own previous training run), it is
+  recommended to restart training from your checkpoint rather than from scratch
+  if the following conditions are met:
    - Your custom dataset covers a region included in the training data of the checkpoint (e.g., a sub-region of the continental United States for the checkpoint mentioned above).
    - At most half of the variables in your dataset are also included in the training data of the checkpoint.
 
    Training from scratch is recommended for all other cases.
 
-2. **How many samples are needed to train a CorrDiff model?**  
+1. **How many samples are needed to train a CorrDiff model?**  
    The more, the better. As a rule of thumb, at least 50,000 samples are necessary.  
    *Note: For patch-based diffusion, each patch can be counted as a sample.*
 
-3. **How many GPUs are required to train CorrDiff?**  
+2. **How many GPUs are required to train CorrDiff?**  
    A single GPU is sufficient as long as memory is not exhausted, but this may
    result in extremely slow training. To accelerate training, CorrDiff
    leverages distributed data parallelism. The total training wall-clock time
@@ -477,23 +489,23 @@ The generated samples are saved in a NetCDF file with three main components:
    patch-based diffusion models, decrease the patch size—ensuring it remains
    larger than the auto-correlation distance.
 
-4. **How long does it take to train CorrDiff on a custom dataset?**  
+3. **How long does it take to train CorrDiff on a custom dataset?**  
    Training CorrDiff on the continental United States dataset required
    approximately 5,000 A100 GPU hours. This corresponds to roughly 80 hours of
    wall-clock time with 64 GPUs. You can expect the cost to scale
    linearly with the number of samples available.
 
-5. **What are CorrDiff's current limitations for custom datasets?**  
+4. **What are CorrDiff's current limitations for custom datasets?**  
    The main limitation of CorrDiff is the maximum _downscaling ratio_ it can
    achieve. For a purely spatial super-resolution task (where input and output variables are the same), CorrDiff can reliably achieve a maximum resolution scaling of ×16. If the task involves inferring new output variables, the maximum reliable spatial super-resolution is ×11.
 
-6. **What does a successful training look like?**  
+5. **What does a successful training look like?**  
    In a successful training run, the loss function should decrease monotonically, as shown below:  
   <p align="center">
 <img src="../../../docs/img/corrdiff_training_loss.png"/>
 </p>
 
-7. **Which hyperparameters are most important?**  
+1. **Which hyperparameters are most important?**  
    One of the most crucial hyperparameters is the patch size for a patch-based
    diffusion model (`patch_shape_x` and `patch_shape_y` in the configuration file). A larger
    patch size increases computational cost and GPU memory requirements, while a
