@@ -54,7 +54,6 @@ def test_regression_step(device, pytestconfig):
     # define the net
     mock_unet = UNet(
         img_resolution=[16, 16],
-        img_channels=2,
         img_in_channels=8,
         img_out_channels=2,
         N_grid_channels=4,

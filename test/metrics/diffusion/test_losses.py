@@ -168,7 +168,7 @@ def test_call_method_regressionloss():
 
     # With a fake network
 
-    def fake_net(input, y_lr, sigma, labels, augment_labels=None):
+    def fake_net(input, y_lr, augment_labels=None, force_fp32=False):
         return torch.tensor([1.0])
 
     loss_func = RegressionLoss()

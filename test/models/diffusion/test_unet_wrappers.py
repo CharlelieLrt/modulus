@@ -36,7 +36,6 @@ def test_unet_forwards(device):
     res, inc, outc = 64, 2, 3
     model = UNet(
         img_resolution=res,
-        img_channels=inc,
         img_in_channels=inc,
         img_out_channels=outc,
         model_type="SongUNet",
@@ -65,7 +64,6 @@ def test_unet_optims(device):
 
         model = UNet(
             img_resolution=res,
-            img_channels=inc,
             img_in_channels=inc,
             img_out_channels=outc,
             model_type="SongUNet",
@@ -99,14 +97,12 @@ def test_unet_checkpoint(device):
     res, inc, outc = 64, 2, 3
     model_1 = UNet(
         img_resolution=res,
-        img_channels=inc,
         img_in_channels=inc,
         img_out_channels=outc,
         model_type="SongUNet",
     ).to(device)
     model_2 = UNet(
         img_resolution=res,
-        img_channels=inc,
         img_in_channels=inc,
         img_out_channels=outc,
         model_type="SongUNet",

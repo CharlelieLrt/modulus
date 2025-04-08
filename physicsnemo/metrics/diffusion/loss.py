@@ -392,11 +392,13 @@ class RegressionLoss:
         net : torch.nn.Module
             The neural network model that will make predictions.
             Expected signature: `net(x, img_lr,
-            augment_labels=augment_labels)`, where:
+            augment_labels=augment_labels, force_fp32=False)`, where:
                 x (torch.Tensor): Tensor of shape (B, C_hr, H, W). Is zero-filled.
                 img_lr (torch.Tensor): Low-resolution input of shape (B, C_lr, H, W)
                 augment_labels (torch.Tensor, optional): Optional augmentation
                 labels, returned by `augment_pipe`.
+                force_fp32 (bool, optional): Whether to force the model to use
+                fp32, by default False.
             Returns:
                 torch.Tensor: Predictions of shape (B, C_hr, H, W)
 
@@ -439,9 +441,7 @@ class RegressionLoss:
         y_lr = y_tot[:, img_clean.shape[1] :, :, :]
 
         zero_input = torch.zeros_like(y, device=img_clean.device)
-        D_yn = net(
-            x=zero_input, img_lr=y_lr, force_fp32=False, augment_labels=augment_labels
-        )
+        D_yn = net(zero_input, y_lr, force_fp32=False, augment_labels=augment_labels)
         loss = weight * ((D_yn - y) ** 2)
 
         return loss
@@ -899,8 +899,11 @@ class RegressionLossCE:
         Arguments
         ----------
         prob_channels: list[int], optional
-            List of channel indices to be treated as probability channels.
-            By default, [4, 5, 6, 7, 8].
+            List of channel indices from the target tensor to be treated as
+            probability channels. Cross entropy loss is computed over these
+            channels, while the remaining channels are treated as scalar
+            channels and the squared error loss is computed over them. By
+            default, [4, 5, 6, 7, 8].
         """
         self.entropy = torch.nn.CrossEntropyLoss(reduction="none")
         self.prob_channels = prob_channels
@@ -959,10 +962,12 @@ class RegressionLossCE:
         Returns
         -------
         torch.Tensor
-            A tensor of shape (B, C_hr, H, W) representing the per-sample loss.
-            The channels corresponding to `prob_channels` use cross entropy loss,
-            while the remaining scalar channels use squared error.
-            Both types of losses are concatenated along the channel dimension.
+            A tensor of shape (B, C_loss, H, W) representing the pixel-wise
+            loss., where `C_loss = C_hr - len(prob_channels) + 1`. More
+            specifically, the last channel of the output tensor corresponds to
+            the cross-entropy loss computed over the channels specified in
+            `prob_channels`, while the first `C_hr - len(prob_channels)`
+            channels of the output tensor correspond to the squared error loss.
         """
         all_channels = list(range(img_clean.shape[1]))  # [0, 1, 2, ..., 10]
         scalar_channels = [

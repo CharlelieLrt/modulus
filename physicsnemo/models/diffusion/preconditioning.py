@@ -969,7 +969,8 @@ class VEPrecond_dfsr(torch.nn.Module):
         self.img_channels = img_channels
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
-        self.model = globals()[model_type](
+        model_class = getattr(network_module, model_type)
+        self.model = model_class(
             img_resolution=img_resolution,
             in_channels=self.img_channels,
             out_channels=img_channels,
@@ -1068,7 +1069,8 @@ class VEPrecond_dfsr_cond(torch.nn.Module):
         self.img_channels = img_channels
         self.label_dim = label_dim
         self.use_fp16 = use_fp16
-        self.model = globals()[model_type](
+        model_class = getattr(network_module, model_type)
+        self.model = model_class(
             img_resolution=img_resolution,
             in_channels=model_kwargs["model_channels"] * 2,
             out_channels=img_channels,

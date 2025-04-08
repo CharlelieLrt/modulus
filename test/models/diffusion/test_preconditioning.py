@@ -60,7 +60,7 @@ def test_EDMPrecondSuperResolution_serialization(tmp_path, pytestconfig):
 
     from physicsnemo.launch.utils import load_checkpoint, save_checkpoint
 
-    module = EDMPrecondSuperResolution(8, 1, 1, scale_cond_input=False)
+    module = EDMPrecondSuperResolution(8, 1, 1)
     model_path = tmp_path / "output.mdlus"
     module.save(model_path.as_posix())
     loaded = Module.from_checkpoint(model_path.as_posix())
