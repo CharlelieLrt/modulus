@@ -276,7 +276,7 @@ def test_call_method_regressionlossce_with_unet(device):
     loss_func = RegressionLossCE(prob_channels=prob_channels)
     loss_value = loss_func(model, img_clean, img_lr, lead_time_label=lead_time_label)
     assert isinstance(loss_value, torch.Tensor)
-    assert loss_value.shape == img_clean.shape
+    assert loss_value.shape == (1, outc - len(prob_channels) + 1, res, res)
 
 
 # ResidualLoss tests
