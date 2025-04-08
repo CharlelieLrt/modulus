@@ -21,6 +21,7 @@ import torch._dynamo
 import nvtx
 import numpy as np
 import netCDF4 as nc
+import contextlib
 
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.launch.logging import PythonLogger, RankZeroLoggingWrapper
@@ -90,8 +91,8 @@ def main(cfg: DictConfig) -> None:
     dataset_cfg = OmegaConf.to_container(cfg.dataset)
 
     # Register dataset (if custom dataset)
-    register_dataset(dataset_cfg.dataset.type)
-    logger0.info(f"Using dataset: {dataset_cfg.dataset.type}")
+    register_dataset(cfg.dataset.type)
+    logger0.info(f"Using dataset: {cfg.dataset.type}")
 
     if "has_lead_time" in cfg.generation:
         has_lead_time = cfg.generation["has_lead_time"]
@@ -266,8 +267,18 @@ def main(cfg: DictConfig) -> None:
         # add attributes
         f.cfg = str(cfg)
 
-    with torch.cuda.profiler.profile():
-        with torch.autograd.profiler.emit_nvtx():
+    torch_cuda_profiler = (
+        torch.cuda.profiler.profile()
+        if torch.cuda.is_available()
+        else contextlib.nullcontext()
+    )
+    torch_nvtx_profiler = (
+        torch.autograd.profiler.emit_nvtx()
+        if torch.cuda.is_available()
+        else contextlib.nullcontext()
+    )
+    with torch_cuda_profiler:
+        with torch_nvtx_profiler:
 
             data_loader = torch.utils.data.DataLoader(
                 dataset=dataset, sampler=sampler, batch_size=1, pin_memory=True
@@ -289,11 +300,29 @@ def main(cfg: DictConfig) -> None:
                 )
                 writer_threads = []
 
-            start = torch.cuda.Event(enable_timing=True)
-            end = torch.cuda.Event(enable_timing=True)
+            # Create timer objects only if CUDA is available
+            use_cuda_timing = torch.cuda.is_available()
+            if use_cuda_timing:
+                start = torch.cuda.Event(enable_timing=True)
+                end = torch.cuda.Event(enable_timing=True)
+            else:
+                # Dummy no-op functions for CPU case
+                class DummyEvent:
+                    def record(self):
+                        pass
+
+                    def synchronize(self):
+                        pass
+
+                    def elapsed_time(self, _):
+                        return 0
+
+                start = end = DummyEvent()
 
             times = dataset.time()
-            for image_tar, image_lr, index, *lead_time_label in iter(data_loader):
+            for index, (image_tar, image_lr, *lead_time_label) in enumerate(
+                iter(data_loader)
+            ):
                 time_index += 1
                 if dist.rank == 0:
                     logger0.info(f"starting index: {time_index}")
@@ -326,15 +355,17 @@ def main(cfg: DictConfig) -> None:
                             image_tar.cpu(),
                             image_lr.cpu(),
                             time_index,
-                            index[0],
+                            index,
                             has_lead_time,
                         )
                     )
             end.record()
             end.synchronize()
-            elapsed_time = start.elapsed_time(end) / 1000.0  # Convert ms to s
+            elapsed_time = (
+                start.elapsed_time(end) / 1000.0 if use_cuda_timing else 0
+            )  # Convert ms to s
             timed_steps = time_index + 1 - warmup_steps
-            if dist.rank == 0:
+            if dist.rank == 0 and use_cuda_timing:
                 average_time_per_batch_element = elapsed_time / timed_steps / batch_size
                 logger.info(
                     f"Total time to run {timed_steps} steps and {batch_size} members = {elapsed_time} s"

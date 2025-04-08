@@ -736,6 +736,10 @@ class EDMPrecondSuperResolution(Module):
         Defaults to 'SongUNetPosEmbd'.
     sigma_data : float, optional
         Expected standard deviation of the training data, by default 0.5.
+    sigma_min : float, optional
+        Minimum supported noise level, by default 0.0.
+    sigma_max : float, optional
+        Maximum supported noise level, by default inf.
     **model_kwargs : dict
         Keyword arguments passed to the underlying model `__init__` method.
 
@@ -771,6 +775,8 @@ class EDMPrecondSuperResolution(Module):
             "SongUNetPosEmbd", "SongUNetPosLtEmbd", "SongUNet", "DhariwalUNet"
         ] = "SongUNetPosEmbd",
         sigma_data: float = 0.5,
+        sigma_min=0.0,
+        sigma_max=float("inf"),
         **model_kwargs: dict,
     ):
         super().__init__(meta=EDMPrecondSuperResolutionMetaData)
@@ -779,6 +785,8 @@ class EDMPrecondSuperResolution(Module):
         self.img_out_channels = img_out_channels
         self.use_fp16 = use_fp16
         self.sigma_data = sigma_data
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
 
         model_class = getattr(network_module, model_type)
         self.model = model_class(

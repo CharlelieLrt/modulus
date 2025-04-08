@@ -190,12 +190,6 @@ def main(cfg: DictConfig) -> None:
     }
     if cfg.model.name == "lt_aware_ce_regression":
         model_args["prob_channels"] = prob_channels
-    if cfg.model.name in (
-        "diffusion",
-        "patched_diffusion",
-        "lt_aware_patched_diffusion",
-    ):
-        model_args["scale_cond_input"] = cfg.model.scale_cond_input
     if hasattr(cfg.model, "model_args"):  # override defaults from config file
         model_args.update(OmegaConf.to_container(cfg.model.model_args))
     if cfg.model.name == "regression":

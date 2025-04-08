@@ -15,7 +15,7 @@
 # limitations under the License.
 
 
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 import torch
 from torch import Tensor
@@ -24,7 +24,7 @@ from physicsnemo.utils.patching import GridPatching2D
 
 
 def stochastic_sampler(
-    net: Any,
+    net: torch.nn.Module,
     latents: Tensor,
     img_lr: Tensor,
     class_labels: Optional[Tensor] = None,
@@ -47,9 +47,26 @@ def stochastic_sampler(
 
     Parameters
     ----------
-    net : Any
+    net : torch.nn.Module
         The neural network model that generates denoised images from noisy
         inputs.
+        Expected signature: `net(x, x_lr, t_hat, class_labels,
+        lead_time_label=lead_time_label, embedding_selector=embedding_selector)`,
+        where:
+            x (torch.Tensor): Noisy input of shape (batch_size, C_out, H, W)
+            x_lr (torch.Tensor): Conditioning input of shape (batch_size, C_cond, H, W)
+            t_hat (torch.Tensor): Noise level of shape (batch_size, 1, 1, 1) or scalar
+            class_labels (torch.Tensor, optional): Optional class labels
+            lead_time_label (torch.Tensor, optional): Optional lead time labels
+            embedding_selector (callable, optional): Function to select
+            positional embeddings. Used for patch-based diffusion.
+        Returns:
+            torch.Tensor: Denoised prediction of shape (batch_size, C_out, H, W)
+
+        Required attributes:
+            sigma_min (float): Minimum supported noise level for the model
+            sigma_max (float): Maximum supported noise level for the model
+            round_sigma (callable): Method to convert sigma values to tensor representation
     latents : Tensor
         The latent variables (e.g., noise) used as the initial input for the
         sampler. Has shape (batch_size, C_out, img_shape_y, img_shape_x).
@@ -78,6 +95,8 @@ def stochastic_sampler(
         B_hr can be either 1, either equal to batch_size, or can be omitted. If
         B_hr = 1 or is omitted, `mean_hr` will be expanded to match the shape
         of `img_lr`. By default None.
+    lead_time_label : Optional[Tensor], optional
+        Optional lead time labels. By default None.
     num_steps : int
         Number of time steps for the sampler. By default 18.
     sigma_min : float
@@ -101,6 +120,12 @@ def stochastic_sampler(
     Tensor
         The final denoised image produced by the sampler. Same shape as
         `latents`: (batch_size, C_out, img_shape_y, img_shape_x).
+
+    See Also
+    --------
+    :class:`physicsnemo.models.diffusion.EDMPrecondSuperResolution`: A model
+        wrapper that provides preconditioning for super-resolution diffusion
+        models and implements the required interface for this sampler.
     """
 
     # Adjust noise levels based on what's supported by the network.

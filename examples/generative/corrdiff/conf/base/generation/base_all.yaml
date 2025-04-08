@@ -26,8 +26,8 @@ inference_mode: all
 # Choose between "all" (regression + diffusion), "regression" or "diffusion"
 hr_mean_conditioning: true
 # Whether to use hr_mean_conditioning
-times_range: ???
-# Time range to generate. Should be overridden.
+times_range: null
+# Time range to generate. Can be overridden.
 has_lead_time: False
 # Whether the model has lead time.
 

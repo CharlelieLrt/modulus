@@ -67,10 +67,10 @@ dataset:
 # Training parameters
 training:
     hp:
-        training_duration: 400  # DEBUG
+        training_duration: 2000000
         # Training duration based on the number of processed samples
     io:
-        print_progress_freq: 100  # DEBUG
+        print_progress_freq: 10000
 
 # Parameters for wandb logging
 wandb:

@@ -67,11 +67,11 @@ dataset:
 # Training parameters
 training:
     hp:
-        training_duration: 500  # DEBUG
+        training_duration: 8000000
         # Training duration based on the number of processed samples
     io:
-        print_progress_freq: 100  # DEBUG
-        regression_checkpoint_path: ./checkpoints_regression/UNet.0.400.mdlus # DEBUG
+        print_progress_freq: 10000
+        regression_checkpoint_path: <regression_checkpoint.mdlus>
         # Path to load the regression checkpoint
 
 # Parameters for wandb logging

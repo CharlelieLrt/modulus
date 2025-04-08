@@ -18,8 +18,6 @@ name: diffusion
 # Model type.
 hr_mean_conditioning: True
 # Recommended to use high-res conditioning for diffusion.
-scale_cond_input: False
-# If true, also scales the input conditioning. Recommended to False.
 
 # Standard model parameters.
 model_args:

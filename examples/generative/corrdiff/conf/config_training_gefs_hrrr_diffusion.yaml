@@ -64,11 +64,6 @@ dataset:
     stats_path: ./data/stats.json
     # Path to json stats file
 
-model:
-    scale_cond_input: true
-    # If true, also scales the input conditioning. Set to True for backward
-    # compatibility.
-
 # Training parameters
 training:
     hp:

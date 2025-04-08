@@ -22,8 +22,6 @@ hr_mean_conditioning: False
 
 # Default model parameters.
 model_args:
-  img_channels: 4
-  # Number of color channels in the model
   N_grid_channels: 4
   # Number of channels for positional grid embeddings
   embedding_type: "zero"
