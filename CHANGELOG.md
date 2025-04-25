@@ -30,6 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Added backward compatibility utilities to load existing UNet and SongUnet
+  checkpoints (e.g. used in CorrDiff)
+
 ### Security
 
 ### Dependencies
