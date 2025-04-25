@@ -28,6 +28,7 @@ from typing import Any, Dict, Union
 import torch
 
 import physicsnemo
+import physicsnemo.models.utils_compatibility as bwc
 from physicsnemo.models.meta import ModelMetaData
 from physicsnemo.registry import ModelRegistry
 from physicsnemo.utils.filesystem import _download_cached, _get_fs
@@ -162,6 +163,9 @@ class Module(torch.nn.Module):
         )
         """
 
+        # Backward compatibility: handle old checkpoints (class renamed)
+        bwc._update_class_name(arg_dict)
+
         _cls_name = arg_dict["__name__"]
         registry = ModelRegistry()
         if cls.__name__ == arg_dict["__name__"]:  # If cls is the class
@@ -191,6 +195,9 @@ class Module(torch.nn.Module):
         # This works with the importlib.metadata.EntryPoint
         if isinstance(_cls, importlib.metadata.EntryPoint):
             _cls = _cls.load()
+
+        # Hack: backward compatibility for old checkpoints
+        bwc._update_init_args(_cls, arg_dict["__args__"])
 
         return _cls(**arg_dict["__args__"])
 
