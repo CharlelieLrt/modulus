@@ -121,7 +121,11 @@ class Module(torch.nn.Module):
                 print(f"Skipping potentially malicious file: {member.name}")
 
     @classmethod
-    def instantiate(cls, arg_dict: Dict[str, Any]) -> "Module":
+    def instantiate(
+        cls,
+        arg_dict: Dict[str, Any],
+        backward_compatibility: bool = False,
+    ) -> "Module":
         """Instantiate a model from a dictionary of arguments
 
         Parameters
@@ -132,6 +136,9 @@ class Module(torch.nn.Module):
             are used to import the class and the last is used to instantiate
             the class. The '__args__' key should be a dictionary of arguments
             to pass to the class's __init__ function.
+        backward_compatibility : bool, optional
+            Whether to apply backward compatibility patches to the arguments, by
+            default False.
 
         Returns
         -------
@@ -164,7 +171,8 @@ class Module(torch.nn.Module):
         """
 
         # Backward compatibility: handle old checkpoints (class renamed)
-        bwc._update_class_name(arg_dict)
+        if backward_compatibility:
+            bwc._update_class_name(arg_dict)
 
         _cls_name = arg_dict["__name__"]
         registry = ModelRegistry()
@@ -196,8 +204,9 @@ class Module(torch.nn.Module):
         if isinstance(_cls, importlib.metadata.EntryPoint):
             _cls = _cls.load()
 
-        # Hack: backward compatibility for old checkpoints
-        bwc._update_init_args(_cls, arg_dict["__args__"])
+        # Backward compatibility: handle old checkpoints (args renamed)
+        if backward_compatibility:
+            bwc._update_init_args(_cls, arg_dict["__args__"])
 
         return _cls(**arg_dict["__args__"])
 
@@ -344,13 +353,18 @@ class Module(torch.nn.Module):
             self.load_state_dict(model_dict, strict=strict)
 
     @classmethod
-    def from_checkpoint(cls, file_name: str) -> "Module":
+    def from_checkpoint(
+        cls, file_name: str, backward_compatibility: bool = False
+    ) -> "Module":
         """Simple utility for constructing a model from a checkpoint
 
         Parameters
         ----------
         file_name : str
             Checkpoint file name
+        backward_compatibility : bool, optional
+            Whether to apply backward compatibility patches to the arguments, by
+            default False.
 
         Returns
         -------
@@ -381,7 +395,7 @@ class Module(torch.nn.Module):
             # Load model arguments and instantiate the model
             with open(local_path.joinpath("args.json"), "r") as f:
                 args = json.load(f)
-            model = cls.instantiate(args)
+            model = cls.instantiate(args, backward_compatibility=backward_compatibility)
 
             # Load the model weights
             model_dict = torch.load(
