@@ -520,9 +520,8 @@ def main(cfg: DictConfig) -> None:
 
                             for patch_num_per_iter in patch_nums_iter:
                                 if patching is not None:
-                                    patching.set_patch_sum(patch_num_per_iter)
+                                    patching.set_patch_num(patch_num_per_iter)
                                     loss_fn_kwargs.update({"patching": patching})
-                                # pdb.set_trace()
                                 with nvtx.annotate(f"loss forward", color="green"):
                                     with torch.autocast(
                                         "cuda", dtype=amp_dtype, enabled=enable_amp
@@ -665,11 +664,10 @@ def main(cfg: DictConfig) -> None:
 
                                     for patch_num_per_iter in patch_nums_iter:
                                         if patching is not None:
-                                            patching.set_patch_sum(patch_num_per_iter)
+                                            patching.set_patch_num(patch_num_per_iter)
                                             loss_fn_kwargs.update(
                                                 {"patching": patching}
                                             )
-                                        # pdb.set_trace()
                                         with torch.autocast(
                                             "cuda", dtype=amp_dtype, enabled=enable_amp
                                         ):
