@@ -93,6 +93,13 @@ def cuda_profiler_stop():
         torch.cuda.profiler.stop()
 
 
+def profiler_emit_nvtx():
+    try:
+        return torch.autograd.profiler.emit_nvtx()
+    except (ImportError, AttributeError):
+        return nullcontext()
+
+
 # Train the CorrDiff model using the configurations in "conf/config_training.yaml"
 @hydra.main(version_base="1.2", config_path="conf", config_name="config_training")
 def main(cfg: DictConfig) -> None:
@@ -125,10 +132,10 @@ def main(cfg: DictConfig) -> None:
     logger0.info(f"Using dataset: {cfg.dataset.type}")
 
     if hasattr(cfg, "validation"):
-        train_test_split = True
+        validation = True
         validation_dataset_cfg = OmegaConf.to_container(cfg.validation)
     else:
-        train_test_split = False
+        validation = False
         validation_dataset_cfg = None
     fp_optimizations = cfg.training.perf.fp_optimizations
     songunet_checkpoint_level = cfg.training.perf.songunet_checkpoint_level
@@ -165,7 +172,7 @@ def main(cfg: DictConfig) -> None:
         batch_size=cfg.training.hp.batch_size_per_gpu,
         seed=0,
         validation_dataset_cfg=validation_dataset_cfg,
-        train_test_split=train_test_split,
+        validation=validation,
     )
 
     # Parse image configuration & update model args
@@ -219,7 +226,6 @@ def main(cfg: DictConfig) -> None:
     if hasattr(cfg.model, "model_args"):  # override defaults from config file
         model_args.update(OmegaConf.to_container(cfg.model.model_args))
 
-    optimization_mode = False
     use_torch_compile = False
     use_apex_gn = False
     profile_mode = False
@@ -441,7 +447,7 @@ def main(cfg: DictConfig) -> None:
 
     # enable profiler:
     with cuda_profiler():
-        with torch.autograd.profiler.emit_nvtx():
+        with profiler_emit_nvtx():
 
             while not done:
                 tick_start_nimg = cur_nimg
