@@ -21,6 +21,7 @@ from torch.nn.parallel import DistributedDataParallel
 from torch.utils.tensorboard import SummaryWriter
 import wandb
 from hydra.core.hydra_config import HydraConfig
+from contextlib import nullcontext
 
 from physicsnemo import Module
 from physicsnemo.models.diffusion import UNet, EDMPrecondSuperResolution
@@ -72,6 +73,24 @@ def checkpoint_list(path, suffix=".mdlus"):
     # Sort by index and return filenames
     checkpoints.sort(key=lambda x: x[0])
     return [file for _, file in checkpoints]
+
+
+# Define safe CUDA profiler tools that fallback to no-ops when CUDA is not available
+def cuda_profiler():
+    if torch.cuda.is_available():
+        return torch.cuda.profiler.profile()
+    else:
+        return nullcontext()
+
+
+def cuda_profiler_start():
+    if torch.cuda.is_available():
+        torch.cuda.profiler.start()
+
+
+def cuda_profiler_stop():
+    if torch.cuda.is_available():
+        torch.cuda.profiler.stop()
 
 
 # Train the CorrDiff model using the configurations in "conf/config_training.yaml"
@@ -421,7 +440,7 @@ def main(cfg: DictConfig) -> None:
         input_dtype = torch.float16
 
     # enable profiler:
-    with torch.cuda.profiler.profile():
+    with cuda_profiler():
         with torch.autograd.profiler.emit_nvtx():
 
             while not done:
@@ -430,11 +449,11 @@ def main(cfg: DictConfig) -> None:
 
                 if cur_nimg - start_nimg == 24 * cfg.training.hp.total_batch_size:
                     logger0.info(f"Starting Profiler at {cur_nimg}")
-                    torch.cuda.profiler.start()
+                    cuda_profiler_start()
 
                 if cur_nimg - start_nimg == 25 * cfg.training.hp.total_batch_size:
-                    logger0.info(f"Stoping Profiler at {cur_nimg}")
-                    torch.cuda.profiler.stop()
+                    logger0.info(f"Stopping Profiler at {cur_nimg}")
+                    cuda_profiler_stop()
 
                 with nvtx.annotate("Training iteration", color="green"):
                     # Compute & accumulate gradients
