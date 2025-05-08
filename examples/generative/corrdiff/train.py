@@ -94,9 +94,9 @@ def cuda_profiler_stop():
 
 
 def profiler_emit_nvtx():
-    try:
+    if torch.cuda.is_available():
         return torch.autograd.profiler.emit_nvtx()
-    except (ImportError, AttributeError):
+    else:
         return nullcontext()
 
 
@@ -724,14 +724,15 @@ def main(cfg: DictConfig) -> None:
                     fields += [
                         f"cpu_mem_gb {(psutil.Process(os.getpid()).memory_info().rss / 2**30):<6.2f}"
                     ]
-                    fields += [
-                        f"peak_gpu_mem_gb {(torch.cuda.max_memory_allocated(dist.device) / 2**30):<6.2f}"
-                    ]
-                    fields += [
-                        f"peak_gpu_mem_reserved_gb {(torch.cuda.max_memory_reserved(dist.device) / 2**30):<6.2f}"
-                    ]
+                    if torch.cuda.is_available():
+                        fields += [
+                            f"peak_gpu_mem_gb {(torch.cuda.max_memory_allocated(dist.device) / 2**30):<6.2f}"
+                        ]
+                        fields += [
+                            f"peak_gpu_mem_reserved_gb {(torch.cuda.max_memory_reserved(dist.device) / 2**30):<6.2f}"
+                        ]
+                        torch.cuda.reset_peak_memory_stats()
                     logger0.info(" ".join(fields))
-                    torch.cuda.reset_peak_memory_stats()
 
                 # Save checkpoints
                 if dist.world_size > 1:
