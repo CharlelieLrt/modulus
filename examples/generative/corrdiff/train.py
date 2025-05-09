@@ -469,7 +469,7 @@ def main(cfg: DictConfig) -> None:
                         with nvtx.annotate(
                             f"accumulation round {n_i}", color="Magenta"
                         ):
-                            with nvtx.annotate(f"loading data", color="green"):
+                            with nvtx.annotate("loading data", color="green"):
                                 img_clean, img_lr, *lead_time_label = next(
                                     dataset_iterator
                                 )
@@ -570,7 +570,7 @@ def main(cfg: DictConfig) -> None:
                         n_average_loss_running_mean = 1
 
                     # Update weights.
-                    with nvtx.annotate(f"update weights", color="blue"):
+                    with nvtx.annotate("update weights", color="blue"):
                         lr_rampup = (
                             cfg.training.hp.lr_rampup
                         )  # ramp up the learning rate
