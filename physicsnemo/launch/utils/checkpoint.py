@@ -145,7 +145,7 @@ def _unique_model_names(
     models: List[torch.nn.Module],
 ) -> Dict[str, torch.nn.Module]:
     """Util to clean model names and index if repeat names, will also strip DDP wrappers
-    if they exist.
+     and torch dynamo wrappers if they exist.
 
     Parameters
     ----------
@@ -163,6 +163,9 @@ def _unique_model_names(
         if hasattr(model0, "module"):
             # Strip out DDP layer
             model0 = model0.module
+        # Strip out torch dynamo wrapper
+        if isinstance(model0, torch._dynamo.eval_frame.OptimizedModule):
+            model0 = model0._orig_mod
         # Base name of model is meta.name unless pytorch model
         base_name = model0.__class__.__name__
         if isinstance(model0, physicsnemo.models.Module):
@@ -257,13 +260,20 @@ def save_checkpoint(
     checkpoint_dict = {}
     # Optimizer state dict
     if optimizer:
-        checkpoint_dict["optimizer_state_dict"] = optimizer.state_dict()
+        opt_state_dict = optimizer.state_dict()
+        # Strip out torch dynamo wrapper prefix
+        for pg in opt_state_dict.get("param_groups", []):
+            param_names = pg.get("param_names")
+            if param_names is None:
+                continue
+            pg["param_names"] = [pn.removeprefix("_orig_mod.") for pn in param_names]
+        checkpoint_dict["optimizer_state_dict"] = opt_state_dict
 
     # Scheduler state dict
     if scheduler:
         checkpoint_dict["scheduler_state_dict"] = scheduler.state_dict()
 
-    # Scheduler state dict
+    # Scaler state dict
     if scaler:
         checkpoint_dict["scaler_state_dict"] = scaler.state_dict()
     # Static capture is being used, save its grad scaler

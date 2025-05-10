@@ -304,6 +304,12 @@ def main(cfg: DictConfig) -> None:
     if cfg.wandb.watch_model and dist.rank == 0:
         wandb.watch(model)
 
+    # Load the model checkpoint if applicable
+    try:
+        cur_nimg_model = load_checkpoint(path=checkpoint_dir, models=model)
+    except:
+        cur_nimg_model = None
+
     # Load the regression checkpoint if applicable
     if (
         hasattr(cfg.training.io, "regression_checkpoint_path")
@@ -328,10 +334,12 @@ def main(cfg: DictConfig) -> None:
         if use_apex_gn:
             regression_net.to(memory_format=torch.channels_last)
         logger0.success("Loaded the pre-trained regression model")
+    else:
+        regression_net = None
 
+    # Compile the model and regression net if applicable
     if use_torch_compile:
-        if model:
-            model = torch.compile(model)
+        model = torch.compile(model)
         if regression_net:
             regression_net = torch.compile(regression_net)
 
@@ -415,13 +423,12 @@ def main(cfg: DictConfig) -> None:
     # Record the current time to measure the duration of subsequent operations.
     start_time = time.time()
 
-    ## Resume training from previous checkpoints if exists
+    ## Load optimizer checkpoint if exists
     if dist.world_size > 1:
         torch.distributed.barrier()
     try:
         cur_nimg = load_checkpoint(
             path=checkpoint_dir,
-            models=model,
             optimizer=optimizer,
             device=dist.device,
         )
