@@ -183,6 +183,7 @@ def main(cfg: DictConfig) -> None:
     if cfg.model.hr_mean_conditioning:
         img_in_channels += img_out_channels
 
+    # Handle patch shape
     if cfg.model.name == "lt_aware_ce_regression":
         prob_channels = dataset.get_prob_channel_index()
     else:
@@ -197,6 +198,16 @@ def main(cfg: DictConfig) -> None:
     else:
         patch_shape_x = None
         patch_shape_y = None
+    if (
+        patch_shape_x
+        and patch_shape_y
+        and patch_shape_y >= img_shape[0]
+        and patch_shape_x >= img_shape[1]
+    ):
+        logger0.warning(
+            f"Patch shape {patch_shape_y}x{patch_shape_x} is larger than \
+            the image shape {img_shape[0]}x{img_shape[1]}. Patching will not be used."
+        )
     patch_shape = (patch_shape_y, patch_shape_x)
     use_patching, img_shape, patch_shape = set_patch_shape(img_shape, patch_shape)
     if use_patching:
