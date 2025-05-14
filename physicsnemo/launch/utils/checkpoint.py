@@ -143,6 +143,7 @@ def _get_checkpoint_filename(
 
 def _unique_model_names(
     models: List[torch.nn.Module],
+    loading: bool = False,
 ) -> Dict[str, torch.nn.Module]:
     """Util to clean model names and index if repeat names, will also strip DDP wrappers
      and torch dynamo wrappers if they exist.
@@ -150,7 +151,9 @@ def _unique_model_names(
     Parameters
     ----------
     model :  List[torch.nn.Module]
-        List of models to generate names for
+        List of models to generate names for.
+    loading : bool, optional
+        Whether the models are being loaded, by default False.
 
     Returns
     -------
@@ -166,10 +169,18 @@ def _unique_model_names(
         # Strip out torch dynamo wrapper
         if isinstance(model0, torch._dynamo.eval_frame.OptimizedModule):
             model0 = model0._orig_mod
+            is_compiled = True
+        else:
+            is_compiled = False
         # Base name of model is meta.name unless pytorch model
         base_name = model0.__class__.__name__
         if isinstance(model0, physicsnemo.models.Module):
             base_name = model0.meta.name
+        # Warning in case of attempt to load into a compiled model
+        if is_compiled and loading:
+            checkpoint_logging.warning(
+                f"Model {base_name} is already compiled, consider loading first and then compiling."
+            )
         # If we have multiple models of the same name, introduce another index
         if base_name in model_dict:
             model_dict[base_name].append(model0)
@@ -357,7 +368,7 @@ def load_checkpoint(
     if models:
         if not isinstance(models, list):
             models = [models]
-        models = _unique_model_names(models)
+        models = _unique_model_names(models, loading=True)
         for name, model in models.items():
             # Get model type
             model_type = (
