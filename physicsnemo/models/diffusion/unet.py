@@ -218,6 +218,7 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
                 sub_module.amp_mode = value
 
 
+# TODO: implement amp_mode property for StormCastUNet (same as UNet)
 class StormCastUNet(Module):
     """
     U-Net wrapper for StormCast; used so the same Song U-Net network can be re-used for this model.
