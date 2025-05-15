@@ -194,6 +194,29 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
         """
         return torch.as_tensor(sigma)
 
+    @property
+    def amp_mode(self):
+        """
+        Return the *amp_mode* flag of the underlying model if present.
+        """
+        return getattr(self.model, "amp_mode", None)
+
+    @amp_mode.setter
+    def amp_mode(self, value: bool):
+        """
+        Update *amp_mode* on the wrapped model and its sub-modules.
+        """
+        if not isinstance(value, bool):
+            raise TypeError("amp_mode must be a boolean value.")
+
+        if hasattr(self.model, "amp_mode"):
+            self.model.amp_mode = value
+
+        # Recursively update sub-modules that define *amp_mode*.
+        for sub_module in self.model.modules():
+            if hasattr(sub_module, "amp_mode"):
+                sub_module.amp_mode = value
+
 
 class StormCastUNet(Module):
     """
