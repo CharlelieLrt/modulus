@@ -557,21 +557,22 @@ class InfiniteSampler(torch.utils.data.Sampler[int]):  # pragma: no cover
     """Sampler for torch.utils.data.DataLoader that loops over the dataset indefinitely.
 
     This sampler yields indices indefinitely, optionally shuffling items as it goes.
-    It can also perform distributed sampling when rank and num_replicas are specified.
+    It can also perform distributed sampling when `rank` and `num_replicas` are
+    specified.
 
     Parameters
     ----------
-    dataset : torch.utils.data.Dataset
+    - dataset : torch.utils.data.Dataset
         The dataset to sample from
-    rank : int, default=0
+    - rank : int, default=0
         The rank of the current process within num_replicas processes
-    num_replicas : int, default=1
+    - num_replicas : int, default=1
         The number of processes participating in distributed sampling
-    shuffle : bool, default=True
+    - shuffle : bool, default=True
         Whether to shuffle the indices
-    seed : int, default=0
+    - seed : int, default=0
         Random seed for reproducibility when shuffling
-    window_size : float, default=0.5
+    - window_size : float, default=0.5
         Fraction of dataset to use as window for shuffling. Must be between 0 and 1.
         A larger window means more thorough shuffling but slower iteration.
     """

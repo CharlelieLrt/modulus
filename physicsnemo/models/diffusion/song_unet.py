@@ -14,11 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-Model architectures used in the paper "Elucidating the Design Space of 
-Diffusion-Based Generative Models".
-"""
-
 import contextlib
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Union
@@ -39,6 +34,10 @@ from physicsnemo.models.diffusion import (
 )
 from physicsnemo.models.meta import ModelMetaData
 from physicsnemo.models.module import Module
+
+# ------------------------------------------------------------------------------
+# Backbone architectures
+# ------------------------------------------------------------------------------
 
 
 @dataclass
@@ -61,68 +60,104 @@ class MetaData(ModelMetaData):
 
 class SongUNet(Module):
     """
-    Reimplementation of the DDPM++ and NCSN++ architectures, U-Net variants with
-    optional self-attention, embeddings, and encoder-decoder components.
+    This U-Net architecture is a diffusion backbone for 2D image generation.
+    It is a reimplementation of the DDPM++ and NCSN++ architectures, U-Net variants
+    with optional self-attention, embeddings, and encoder-decoder components.
 
     This model supports conditional and unconditional setups, as well as several
     options for various internal architectural choices such as encoder and decoder
     type, embedding type, etc., making it flexible and adaptable to different tasks
     and configurations.
 
+    At each level in the U-Net encoder:
+    • A first block downsamples the feature map resolution by a factor of 2
+      (odd resolutions are floored).
+    • A number of residual blocks `num_blocks` are applied, each with a different
+      number of channels.
+    • If specified, a self-attention block is applied at the end of the level.
+
+    The decoder is a mirror of the encoder, with the same number of levels and
+    the same number of blocks per level. It multiplies the feature map resolution
+    by a factor of 2 at each level.
+
+    This architecture supports conditioning on images based on channel-wise
+    concatenation at the first convolution layer. It is also conditioned on the
+    diffusion noise level through adaptive scaling in the normalization layers.
+
     Parameters
     -----------
-    img_resolution : Union[List[int], int]
+    - img_resolution : Union[List[int], int]
         The resolution of the input/output image. Can be a single int for square images
         or a list [height, width] for rectangular images.
-    in_channels : int
+    - in_channels : int
         Number of channels in the input image.
-    out_channels : int
+    - out_channels : int
         Number of channels in the output image.
-    label_dim : int, optional
+    - label_dim : int, optional
         Number of class labels; 0 indicates an unconditional model. By default 0.
-    augment_dim : int, optional
+    - augment_dim : int, optional
         Dimensionality of augmentation labels; 0 means no augmentation. By default 0.
-    model_channels : int, optional
+    - model_channels : int, optional
         Base multiplier for the number of channels across the network. By default 128.
-    channel_mult : List[int], optional
+    - channel_mult : List[int], optional
         Per-resolution multipliers for the number of channels. By default [1,2,2,2].
-    channel_mult_emb : int, optional
+    - channel_mult_emb : int, optional
         Multiplier for the dimensionality of the embedding vector. By default 4.
-    num_blocks : int, optional
+    - num_blocks : int, optional
         Number of residual blocks per resolution. By default 4.
-    attn_resolutions : List[int], optional
+    - attn_resolutions : List[int], optional
         Resolutions at which self-attention layers are applied. By default [16].
-    dropout : float, optional
+    - dropout : float, optional
         Dropout probability applied to intermediate activations. By default 0.10.
-    label_dropout : float, optional
+    - label_dropout : float, optional
         Dropout probability of class labels for classifier-free guidance. By default 0.0.
-    embedding_type : str, optional
+    - embedding_type : str, optional
         Timestep embedding type: 'positional' for DDPM++, 'fourier' for NCSN++, 'zero' for none.
         By default 'positional'.
-    channel_mult_noise : int, optional
+    - channel_mult_noise : int, optional
         Timestep embedding size: 1 for DDPM++, 2 for NCSN++. By default 1.
-    encoder_type : str, optional
+    - encoder_type : str, optional
         Encoder architecture: 'standard' for DDPM++, 'residual' for NCSN++, 'skip' for skip connections.
         By default 'standard'.
-    decoder_type : str, optional
+    - decoder_type : str, optional
         Decoder architecture: 'standard' or 'skip' for skip connections. By default 'standard'.
-    resample_filter : List[int], optional
+    - resample_filter : List[int], optional
         Resampling filter coefficients: [1,1] for DDPM++, [1,3,3,1] for NCSN++. By default [1,1].
-    checkpoint_level : int, optional
+    - checkpoint_level : int, optional
         Number of layers that should use gradient checkpointing (0 disables checkpointing).
         Higher values trade memory for computation. By default 0.
-    additive_pos_embed : bool, optional
+    - additive_pos_embed : bool, optional
         If True, adds a learned positional embedding after the first convolution layer.
         Used in StormCast model. By default False.
-    use_apex_gn : bool, optional
+    - use_apex_gn : bool, optional
         A boolean flag indicating whether we want to use Apex GroupNorm for NHWC layout.
         Need to set this as False on cpu. Defaults to False.
-    act : str, optional
+    - act : str, optional
         The activation function to use when fusing activation with GroupNorm. Defaults to None.
-    profile_mode:
+    - profile_mode:
         A boolean flag indicating whether to enable all nvtx annotations during profiling.
-    amp_mode : bool, optional
+    - amp_mode : bool, optional
         A boolean flag indicating whether mixed-precision (AMP) training is enabled. Defaults to False.
+
+    Forward
+    -------
+    - x : torch.Tensor
+        The input tensor of shape (batch_size, in_channels, height, width).
+    - noise_labels : torch.Tensor
+        The noise labels of shape (batch_size,).
+    - class_labels : torch.Tensor, optional
+        The class labels of shape (batch_size,).
+    - augment_labels : torch.Tensor, optional
+        The augmentation labels of shape (batch_size,).
+
+    .. important::
+        • The terms 'labels' and 'classes' originate from the original paper and EDM repository,
+          where this architecture was used for class-conditional image generation. While these terms
+          suggest class-based conditioning, the architecture can actually condition on any scalar value.
+        • The term 'positional embedding' also comes from the original paper and EDM repository. Here,
+          'positional' refers to the diffusion time-step, similar to how position is used in transformer
+          architectures. Despite the name, these embeddings encode temporal information about the
+          diffusion process rather than spatial position information.
 
     Reference
     ----------
@@ -486,6 +521,11 @@ class SongUNet(Module):
                         else:
                             x = block(x, emb)
             return aux
+
+
+# ------------------------------------------------------------------------------
+# Specialized architectures
+# ------------------------------------------------------------------------------
 
 
 class SongUNetPosEmbd(SongUNet):
