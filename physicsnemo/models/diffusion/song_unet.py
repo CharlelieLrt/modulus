@@ -16,7 +16,7 @@
 
 import contextlib
 from dataclasses import dataclass
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Literal, Optional, Union
 
 import numpy as np
 import nvtx
@@ -60,8 +60,8 @@ class MetaData(ModelMetaData):
 
 class SongUNet(Module):
     """
-    This U-Net architecture is a diffusion backbone for 2D image generation.
-    It is a reimplementation of the DDPM++ and NCSN++ architectures, U-Net variants
+    The architecture is a diffusion backbone for 2D image generation.
+    It is a reimplementation of the DDPM++ and NCSN++ architectures, which are U-Net variants
     with optional self-attention, embeddings, and encoder-decoder components.
 
     This model supports conditional and unconditional setups, as well as several
@@ -69,20 +69,33 @@ class SongUNet(Module):
     type, embedding type, etc., making it flexible and adaptable to different tasks
     and configurations.
 
-    At each level in the U-Net encoder:
+    This architecture supports conditioning on the noise level (called *noise labels*),
+    as well as on additional vector-valued labels (called *class labels*) and (optional)
+    vector-valued augmentation labels. The conditioning mechanism relies on addition
+    of the conditioning embeddings in the U-Net blocks of the encoder. To condition
+    on images, the simplest mechanism is to concatenate the image to the input
+    before passing it to the SongUNet.
+
+    The model first applies a mapping operation to generate embeddings for all
+    the conditioning inputs (the noise level, the class labels, and the
+    optional augmentation labels).
+
+    Then, at each level in the U-Net encoder, a sequence of blocks is applied:
     • A first block downsamples the feature map resolution by a factor of 2
-      (odd resolutions are floored).
-    • A number of residual blocks `num_blocks` are applied, each with a different
-      number of channels.
-    • If specified, a self-attention block is applied at the end of the level.
+      (odd resolutions are floored). This block does not change the number of
+      channels.
+    • A sequence of `num_blocks` U-Net blocks are applied, each with a different
+      number of channels. These blocks do not change the feature map
+      resolution, but they multiply the number of channels by a factor
+      specified in `channel_mult`.
+      If required, the U-Net blocks also apply self-attention at the specified
+      resolutions.
+    • At the end of the level, the feature map is cached to be used in a skip
+      connection in the decoder.
 
     The decoder is a mirror of the encoder, with the same number of levels and
     the same number of blocks per level. It multiplies the feature map resolution
     by a factor of 2 at each level.
-
-    This architecture supports conditioning on images based on channel-wise
-    concatenation at the first convolution layer. It is also conditioned on the
-    diffusion noise level through adaptive scaling in the normalization layers.
 
     Parameters
     -----------
@@ -90,72 +103,113 @@ class SongUNet(Module):
         The resolution of the input/output image. Can be a single int for square images
         or a list [height, width] for rectangular images.
     - in_channels : int
-        Number of channels in the input image.
+        Number of channels in the input image. May include channels from both
+        the latent state `x` and additional channels when conditioning on images.
+        For an unconditional model, this should be equal to `out_channels`.
     - out_channels : int
-        Number of channels in the output image.
+        Number of channels in the output image. Should be equal to the number
+        of channels in the latent state `x`.
     - label_dim : int, optional
-        Number of class labels; 0 indicates an unconditional model. By default 0.
+        Dimension of the vector-valued ``class_labels` conditioning; 0
+        indicates no conditioning on class labels. By default 0.
     - augment_dim : int, optional
-        Dimensionality of augmentation labels; 0 means no augmentation. By default 0.
+        Dimension of the vector-valued `augment_labels` conditioning; 0 means
+        no conditioning on augmentation labels. By default 0.
     - model_channels : int, optional
-        Base multiplier for the number of channels across the network. By default 128.
+        Base multiplier for the number of channels accross the entire network.
+        By default 128.
     - channel_mult : List[int], optional
-        Per-resolution multipliers for the number of channels. By default [1,2,2,2].
+        Multipliers for the number of channels at every level in
+        the encoder and decoder. The length of `channel_mult` determines the
+        number of levels in the U-Net. At level `i`, the number of channel in
+        the feature map is `channel_mult[i] * model_channels`. By default
+        [1,2,2,2].
     - channel_mult_emb : int, optional
-        Multiplier for the dimensionality of the embedding vector. By default 4.
+        Multiplier for the number of channels in the embedding vector. The
+        embedding vector has `model_channels * channel_mult_emb` channels.
+        By default 4.
     - num_blocks : int, optional
-        Number of residual blocks per resolution. By default 4.
+        Number of U-Net blocks at each level. By default 4.
     - attn_resolutions : List[int], optional
-        Resolutions at which self-attention layers are applied. By default [16].
+        Resolutions of the levels at which self-attention layers are applied.
+        Note that the feature map resolution must match exactly the value
+        provided in `attn_resolutions` for the self-attention layers to be
+        applied. By default [16].
     - dropout : float, optional
-        Dropout probability applied to intermediate activations. By default 0.10.
+        Dropout probability applied to intermediate activations within the
+        U-Net blocks. By default 0.10.
     - label_dropout : float, optional
-        Dropout probability of class labels for classifier-free guidance. By default 0.0.
-    - embedding_type : str, optional
-        Timestep embedding type: 'positional' for DDPM++, 'fourier' for NCSN++, 'zero' for none.
-        By default 'positional'.
+        Dropout probability applied to the `class_labels`. Typically used for
+        classifier-free guidance. By default 0.0.
+    - embedding_type : Literal["fourier", "positional", "zero"], optional
+        Diffusion timestep embedding type: 'positional' for DDPM++, 'fourier'
+        for NCSN++, 'zero' for none. By default 'positional'.
     - channel_mult_noise : int, optional
-        Timestep embedding size: 1 for DDPM++, 2 for NCSN++. By default 1.
-    - encoder_type : str, optional
+        Multiplier for the number of channels in the noise level embedding. The
+        noise level embedding vector has `model_channels * channel_mult_noise` channels.
+        By default 1.
+    - encoder_type : Literal["standard", "skip", "residual"], optional
         Encoder architecture: 'standard' for DDPM++, 'residual' for NCSN++, 'skip' for skip connections.
         By default 'standard'.
-    - decoder_type : str, optional
+    - decoder_type : Literal["standard", "skip"], optional
         Decoder architecture: 'standard' or 'skip' for skip connections. By default 'standard'.
     - resample_filter : List[int], optional
-        Resampling filter coefficients: [1,1] for DDPM++, [1,3,3,1] for NCSN++. By default [1,1].
+        Resampling filter coefficients applied in the U-Net blocks
+        convolutions: [1,1] for DDPM++, [1,3,3,1] for NCSN++. By default [1,1].
     - checkpoint_level : int, optional
-        Number of layers that should use gradient checkpointing (0 disables checkpointing).
-        Higher values trade memory for computation. By default 0.
+        Number of levels that should use gradient checkpointing (0 disables
+        checkpointing). Higher values trade memory for computation. By default 0.
     - additive_pos_embed : bool, optional
         If True, adds a learned positional embedding after the first convolution layer.
         Used in StormCast model. By default False.
     - use_apex_gn : bool, optional
-        A boolean flag indicating whether we want to use Apex GroupNorm for NHWC layout.
+        A flag indicating whether we want to use Apex GroupNorm for NHWC layout.
         Need to set this as False on cpu. Defaults to False.
     - act : str, optional
-        The activation function to use when fusing activation with GroupNorm. Defaults to None.
-    - profile_mode:
-        A boolean flag indicating whether to enable all nvtx annotations during profiling.
+        The activation function to use when fusing activation with GroupNorm.
+        Required when `use_apex_gn` is True. Defaults to None.
+    - profile_mode : bool, optional
+        A flag indicating whether to enable all nvtx annotations during
+        profiling. By default False.
     - amp_mode : bool, optional
-        A boolean flag indicating whether mixed-precision (AMP) training is enabled. Defaults to False.
+        A flag indicating whether mixed-precision (AMP) training is enabled.
+        Defaults to False.
 
     Forward
     -------
-    - x : torch.Tensor
-        The input tensor of shape (batch_size, in_channels, height, width).
-    - noise_labels : torch.Tensor
-        The noise labels of shape (batch_size,).
-    - class_labels : torch.Tensor, optional
-        The class labels of shape (batch_size,).
-    - augment_labels : torch.Tensor, optional
-        The augmentation labels of shape (batch_size,).
+    Should be called with `output = model(x, noise_labels, class_labels,
+    augment_labels=augment_labels)`.
+
+    Input:
+        - x : torch.Tensor
+            The input tensor of shape `(batch_size, in_channels, height, width)`,
+            where `height` and `width` should match the `img_resolution`
+            parameter. In general `x` is the channel-wise concatenation of the
+            latent state and additional images used for conditioning.
+        - noise_labels : torch.Tensor
+            The noise labels of shape `(batch_size,)`. Used for conditioning on
+            the noise level.
+        - class_labels : torch.Tensor | None
+            The class labels of shape `(batch_size, label_dim)`. Used for
+            conditioning on any vector-valued quantity. Can pass `None` when
+            `label_dim` is 0.
+        - augment_labels : torch.Tensor, optional
+            The augmentation labels of shape `(batch_size, augment_dim)`. Used
+            for conditioning on any additional vector-valued quantity. Can pass
+            `None` when `augment_dim` is 0.
+
+    Return:
+        - output : torch.Tensor
+            The denoised latentstate of shape `(batch_size, out_channels, height, width)`.
 
     .. important::
-        • The terms 'labels' and 'classes' originate from the original paper and EDM repository,
+        • The terms *noise levels* (or *noise labels*) are used to refer to the diffusion time-step, as these are conceptually equivalent.
+        • The terms *labels* and *classes* originate from the original paper and EDM repository,
           where this architecture was used for class-conditional image generation. While these terms
-          suggest class-based conditioning, the architecture can actually condition on any scalar value.
-        • The term 'positional embedding' also comes from the original paper and EDM repository. Here,
-          'positional' refers to the diffusion time-step, similar to how position is used in transformer
+          suggest class-based conditioning, the architecture can actually be conditioned on any vector-valued
+          conditioning.
+        • The term *positional embedding* also comes from the original paper and EDM repository. Here,
+          *positional* refers to the diffusion time-step, similar to how position is used in transformer
           architectures. Despite the name, these embeddings encode temporal information about the
           diffusion process rather than spatial position information.
 
@@ -164,11 +218,6 @@ class SongUNet(Module):
     Song, Y., Sohl-Dickstein, J., Kingma, D.P., Kumar, A., Ermon, S. and
     Poole, B., 2020. Score-based generative modeling through stochastic differential
     equations. arXiv preprint arXiv:2011.13456.
-
-    Note
-    -----
-    Equivalent to the original implementation by Song et al., available at
-    https://github.com/yang-song/score_sde_pytorch
 
     Example
     --------
@@ -195,10 +244,10 @@ class SongUNet(Module):
         attn_resolutions: List[int] = [16],
         dropout: float = 0.10,
         label_dropout: float = 0.0,
-        embedding_type: str = "positional",
+        embedding_type: Literal["fourier", "positional", "zero"] = "positional",
         channel_mult_noise: int = 1,
-        encoder_type: str = "standard",
-        decoder_type: str = "standard",
+        encoder_type: Literal["standard", "skip", "residual"] = "standard",
+        decoder_type: Literal["standard", "skip"] = "standard",
         resample_filter: List[int] = [1, 1],
         checkpoint_level: int = 0,
         additive_pos_embed: bool = False,
@@ -529,103 +578,130 @@ class SongUNet(Module):
 
 
 class SongUNetPosEmbd(SongUNet):
-    """Extends SongUNet with positional embeddings.
+    """This specialized architecture extends
+    :class:`~physicsnemo.models.diffusion.song_unet.SongUNet` with positional
+    embeddings that represent global spatial coordinates of the pixels.
 
-    This model supports conditional and unconditional setups, as well as several
-    options for various internal architectural choices such as encoder and decoder
-    type, embedding type, etc., making it flexible and adaptable to different tasks
-    and configurations.
-
-    This model adds positional embeddings to the base SongUNet architecture. The embeddings
-    can be selected using either a selector function or global indices, with the selector
-    approach being more computationally efficient.
+    This model supports the same type of conditioning as the base SongUNet, and
+    is in addition conditioned on the positional embeddings.
 
     The model provides two methods for selecting positional embeddings:
-
-    1. Using a selector function (preferred method). See
-       :meth:`positional_embedding_selector` for details.
+    1. Using a selector. See :meth:`positional_embedding_selector` for details.
     2. Using global indices. See :meth:`positional_embedding_indexing` for
        details.
 
+    Most parameters are the same as in the parent class
+    :class:`~physicsnemo.models.diffusion.song_unet.SongUNet`. Only the ones
+    that differ are listed below.
+
     Parameters
     ----------
-    img_resolution : Union[List[int], int]
+    - img_resolution : Union[List[int], int]
         The resolution of the input/output image. Can be a single int for square images
         or a list [height, width] for rectangular images.
-    in_channels : int
+    - in_channels : int
         Number of channels in the input image.
-    out_channels : int
+    - out_channels : int
         Number of channels in the output image.
-    label_dim : int, optional
+    - label_dim : int, optional
         Number of class labels; 0 indicates an unconditional model. By default 0.
-    augment_dim : int, optional
+    - augment_dim : int, optional
         Dimensionality of augmentation labels; 0 means no augmentation. By default 0.
-    model_channels : int, optional
+    - model_channels : int, optional
         Base multiplier for the number of channels across the network. By default 128.
-    channel_mult : List[int], optional
+    - channel_mult : List[int], optional
         Per-resolution multipliers for the number of channels. By default [1,2,2,2,2].
-    channel_mult_emb : int, optional
+    - channel_mult_emb : int, optional
         Multiplier for the dimensionality of the embedding vector. By default 4.
-    num_blocks : int, optional
+    - num_blocks : int, optional
         Number of residual blocks per resolution. By default 4.
-    attn_resolutions : List[int], optional
+    - attn_resolutions : List[int], optional
         Resolutions at which self-attention layers are applied. By default [28].
-    dropout : float, optional
+    - dropout : float, optional
         Dropout probability applied to intermediate activations. By default 0.13.
-    label_dropout : float, optional
+    - label_dropout : float, optional
         Dropout probability of class labels for classifier-free guidance. By default 0.0.
-    embedding_type : str, optional
+    - embedding_type : str, optional
         Timestep embedding type: 'positional' for DDPM++, 'fourier' for NCSN++.
         By default 'positional'.
-    channel_mult_noise : int, optional
+    - channel_mult_noise : int, optional
         Timestep embedding size: 1 for DDPM++, 2 for NCSN++. By default 1.
-    encoder_type : str, optional
+    - encoder_type : str, optional
         Encoder architecture: 'standard' for DDPM++, 'residual' for NCSN++, 'skip' for skip connections.
         By default 'standard'.
-    decoder_type : str, optional
+    - decoder_type : str, optional
         Decoder architecture: 'standard' or 'skip' for skip connections. By default 'standard'.
-    resample_filter : List[int], optional
+    - resample_filter : List[int], optional
         Resampling filter coefficients: [1,1] for DDPM++, [1,3,3,1] for NCSN++. By default [1,1].
-    gridtype : str, optional
+    - gridtype : str, optional
         Type of positional grid to use: 'sinusoidal', 'learnable', 'linear', or 'test'.
         Controls how positional information is encoded. By default 'sinusoidal'.
-    N_grid_channels : int, optional
+    - N_grid_channels : int, optional
         Number of channels in the positional embedding grid. For 'sinusoidal' must be 4 or
         multiple of 4. For 'linear' must be 2. By default 4.
-    checkpoint_level : int, optional
+    - checkpoint_level : int, optional
         Number of layers that should use gradient checkpointing (0 disables checkpointing).
         Higher values trade memory for computation. By default 0.
-    additive_pos_embed : bool, optional
+    - additive_pos_embed : bool, optional
         If True, adds a learned positional embedding after the first convolution layer.
         Used in StormCast model. By default False.
-    use_apex_gn : bool, optional
+    - use_apex_gn : bool, optional
         A boolean flag indicating whether we want to use Apex GroupNorm for NHWC layout.
         Need to set this as False on cpu. Defaults to False.
-    act : str, optional
+    - act : str, optional
         The activation function to use when fusing activation with GroupNorm. Defaults to None.
-    profile_mode:
+    - profile_mode:
         A boolean flag indicating whether to enable all nvtx annotations during profiling.
-    amp_mode : bool, optional
+    - amp_mode : bool, optional
         A boolean flag indicating whether mixed-precision (AMP) training is enabled. Defaults to False.
-    lead_time_mode : bool, optional
+    - lead_time_mode : bool, optional
         A boolean flag indicating whether we are running SongUNet with lead time embedding. Defaults to False.
-    lead_time_channels : int, optional
+    - lead_time_channels : int, optional
         Number of channels in the lead time embedding. These are learned embeddings that
         encode temporal forecast information. By default None.
-    lead_time_steps : int, optional
+    - lead_time_steps : int, optional
         Number of discrete lead time steps to support. Each step gets its own learned
         embedding vector. By default 9.
-    prob_channels : List[int], optional
+    - prob_channels : List[int], optional
         Indices of probability output channels that should use softmax activation.
         Used for classification outputs. By default empty list.
 
+    Forward
+    -------
+    The model should be called with `output = model(x, noise_labels,
+    class_labels, global_index=global_index,
+    embedding_selector=embedding_selector)`
 
-    Note
-    -----
-    Equivalent to the original implementation by Song et al., available at
-    https://github.com/yang-song/score_sde_pytorch
+    Inputs:
+        - x : torch.Tensor
+            The input tensor of shape `(batch_size, in_channels, height, width)`,
+            where `height` and `width` should match the `img_resolution` parameter.
+            In general `x` is the channel-wise concatenation of the latent state and
+            additional images used for conditioning.
+        - noise_labels : torch.Tensor
+            The noise labels of shape `(batch_size,)`. Used for conditioning on
+            the noise level.
+        - class_labels : torch.Tensor
+            The class labels of shape `(batch_size, label_dim)`. Used for conditioning
+            on the class labels.
+        - global_index : torch.Tensor, optional
+            The global index of the positional embeddings to use. If not provided,
+            all positional embeddings are used.
+        - embedding_selector : Callable, optional
+            A function that selects the positional embeddings to use. If not provided,
+            all positional embeddings are used.
 
-    Example
+    Return:
+        - output : torch.Tensor
+            The output tensor of shape `(batch_size, out_channels, height, width)`.
+
+    .. important::
+        Unlike positional embeddings in the parent class :class:`~physicsnemo.models.diffusion.song_unet.SongUNet`
+        that encode the diffusion time-step, the positional embeddings in this
+        specialized architecture represent global spatial coordinates of the
+        pixels.
+
+    Examples
     --------
     >>> import torch
     >>> from physicsnemo.models.diffusion.song_unet import SongUNetPosEmbd

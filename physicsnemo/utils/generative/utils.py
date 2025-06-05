@@ -548,11 +548,6 @@ def profiled_function(fn):  # pragma: no cover
     return decorator
 
 
-# ----------------------------------------------------------------------------
-# Sampler for torch.utils.data.DataLoader that loops over the dataset
-# indefinitely, shuffling items as it goes.
-
-
 class InfiniteSampler(torch.utils.data.Sampler[int]):  # pragma: no cover
     """Sampler for torch.utils.data.DataLoader that loops over the dataset indefinitely.
 

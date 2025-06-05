@@ -470,6 +470,83 @@ Recurrent Neural Networks
     :show-inheritance:
 
 
+Diffusion Models
+----------------
+
+PhysicsNeMo diffusion library provides 3 categories of models, that serve
+different purposes. All models are based on the :class:`physicsnemo.models.Module` class.
+
+- Model backbones: those are highly configurable architectures that can be used
+as a building block for more complex models.
+- Specialized architectures: those are models that usually inherit from the model backbones,
+with some specific additional functionalities.
+- Application-specific interfaces: these Modules are not truly architectures,
+but rather wrappers around the model backbones or specialized architectures.
+Their intent is to provide a more user-friendly interface for specific applications.
+
+Architecture Backbones
+^^^^^^^^^^^^^^^^^^^^^^
+
+Diffusion model backbones are highly configurable architectures that can be used
+as a building block for more complex models. Backbones support
+both conditional and unconditional modeling. Currently, there are two provided
+backbones: the SongUNet, as implemented in the
+:class:`physicsnemo.models.diffusion.song_unet.SongUNet` class and the DhariwalUNet,
+as implemented in the :class:`physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet`
+class. These models were introduced in the papers `Score-based generative modeling through stochastic
+differential equations, Song et al. <https://arxiv.org/abs/2011.13456>`_ and
+`Diffusion models beat gans on image synthesis, Dhariwal et al.
+<https://proceedings.neurips.cc/paper/2021/hash/49ad23d1ec9fa4bd8d77d02681df5cfa-Abstract.html>`_.
+The PhysicsNeMo implementation of these models follows closely that used in the paper
+`Elucidating the Design Space of Diffusion-Based Generative Models, Karras et al.
+<https://arxiv.org/abs/2206.00364>`_. The original implementation of these
+models can be found in the `EDM repository <https://github.com/NVlabs/edm>`_.
+
+Model backbones can be used as is, such as in the StormCast example in
+:file:`examples/weather/stormcast/README.md`, but they can also be used as a base class for
+more complex models. They are designed to support both conditional and unconditional
+modeling.
+
+
+.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNet
+    :show-inheritance:
+
+.. autoclass:: physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet
+    :show-inheritance:
+
+Specialized Architectures
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Note that even though backbones can be used as is, some of the applications in
+PhysicsNeMo examples use specialized architectures. These specialized architectures
+typically inherit from the backbones and implement additional functionalities for specific
+applications. For example the CorrDiff example in :file:`examples/weather/corrdiff/README.md`
+uses the specialized architectures :class:`physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd`
+and :class:`physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd` to implement
+the diffusion model.
+
+.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd
+    :show-inheritance:
+
+.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd
+    :show-inheritance:
+
+Application-specific Interfaces
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Application-specific interfaces are not true architectures, but rather wrappers
+around the model backbones or specialized architectures that provide a more
+user-friendly interface for specific applications. Note that not all these
+classes are true diffusion models, but can also be used in conjunction with
+diffusion models. For instance, the CorrDiff example in
+:file:`examples/weather/corrdiff/README.md` uses the :class:`physicsnemo.models.diffusion.unet.UNet`
+class to implement the regression model.
+
+.. autoclass:: physicsnemo.models.diffusion.unet
+    :show-inheritance:
+
+
+
 Weather / Climate Models
 -------------------------
 
@@ -495,74 +572,4 @@ Weather / Climate Models
 
 .. automodule:: physicsnemo.models.swinvrnn.swinvrnn
     :members:
-    :show-inheritance:
-
-
-Diffusion Models
-----------------
-
-PhysicsNeMo diffusion library provides 3 categories of models, that serve
-different purposes. All models are based on the :class:`physicsnemo.models.Module` class.
-
-- Model backbones: those are highly configurable architectures that can be used
-as a building block for more complex models.
-- Specialized architectures: those are models that usually inherit from the model backbones,
-with some specific additional functionalities.
-- Application-specific interfaces: these Modules are not truly architectures,
-but rather wrappers around the model backbones or specialized architectures.
-Their intent is to provide a more user-friendly interface for specific applications.
-
-Model Backbones
-^^^^^^^^^^^^^^^
-
-Diffusion model backbones are highly configurable architectures that can be used
-as a building block for more complex models. Backbones are expected to support
-both conditional and unconditional modeling. Currently, the only provided
-backbone is the SongUNet, as implemented in the
-:class:`physicsnemo.models.diffusion.song_unet.SongUNet` class. This model was
-introduced in the paper `Score-based generative modeling through stochastic
-differential equations, Song et al. <https://arxiv.org/abs/2011.13456>`_. Its
-implementation follows closely that used in the paper `Elucidating the Design
-Space of Diffusion-Based Generative Models, Dhariwal et al.
-<https://arxiv.org/abs/2206.00364>`_ and available in the `EDM repository
-<https://github.com/NVlabs/edm>`_. Model backbones can be used as is, such as
-in the StormCast example in :file:`examples/weather/stormcast`, but they can
-also be used as a base class for more complex models.
-
-
-.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNet
-    :show-inheritance:
-
-Specialized Architectures
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Note that even though backbones can be used as is, some of the applications in
-PhysicsNeMo examples use specialized architectures. These specialized architectures
-typically inherit from the backbones and implement additional functionalities for specific
-applications. For example the CorrDiff example in :file:`examples/weather/corrdiff`
-uses the specialized architectures :class:`physicsnemo.models.diffusion.song_unet.SongUNetPosEmb`
-and :class:`physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmb` to implement
-the diffusion model.
-
-.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosEmb
-    :show-inheritance:
-
-.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmb
-    :show-inheritance:
-
-.. autoclass:: physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet
-    :show-inheritance:
-
-Application-specific Interfaces
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Application-specific interfaces are not true architectures, but rather wrappers
-around the model backbones or specialized architectures that provide a more
-user-friendly interface for specific applications. Note that not all these
-classes are true diffusion models, but can also be used in conjunction with
-diffusion models. For instance, the CorrDiff example in
-:file:`examples/weather/corrdiff` uses the :class:`physicsnemo.models.diffusion.unet.UNet`
-class to implement the regression model.
-
-.. autoclass:: physicsnemo.models.diffusion.unet
     :show-inheritance:
