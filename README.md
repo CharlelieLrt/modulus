@@ -37,21 +37,33 @@ provides you with an optimized stack that will enable you to train your models a
 
 <!-- toc -->
 
-- [More About PhysicsNeMo](#more-about-physicsnemo)
-  - [Scalable GPU-optimized training Library](#scalable-gpu-optimized-training-library)
-  - [A suite of Physics-Informed ML Models](#a-suite-of-physics-informed-ml-models)
-  - [Seamless PyTorch Integration](#seamless-pytorch-integration)
-  - [Easy Customization and Extension](#easy-customization-and-extension)
+- [NVIDIA PhysicsNeMo](#nvidia-physicsnemo)
+  - [What is PhysicsNeMo?](#what-is-physicsnemo)
+  - [More About PhysicsNeMo](#more-about-physicsnemo)
   - [AI4Science Library](#ai4science-library)
     - [Domain Specific Packages](#domain-specific-packages)
-- [Who is contributing to PhysicsNeMo](#who-is-using-and-contributing-to-physicsnemo)
-- [Why use PhysicsNeMo](#why-are-they-using-physicsnemo)
-- [Getting Started](#getting-started)
-- [Resources](#resources)
-- [Installation](#installation)
-- [Contributing](#contributing-to-physicsnemo)
-- [Communication](#communication)
-- [License](#license)
+    - [Scalable GPU-optimized training Library](#scalable-gpu-optimized-training-library)
+    - [A suite of Physics Informed ML Models](#a-suite-of-physics-informed-ml-models)
+    - [Seamless PyTorch Integration](#seamless-pytorch-integration)
+    - [Easy Customization and Extension](#easy-customization-and-extension)
+    - [Hello world](#hello-world)
+  - [Who is using and contributing to PhysicsNeMo](#who-is-using-and-contributing-to-physicsnemo)
+  - [Why are they using PhysicsNeMo](#why-are-they-using-physicsnemo)
+  - [Getting started](#getting-started)
+  - [Resources](#resources)
+  - [Installation](#installation)
+    - [PyPi](#pypi)
+      - [Optional dependencies](#optional-dependencies)
+    - [NVCR Container](#nvcr-container)
+  - [From Source](#from-source)
+    - [Package](#package)
+    - [Source Container](#source-container)
+  - [PhysicsNeMo Migration Guide](#physicsnemo-migration-guide)
+  - [Contributing to PhysicsNeMo](#contributing-to-physicsnemo)
+  - [Cite PhysicsNeMo](#cite-physicsnemo)
+  - [Communication](#communication)
+  - [Feedback](#feedback)
+  - [License](#license)
   
 <!-- tocstop -->
 
@@ -128,8 +140,8 @@ Neural Operators:
 - [MeshGraphNet for Lagrangian](https://docs.nvidia.com/deeplearning/physicsnemo/physicsnemo-core/examples/cfd/lagrangian_mgn/readme.html)
 - [XAeroNet](https://docs.nvidia.com/deeplearning/physicsnemo/physicsnemo-core/examples/cfd/external_aerodynamics/xaeronet/readme.html)
 - [Diffusion Models](physicsnemo/models/diffusion)
-- [Correction Diffusion Model](https://docs.nvidia.com/deeplearning/physicsnemo/physicsnemo-core/examples/generative/corrdiff/readme.html)
-- [DDPM](https://docs.nvidia.com/deeplearning/physicsnemo/physicsnemo-core/examples/generative/diffusion/readme.html)
+- [Correction Diffusion Model](https://docs.nvidia.com/deeplearning/physicsnemo/physicsnemo-core/examples/weather/corrdiff/readme.html)
+- [DDPM](https://docs.nvidia.com/deeplearning/physicsnemo/physicsnemo-core/examples/weather/diffusion/readme.html)
 - [PhysicsNeMo GraphCast](https://docs.nvidia.com/deeplearning/physicsnemo/physicsnemo-core/examples/weather/graphcast/readme.html)
 - [Transsolver](https://github.com/NVIDIA/physicsnemo/tree/main/examples/cfd/darcy_transolver)
 - [RNNs](https://github.com/NVIDIA/physicsnemo/tree/main/physicsnemo/models)
@@ -274,7 +286,7 @@ developing generalizable model architectures and algorithms.
 Some latest examples of community contributors are [HP Labs 3D Printing team](https://developer.nvidia.com/blog/spotlight-hp-3d-printing-and-nvidia-physicsnemo-collaborate-on-open-source-manufacturing-digital-twin/),
 [Stanford Cardiovascular research team](https://developer.nvidia.com/blog/enabling-greater-patient-specific-cardiovascular-care-with-ai-surrogates/),
 [UIUC team](https://github.com/NVIDIA/physicsnemo/tree/main/examples/cfd/mhd_pino),
-[CMU team](https://github.com/NVIDIA/physicsnemo/tree/main/examples/generative/diffusion)
+[CMU team](https://github.com/NVIDIA/physicsnemo/tree/main/examples/cfd/flow_reconstruction_diffusion)
 etc.
 
 Latest examples of research teams using PhysicsNeMo are

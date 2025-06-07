@@ -37,18 +37,18 @@ Filesystem utils
     :members:
     :show-inheritance:
 
-Generative utils
+Diffusion utils
 ----------------
 
-.. automodule:: physicsnemo.utils.generative.deterministic_sampler
+.. automodule:: physicsnemo.utils.diffusion.deterministic_sampler
     :members:
     :show-inheritance:
 
-.. automodule:: physicsnemo.utils.generative.stochastic_sampler
+.. automodule:: physicsnemo.utils.diffusion.stochastic_sampler
     :members:
     :show-inheritance:
 
-.. automodule:: physicsnemo.utils.generative.utils
+.. automodule:: physicsnemo.utils.diffusion.utils
     :members:
     :show-inheritance:
 

@@ -503,7 +503,7 @@ The PhysicsNeMo implementation of these models follows closely that used in the 
 models can be found in the `EDM repository <https://github.com/NVlabs/edm>`_.
 
 Model backbones can be used as is, such as in the StormCast example in
-:file:`examples/weather/stormcast/README.md`, but they can also be used as a base class for
+`StormCast example <../examples/weather/stormcast/README.rst>`_, but they can also be used as a base class for
 more complex models. They are designed to support both conditional and unconditional
 modeling.
 
@@ -520,7 +520,7 @@ Specialized Architectures
 Note that even though backbones can be used as is, some of the examples in
 PhysicsNeMo examples use specialized architectures. These specialized architectures
 typically inherit from the backbones and implement additional functionalities for specific
-applications. For example the CorrDiff example in :file:`examples/weather/corrdiff/README.md`
+applications. For example the `CorrDiff example <../examples/weather/corrdiff/README.rst>`_
 uses the specialized architectures :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd`
 and :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd` to implement
 the diffusion model.
@@ -541,7 +541,7 @@ around the model backbones or specialized architectures that provide a more
 user-friendly interface for specific applications. Note that not all these
 classes are true diffusion models, but can also be used in conjunction with
 diffusion models. For instance, the CorrDiff example in
-:file:`examples/weather/corrdiff/README.md` uses the :class:`~physicsnemo.models.diffusion.unet.UNet`
+`CorrDiff example <../examples/weather/corrdiff/README.rst>`_ uses the :class:`~physicsnemo.models.diffusion.unet.UNet`
 class to implement a regression model.
 
 .. autoclass:: physicsnemo.models.diffusion.unet
