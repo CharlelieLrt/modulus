@@ -1232,8 +1232,8 @@ class SongUNetPosLtEmbd(SongUNetPosEmbd):
             The output tensor of shape `(batch_size, out_channels, height, width)`.
 
     .. note::
-        The lead-time embeddings differ from the diffusion time embeddings used in :class:`~physicsnemo.models.diffusion.song_unet.SongUNet` class, as they do not encode diffusion time-step but *physical time*.
-
+        • The lead-time embeddings differ from the diffusion time embeddings used in :class:`~physicsnemo.models.diffusion.song_unet.SongUNet` class, as they do not encode diffusion time-step but *physical time*.
+        • In training mode, the model outputs logits for the probability channels defined in `prob_channels`. In eval mode, the model applies a softmax to outputs the probabilities.
 
     Example
     --------
