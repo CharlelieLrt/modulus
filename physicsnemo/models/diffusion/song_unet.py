@@ -99,16 +99,21 @@ class SongUNet(Module):
 
     Parameters
     -----------
-    - img_resolution : Union[List[int], int]
-        The resolution of the input/output image. Can be a single int for square images
-        or a list [height, width] for rectangular images.
+    - img_resolution : Union[List[int, int], int]
+        The resolution of the input/output image. Can be a single int for
+        square images or a list [height, width] for rectangular images.
+        *Note: this parameter is only used as a convenience to build the
+        network. In practice, the model can still be used with images of
+        different resolutions. The only exception to this rule is when
+        `additive_pos_embed` is True, in which case the resolution of the latent
+        state `x` must match `img_resolution`.*
     - in_channels : int
         Number of channels in the input image. May include channels from both
-        the latent state `x` and additional channels when conditioning on images.
+        the latent state and additional channels when conditioning on images.
         For an unconditional model, this should be equal to `out_channels`.
     - out_channels : int
         Number of channels in the output image. Should be equal to the number
-        of channels in the latent state `x`.
+        of channels in the latent state.
     - label_dim : int, optional
         Dimension of the vector-valued ``class_labels` conditioning; 0
         indicates no conditioning on class labels. By default 0.
@@ -157,14 +162,22 @@ class SongUNet(Module):
         Resampling filter coefficients applied in the U-Net blocks
         convolutions: [1,1] for DDPM++, [1,3,3,1] for NCSN++. By default [1,1].
     - checkpoint_level : int, optional
-        Number of levels that should use gradient checkpointing (0 disables
-        checkpointing). Higher values trade memory for computation. By default 0.
+        Number of levels that should use gradient checkpointing. Only levels at
+        which the feature map resolution is large enough will be checkpointed
+        (0 disables checkpointing, higher values means more layers are checkpointed).
+        Higher values trade memory for computation. By default 0.
     - additive_pos_embed : bool, optional
-        If True, adds a learned positional embedding after the first convolution layer.
+        If True, adds a learnable positional embedding after the first convolution layer.
         Used in StormCast model. By default False.
+        * Note: those positional embeddings encode spatial position information
+        of the image pixels, unlike the `embedding_type` parameter which encodes
+        temporal information about the diffusion process. In that sense it is a
+        simpler version of the positional embedding used in
+        :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd`. *
     - use_apex_gn : bool, optional
         A flag indicating whether we want to use Apex GroupNorm for NHWC layout.
-        Need to set this as False on cpu. Defaults to False.
+        Apex needs to be installed for this to work. Need to set this as False on cpu.
+        Defaults to False.
     - act : str, optional
         The activation function to use when fusing activation with GroupNorm.
         Required when `use_apex_gn` is True. Defaults to None.
@@ -182,13 +195,16 @@ class SongUNet(Module):
 
     Input:
         - x : torch.Tensor
-            The input tensor of shape `(batch_size, in_channels, height, width)`,
-            where `height` and `width` should match the `img_resolution`
-            parameter. In general `x` is the channel-wise concatenation of the
-            latent state and additional images used for conditioning.
+            The input image of shape `(batch_size, in_channels, height,
+            width)`. In general `x` is the channel-wise concatenation of the
+            latent state and additional images used for conditioning. For an
+            unconditional model, `x` is simply the latent state.
+            *Note: `height` and `width` do not need to match the `img_resolution`
+            parameter, except when `additive_pos_embed` is True. In that case,
+            the resolution of `x` must match `img_resolution`.*
         - noise_labels : torch.Tensor
             The noise labels of shape `(batch_size,)`. Used for conditioning on
-            the noise level.
+            the diffusion noise level.
         - class_labels : torch.Tensor | None
             The class labels of shape `(batch_size, label_dim)`. Used for
             conditioning on any vector-valued quantity. Can pass `None` when
@@ -196,11 +212,11 @@ class SongUNet(Module):
         - augment_labels : torch.Tensor, optional
             The augmentation labels of shape `(batch_size, augment_dim)`. Used
             for conditioning on any additional vector-valued quantity. Can pass
-            `None` when `augment_dim` is 0.
+            `None` when `augment_dim` is 0. Default to `None`.
 
     Return:
         - output : torch.Tensor
-            The denoised latentstate of shape `(batch_size, out_channels, height, width)`.
+            The denoised latent state of shape `(batch_size, out_channels, height, width)`.
 
     .. important::
         • The terms *noise levels* (or *noise labels*) are used to refer to the diffusion time-step, as these are conceptually equivalent.
@@ -208,16 +224,17 @@ class SongUNet(Module):
           where this architecture was used for class-conditional image generation. While these terms
           suggest class-based conditioning, the architecture can actually be conditioned on any vector-valued
           conditioning.
-        • The term *positional embedding* also comes from the original paper and EDM repository. Here,
+        • The term *positional embedding* used in the `embedding_type` parameter
+          also comes from the original paper and EDM repository. Here,
           *positional* refers to the diffusion time-step, similar to how position is used in transformer
           architectures. Despite the name, these embeddings encode temporal information about the
           diffusion process rather than spatial position information.
 
     Reference
     ----------
-    Song, Y., Sohl-Dickstein, J., Kingma, D.P., Kumar, A., Ermon, S. and
+    `Song, Y., Sohl-Dickstein, J., Kingma, D.P., Kumar, A., Ermon, S. and
     Poole, B., 2020. Score-based generative modeling through stochastic differential
-    equations. arXiv preprint arXiv:2011.13456.
+    equations. arXiv preprint arXiv:2011.13456. <https://arxiv.org/abs/2011.13456>`_
 
     Example
     --------
@@ -578,17 +595,34 @@ class SongUNet(Module):
 
 
 class SongUNetPosEmbd(SongUNet):
-    """This specialized architecture extends
+    r"""This specialized architecture extends
     :class:`~physicsnemo.models.diffusion.song_unet.SongUNet` with positional
-    embeddings that represent global spatial coordinates of the pixels.
+    embeddings that encode global spatial coordinates of the pixels.
 
     This model supports the same type of conditioning as the base SongUNet, and
-    is in addition conditioned on the positional embeddings.
+    can be in addition conditioned on the positional embeddings. Conditioning on
+    the positional embeddings is performed with a channel-wise concatenation to
+    the input image before the first layer of the U-Net. Multiple types of
+    positional embeddings are supported. Positional embeddings are represented by
+    a 2D grid of shape `(N_grid_channels, height, width)`, where `height` and
+    `width` correspond to the `img_resolution` parameter.
+    The following types of positional embeddings are
+    supported:
+    • learnable: uses a 2D grid of learnable parameters.
+    • linear: uses a 2D rectilinear grid over the domain :math:`[-1, 1] \times [-1, 1]`.
+    • sinusoidal: uses sinusoidal functions of the spatial coordinates, with
+    possibly multiple frequency bands.
+    • test: uses a 2D grid of integer indices, only used for testing.
 
-    The model provides two methods for selecting positional embeddings:
-    1. Using a selector. See :meth:`positional_embedding_selector` for details.
+    When the input image spatial resolution is smaller than the global
+    positional embeddings, it is necessary to select a subset of the embedding
+    grid that correspond to the spatial locations of the input image pixels. The
+    model provides two methods for selecting the subset of positional embeddings:
+    1. Using a selector function. See :meth:`positional_embedding_selector` for details.
     2. Using global indices. See :meth:`positional_embedding_indexing` for
        details.
+    If none of these are provided, the entire grid of positional embeddings is
+    used and channel-wise concatenated to the input image.
 
     Most parameters are the same as in the parent class
     :class:`~physicsnemo.models.diffusion.song_unet.SongUNet`. Only the ones
@@ -596,109 +630,75 @@ class SongUNetPosEmbd(SongUNet):
 
     Parameters
     ----------
-    - img_resolution : Union[List[int], int]
-        The resolution of the input/output image. Can be a single int for square images
-        or a list [height, width] for rectangular images.
     - in_channels : int
-        Number of channels in the input image.
-    - out_channels : int
-        Number of channels in the output image.
-    - label_dim : int, optional
-        Number of class labels; 0 indicates an unconditional model. By default 0.
-    - augment_dim : int, optional
-        Dimensionality of augmentation labels; 0 means no augmentation. By default 0.
-    - model_channels : int, optional
-        Base multiplier for the number of channels across the network. By default 128.
-    - channel_mult : List[int], optional
-        Per-resolution multipliers for the number of channels. By default [1,2,2,2,2].
-    - channel_mult_emb : int, optional
-        Multiplier for the dimensionality of the embedding vector. By default 4.
-    - num_blocks : int, optional
-        Number of residual blocks per resolution. By default 4.
-    - attn_resolutions : List[int], optional
-        Resolutions at which self-attention layers are applied. By default [28].
-    - dropout : float, optional
-        Dropout probability applied to intermediate activations. By default 0.13.
-    - label_dropout : float, optional
-        Dropout probability of class labels for classifier-free guidance. By default 0.0.
-    - embedding_type : str, optional
-        Timestep embedding type: 'positional' for DDPM++, 'fourier' for NCSN++.
-        By default 'positional'.
-    - channel_mult_noise : int, optional
-        Timestep embedding size: 1 for DDPM++, 2 for NCSN++. By default 1.
-    - encoder_type : str, optional
-        Encoder architecture: 'standard' for DDPM++, 'residual' for NCSN++, 'skip' for skip connections.
-        By default 'standard'.
-    - decoder_type : str, optional
-        Decoder architecture: 'standard' or 'skip' for skip connections. By default 'standard'.
-    - resample_filter : List[int], optional
-        Resampling filter coefficients: [1,1] for DDPM++, [1,3,3,1] for NCSN++. By default [1,1].
-    - gridtype : str, optional
-        Type of positional grid to use: 'sinusoidal', 'learnable', 'linear', or 'test'.
-        Controls how positional information is encoded. By default 'sinusoidal'.
+        Number of channels in the image passed to the U-Net. **Important:** in comparison to
+        the base `SongUNet`, this parameter should also include the number of
+        channels in the positional embedding grid `N_grid_channels`.
+    - gridtype : Literal["sinusoidal", "learnable", "linear", "test"], optional
+        Type of positional embedding to use. Controls how spatial pixels
+        locations are encoded. By default 'sinusoidal'.
     - N_grid_channels : int, optional
         Number of channels in the positional embedding grid. For 'sinusoidal' must be 4 or
-        multiple of 4. For 'linear' must be 2. By default 4.
-    - checkpoint_level : int, optional
-        Number of layers that should use gradient checkpointing (0 disables checkpointing).
-        Higher values trade memory for computation. By default 0.
-    - additive_pos_embed : bool, optional
-        If True, adds a learned positional embedding after the first convolution layer.
-        Used in StormCast model. By default False.
-    - use_apex_gn : bool, optional
-        A boolean flag indicating whether we want to use Apex GroupNorm for NHWC layout.
-        Need to set this as False on cpu. Defaults to False.
-    - act : str, optional
-        The activation function to use when fusing activation with GroupNorm. Defaults to None.
-    - profile_mode:
-        A boolean flag indicating whether to enable all nvtx annotations during profiling.
-    - amp_mode : bool, optional
-        A boolean flag indicating whether mixed-precision (AMP) training is enabled. Defaults to False.
+        multiple of 4. For 'linear' and 'test' must be 2. For 'learnable' can be any
+        value. By default 4.
     - lead_time_mode : bool, optional
-        A boolean flag indicating whether we are running SongUNet with lead time embedding. Defaults to False.
+        Default to False. Provided for convenience. It is recommended to use the architecture
+        :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd`
+        for a lead-time aware model.
     - lead_time_channels : int, optional
-        Number of channels in the lead time embedding. These are learned embeddings that
-        encode temporal forecast information. By default None.
+        Default to None. Provided for convenience. Refer to `SongUNetPosLtEmbd`.
     - lead_time_steps : int, optional
-        Number of discrete lead time steps to support. Each step gets its own learned
-        embedding vector. By default 9.
+        Default to 9. Provided for convenience. Refer to `SongUNetPosLtEmbd`.
     - prob_channels : List[int], optional
-        Indices of probability output channels that should use softmax activation.
-        Used for classification outputs. By default empty list.
+        Default to []. Provided for convenience. Refer to `SongUNetPosLtEmbd`.
 
     Forward
     -------
     The model should be called with `output = model(x, noise_labels,
     class_labels, global_index=global_index,
-    embedding_selector=embedding_selector)`
+    embedding_selector=embedding_selector, augment_labels=augment_labels)`
 
     Inputs:
         - x : torch.Tensor
-            The input tensor of shape `(batch_size, in_channels, height, width)`,
-            where `height` and `width` should match the `img_resolution` parameter.
+            The input image of shape `(batch_size, in_channels - N_grid_channels, height, width)`,
+            where `height` and `width` are the spatial dimensions of the input image.
             In general `x` is the channel-wise concatenation of the latent state and
-            additional images used for conditioning.
+            additional images used for conditioning. For an unconditional model, `x`
+            is simply the latent state.
+            *Note: `height` and `width` do not need to match the `img_resolution`
+            parameter, except when `additive_pos_embed` is True, or when the
+            entire positional embedding grid is used. In that case, the
+            resolution of `x` must match `img_resolution`.*
         - noise_labels : torch.Tensor
             The noise labels of shape `(batch_size,)`. Used for conditioning on
-            the noise level.
+            the diffusion noise level.
         - class_labels : torch.Tensor
-            The class labels of shape `(batch_size, label_dim)`. Used for conditioning
-            on the class labels.
+            The class labels of shape `(batch_size, label_dim)`. Used for
+            conditioning on any vector-valued quantity. Can pass `None` when
+            `label_dim` is 0.
         - global_index : torch.Tensor, optional
-            The global index of the positional embeddings to use. If not provided,
-            all positional embeddings are used.
+            The global indices of the positional embeddings to use. If neither
+            `global_index` nor `embedding_selector` are provided, the entire
+            positional embedding grid is used. In this case `x` must have the
+            same spatial resolution as the positional embedding grid. See
+            :meth:`positional_embedding_indexing` for details. Default to `None`.
         - embedding_selector : Callable, optional
-            A function that selects the positional embeddings to use. If not provided,
-            all positional embeddings are used.
+            A function that selects the positional embeddings to use. See
+            :meth:`positional_embedding_selector` for details. Default to `None`.
+        - augment_labels : torch.Tensor, optional
+            The augmentation labels of shape `(batch_size, augment_dim)`. Used
+            for conditioning on any additional vector-valued quantity. Can pass
+            `None` when `augment_dim` is 0. Default to `None`.
 
     Return:
         - output : torch.Tensor
             The output tensor of shape `(batch_size, out_channels, height, width)`.
 
     .. important::
-        Unlike positional embeddings in the parent class :class:`~physicsnemo.models.diffusion.song_unet.SongUNet`
-        that encode the diffusion time-step, the positional embeddings in this
-        specialized architecture represent global spatial coordinates of the
+        Unlike positional embeddings defined by `embedding_type` in the parent
+        class :class:`~physicsnemo.models.diffusion.song_unet.SongUNet` that
+        encode the diffusion time-step (or noise level), the positional embeddings in this
+        specialized architecture encode global spatial coordinates of the
         pixels.
 
     Examples
@@ -759,7 +759,7 @@ class SongUNetPosEmbd(SongUNet):
         encoder_type: str = "standard",
         decoder_type: str = "standard",
         resample_filter: List[int] = [1, 1],
-        gridtype: str = "sinusoidal",
+        gridtype: Literal["sinusoidal", "learnable", "linear", "test"] = "sinusoidal",
         N_grid_channels: int = 4,
         checkpoint_level: int = 0,
         additive_pos_embed: bool = False,
@@ -832,8 +832,7 @@ class SongUNetPosEmbd(SongUNet):
         ):
             if embedding_selector is not None and global_index is not None:
                 raise ValueError(
-                    "Cannot provide both embedding_selector and global_index. "
-                    "embedding_selector is the preferred approach for better efficiency."
+                    "Cannot provide both embedding_selector and global_index."
                 )
 
             if x.dtype != self.pos_embd.dtype:
@@ -879,32 +878,30 @@ class SongUNetPosEmbd(SongUNet):
     ) -> torch.Tensor:
         """Select positional embeddings using global indices.
 
-        This method either uses global indices to select specific embeddings or expands
-        the embeddings for the full input when no indices are provided.
-
-        Typically used in patch-based training, where the batch dimension
-        contains multiple patches extracted from a larger image.
+        This method uses global indices to select specific subset of the
+        positional embedding grid (called *patches*). If no indices are provided,
+        the entire positional embedding grid is returned.
 
         Arguments
         ---------
-        x : torch.Tensor
-            Input tensor of shape (B, C, H, W), used to determine batch size
+        - x : torch.Tensor
+            Input tensor of shape `(B * P, C, H, W)`. Only used to determine batch size
             and device.
-        global_index : Optional[torch.Tensor]
-            Optional tensor of indices for selecting embeddings. These should
-            correspond to the spatial indices of the batch elements in the
-            input tensor x. When provided, should have shape (P, 2, H, W) where
-            the second dimension contains y,x coordinates (indices of the
-            positional embedding grid).
+        - global_index : Optional[torch.Tensor]
+            Tensor of shape `(P, 2, H, W)` that correspond to the patches to extract
+            from the positional embedding grid. `P` is the number of distinct
+            patches in the input tensor `x`. The channel dimension should
+            contain `j`, `i` indices that should represent the indices of the
+            pixels to extract from the embedding grid.
 
         Returns
         -------
-        torch.Tensor
+        - torch.Tensor
             Selected positional embeddings with shape:
-            - If global_index provided: (B, N_pe, H, W)
-            - If global_index is None: (B, N_pe, H_pe, W_pe)
-            where N_pe is the number of positional embedding channels, and H_pe
-            and W_pe are the height and width of the positional embedding grid.
+            - If global_index provided: (B * P, N_grid_channels, H, W). Same
+            spatial resolution as `global_index`.
+            - If global_index is None: (B, N_grid_channels, height, width)
+            where `height` and `width` match the `img_resolution` parameter.
 
         Example
         -------
@@ -915,13 +912,18 @@ class SongUNetPosEmbd(SongUNet):
         >>> print(global_index.shape)
         torch.Size([4, 2, 8, 8])
 
+        .. note::
+            This method is typically used in patch-based diffusion (or multi-diffusion), where a large input image is split into multiple patches.
+            The batch dimension of the input tensor contains the patches.
+            Patches are processed independently by the model, and the `global_index` parameter is used to select the grid of positional embeddings corresponding to each patch.
+
         See Also
         --------
-        :meth:`physicsnemo.utils.patching.RandomPatching2D.global_index`
+        See these methods for possible ways to generate the `global_index` parameter:
+        - :meth:`~physicsnemo.utils.patching.RandomPatching2D.global_index`
             For generating random patch indices.
-        :meth:`physicsnemo.utils.patching.GridPatching2D.global_index`
+        - :meth:`~physicsnemo.utils.patching.GridPatching2D.global_index`
             For generating deterministic grid-based patch indices.
-            See these methods for possible ways to generate the global_index parameter.
         """
         # If no global indices are provided, select all embeddings and expand
         # to match the batch size of the input
@@ -1013,38 +1015,33 @@ class SongUNetPosEmbd(SongUNet):
     ) -> torch.Tensor:
         """Select positional embeddings using a selector function.
 
-        Similar to positional_embedding_indexing, but uses a selector function
-        to select the embeddings. This method provides a more efficient way to
-        select embeddings for batches of data.
-        Typically used with patch-based processing, where the batch dimension
-        contains multiple patches extracted from a larger image.
+        Similar to :meth:`positional_embedding_indexing`, but instead uses a selector
+        function to select the embeddings.
 
         Arguments
         ---------
-        x : torch.Tensor
-            Input tensor of shape (B, C, H, W) only used to determine dtype and
+        - x : torch.Tensor
+            Input tensor of shape `(B * P, C, H, W)`. Only used to determine dtype and
             device.
-        embedding_selector : Callable
-            Function that takes as input an embedding tensor of shape (N_pe,
-            H_pe, W_pe) and returns selected embeddings with shape (batch_size, N_pe, H, W).
-            Each selected embedding should correspond to the positional
-            information of each batch element in x.
-            For patch-based processing, typically this should be based on
+        - embedding_selector : Callable
+            Function that takes as input the entire embedding grid of shape `(N_grid_channels,
+            H_pe, W_pe)` and returns selected embeddings with shape `(B * P, N_pe, H, W)`.
+            Each selected embedding should correspond to the portion of the embedding grid
+            that corresponds to the batch element in `x`.
+            Typically this should be based on
             :meth:`physicsnemo.utils.patching.BasePatching2D.apply` method to
             maintain consistency with patch extraction.
-        embeds : Optional[torch.Tensor]
-            Optional tensor for combined positional and lead time embeddings tensor
-        lead_time_label : List[int] or torch.Tensor, optional
-            If provided, this list of integers is used to generate lead-time-aware positional embeddings.
-            Each integer represents a lead time index, and the corresponding embeddings are generated and
-            concatenated with the positional embedding. The combined embedding is then produced by
-            `embedding_selector`.
 
-        Returns
-        -------
-        torch.Tensor
-            A tensor of shape (batch_size, N_pe, H, W). N_pe is the number of positional embedding channels,
+        Return
+        ------
+        - torch.Tensor
+            A tensor of shape `(B * P, N_pe, H, W)`. `N_pe` is the number embedding channels,
             which may include additional lead-time embedding channels if `lead_time_label` is provided.
+
+        .. note::
+            This method is typically used in patch-based diffusion (or multi-diffusion), where a large input image is split into multiple patches.
+            The batch dimension of the input tensor contains the patches.
+            Patches are processed independently by the model, and the `embedding_selector` function is used to select the grid of positional embeddings corresponding to each patch.
 
         Example
         -------
@@ -1058,8 +1055,8 @@ class SongUNetPosEmbd(SongUNet):
 
         See Also
         --------
-        :meth:`physicsnemo.utils.patching.BasePatching2D.apply`
-            For the base patching method typically used in embedding_selector.
+        - :meth:`~physicsnemo.utils.patching.BasePatching2D.apply`
+            For the base patching method typically used in `embedding_selector`.
         """
         if x.dtype != self.pos_embd.dtype:
             self.pos_embd = self.pos_embd.to(x.dtype)
@@ -1146,92 +1143,95 @@ class SongUNetPosEmbd(SongUNet):
         return grid
 
 
+# TODO: the entire logic of the lead-time logic should be moved there. We
+# should use subclass of the SongUNetPosEmbd class and specialize it for
+# lead-time aware embeddings.
 class SongUNetPosLtEmbd(SongUNetPosEmbd):
     """
-    This model is adapted from SongUNetPosEmbd, with the incorporation of lead-time aware
-    embeddings. The lead-time embedding is activated by setting the
-    `lead_time_channels` and `lead_time_steps` parameters.
+    This specialized architecture extends
+    :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd` with two
+    additional capabilities:
 
-    Like SongUNetPosEmbd, this model provides two methods for selecting positional embeddings:
-    1. Using a selector function (preferred method). See
-       :meth:`positional_embedding_selector` for details.
-    2. Using global indices. See :meth:`positional_embedding_indexing` for
-       details.
+    1. The model can be conditioned on lead-time labels. These labels encode *physical*
+    time information, such as a forecasting horizon.
+    2. Similarly to the parent `SongUNetPosEmbd`, this model predicts
+    regression targets, but it can also produce classification predictions.
+    More precisely, some of the ouput channels are probability outputs, that
+    are passed through a softmax activation function. This is useful for
+    multi-task applications, where the objective is a combination of both
+    regression and classification losses.
+
+    The mechanism to condition on lead-time labels is implemented by:
+    • First generating a grid of learnable lead-time embeddings of shape
+    `(lead_time_steps, lead_time_channels, height, width)`. The spatial
+    resolution of the lead-time embeddings is the same as the input/output image.
+    • Then, given an input `x`, select the lead-time embeddings that
+    corresponds to the time associated with the input `x`.
+    • Finally, concatenate channels-wise the selected lead-time embeddings and
+    positional embeddings to the input `x` and pass them to the U-Net network.
+
+    Most parameters are similar to the parent `SongUNetPosEmbd`, at the
+    exception of the ones listed below.
 
     Parameters
     -----------
-    img_resolution : Union[List[int], int]
-        The resolution of the input/output image. Can be a single int for square images
-        or a list [height, width] for rectangular images.
-    in_channels : int
-        Number of channels in the input image.
-    out_channels : int
-        Number of channels in the output image.
-    label_dim : int, optional
-        Number of class labels; 0 indicates an unconditional model. By default 0.
-    augment_dim : int, optional
-        Dimensionality of augmentation labels; 0 means no augmentation. By default 0.
-    model_channels : int, optional
-        Base multiplier for the number of channels across the network. By default 128.
-    channel_mult : List[int], optional
-        Per-resolution multipliers for the number of channels. By default [1,2,2,2,2].
-    channel_mult_emb : int, optional
-        Multiplier for the dimensionality of the embedding vector. By default 4.
-    num_blocks : int, optional
-        Number of residual blocks per resolution. By default 4.
-    attn_resolutions : List[int], optional
-        Resolutions at which self-attention layers are applied. By default [28].
-    dropout : float, optional
-        Dropout probability applied to intermediate activations. By default 0.13.
-    label_dropout : float, optional
-        Dropout probability of class labels for classifier-free guidance. By default 0.0.
-    embedding_type : str, optional
-        Timestep embedding type: 'positional' for DDPM++, 'fourier' for NCSN++.
-        By default 'positional'.
-    channel_mult_noise : int, optional
-        Timestep embedding size: 1 for DDPM++, 2 for NCSN++. By default 1.
-    encoder_type : str, optional
-        Encoder architecture: 'standard' for DDPM++, 'residual' for NCSN++, 'skip' for skip connections.
-        By default 'standard'.
-    decoder_type : str, optional
-        Decoder architecture: 'standard' or 'skip' for skip connections. By default 'standard'.
-    resample_filter : List[int], optional
-        Resampling filter coefficients: [1,1] for DDPM++, [1,3,3,1] for NCSN++. By default [1,1].
-    gridtype : str, optional
-        Type of positional grid to use: 'sinusoidal', 'learnable', 'linear', or 'test'.
-        Controls how positional information is encoded. By default 'sinusoidal'.
-    N_grid_channels : int, optional
-        Number of channels in the positional embedding grid. For 'sinusoidal' must be 4 or
-        multiple of 4. For 'linear' must be 2. By default 4.
-    lead_time_channels : int, optional
+    - in_channels : int
+        Number of channels in the image passed to the U-Net. **Important:** in comparison to
+        the base `SongUNet`, this parameter should also include the number of
+        channels in the positional embedding grid `N_grid_channels` and the number of
+        channels in the lead-time embedding grid `lead_time_channels`.
+    - lead_time_channels : int, optional
         Number of channels in the lead time embedding. These are learned embeddings that
-        encode temporal forecast information. By default None.
-    lead_time_steps : int, optional
+        encode *physical* time information. By default None.
+    - lead_time_steps : int, optional
         Number of discrete lead time steps to support. Each step gets its own learned
-        embedding vector. By default 9.
-    prob_channels : List[int], optional
-        Indices of probability output channels that should use softmax activation.
-        Used for classification outputs. By default empty list.
-    checkpoint_level : int, optional
-        Number of layers that should use gradient checkpointing (0 disables checkpointing).
-        Higher values trade memory for computation. By default 0.
-    additive_pos_embed : bool, optional
-        If True, adds a learned positional embedding after the first convolution layer.
-        Used in StormCast model. By default False.
-    use_apex_gn : bool, optional
-        A boolean flag indicating whether we want to use Apex GroupNorm for NHWC layout.
-        Need to set this as False on cpu. Defaults to False.
-    act : str, optional
-        The activation function to use when fusing activation with GroupNorm. Defaults to None.
-    profile_mode:
-        A boolean flag indicating whether to enable all nvtx annotations during profiling.
-    amp_mode : bool, optional
-        A boolean flag indicating whether mixed-precision (AMP) training is enabled. Defaults to False.
+        embedding vector of shape `(lead_time_channels, height, width)`. By default 9.
+    - prob_channels : List[int], optional
+        Indices of channels that are probability outputs (or *classification* predictions). that should use softmax
+        activation. Used for classification outputs. By default empty list.
 
-    Note
-    -----
-    Equivalent to the original implementation by Song et al., available at
-    https://github.com/yang-song/score_sde_pytorch
+    Forward
+    -------
+    The foward pass is similar to the parent `SongUNetPosEmbd`, with the addition of
+    the `lead_time_label` argument.
+    The model should be called with `output = model(x, noise_labels, class_labels,
+    lead_time_label=lead_time_label, global_index=global_index,
+    embedding_selector=embedding_selector, augment_labels=augment_labels)`
+
+    Inputs:
+        - x : torch.Tensor
+            The input image of shape `(batch_size, in_channels -
+            N_grid_channels - lead_time_channels, height, width)`.
+        - noise_labels : torch.Tensor
+            The noise labels of shape `(batch_size,)`. Used for conditioning on
+            the diffusion noise level.
+        - class_labels : torch.Tensor
+            The class labels of shape `(batch_size, label_dim)`. Used for
+            conditioning on any vector-valued quantity. Can pass `None` when
+            `label_dim` is 0.
+        - global_index : torch.Tensor, optional
+            The global indices of the positional embeddings to use. See
+            :meth:`positional_embedding_indexing` for details. If neither
+            `global_index` nor `embedding_selector` are provided, the entire
+            positional embedding grid is used. Default to `None`.
+        - embedding_selector : Callable, optional
+            A function that selects the positional embeddings to use. See
+            :meth:`positional_embedding_selector` for details. Default to `None`.
+        - augment_labels : torch.Tensor, optional
+            The augmentation labels of shape `(batch_size, augment_dim)`. Used
+            for conditioning on any additional vector-valued quantity.
+        - lead_time_label : torch.Tensor, optional
+            The lead-time labels of shape `(batch_size,)`. Used for selecting
+            lead-time embeddings. It should contain the indices of the lead-time
+            embeddings that correspond to the lead-time of each sample in the batch.
+
+    Return:
+        - output : torch.Tensor
+            The output tensor of shape `(batch_size, out_channels, height, width)`.
+
+    .. note::
+        The lead-time embeddings differ from the diffusion time embeddings used in :class:`~physicsnemo.models.diffusion.song_unet.SongUNet` class, as they do not encode diffusion time-step but *physical time*.
+
 
     Example
     --------

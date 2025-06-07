@@ -72,16 +72,18 @@ class DhariwalUNet(Module):
 
     Parameters
     -----------
-    - img_resolution : Union[List[int], int]
-        The resolution of the input/output image. Can be a single int for square images
-        or a list [height, width] for rectangular images.
+    - img_resolution :int
+        The resolution of the input/output image. Assumes square images. *Note:
+        this parameter is only used as a convenience to build the network. In
+        practice, the model can still be used with images of different
+        resolutions.*
     - in_channels : int
         Number of channels in the input image. May include channels from both the
-        latent state `x` and additional channels when conditioning on images. For an
+        latent state and additional channels when conditioning on images. For an
         unconditional model, this should be equal to `out_channels`.
     - out_channels : int
         Number of channels in the output image. Should be equal to the number
-        of channels in the latent state `x`.
+        of channels in the latent state.
     - label_dim : int, optional
         Dimension of the vector-valued ``class_labels` conditioning; 0
         indicates no conditioning on class labels. By default 0.
@@ -122,10 +124,10 @@ class DhariwalUNet(Module):
 
     Input:
         - x : torch.Tensor
-            The input tensor of shape `(batch_size, in_channels, height, width)`,
-            where `height` and `width` should match the `img_resolution`
-            parameter. In general `x` is the channel-wise concatenation of the
-            latent state and additional images used for conditioning.
+            The input tensor of shape `(batch_size, in_channels, img_resolution, img_resolution)`.
+            In general `x` is the channel-wise concatenation of the latent state
+            and additional images used for conditioning. For an unconditional
+            model, `x` is simply the latent state.
         - noise_labels : torch.Tensor
             The noise labels of shape `(batch_size,)`. Used for conditioning on
             the noise level.

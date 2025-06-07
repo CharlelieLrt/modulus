@@ -491,8 +491,8 @@ Diffusion model backbones are highly configurable architectures that can be used
 as a building block for more complex models. Backbones support
 both conditional and unconditional modeling. Currently, there are two provided
 backbones: the SongUNet, as implemented in the
-:class:`physicsnemo.models.diffusion.song_unet.SongUNet` class and the DhariwalUNet,
-as implemented in the :class:`physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet`
+:class:`~physicsnemo.models.diffusion.song_unet.SongUNet` class and the DhariwalUNet,
+as implemented in the :class:`~physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet`
 class. These models were introduced in the papers `Score-based generative modeling through stochastic
 differential equations, Song et al. <https://arxiv.org/abs/2011.13456>`_ and
 `Diffusion models beat gans on image synthesis, Dhariwal et al.
@@ -517,19 +517,21 @@ modeling.
 Specialized Architectures
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Note that even though backbones can be used as is, some of the applications in
+Note that even though backbones can be used as is, some of the examples in
 PhysicsNeMo examples use specialized architectures. These specialized architectures
 typically inherit from the backbones and implement additional functionalities for specific
 applications. For example the CorrDiff example in :file:`examples/weather/corrdiff/README.md`
-uses the specialized architectures :class:`physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd`
-and :class:`physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd` to implement
+uses the specialized architectures :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd`
+and :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd` to implement
 the diffusion model.
 
 .. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd
     :show-inheritance:
+    :members: positional_embedding_indexing, positional_embedding_selector
 
 .. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd
     :show-inheritance:
+    :members: positional_embedding_indexing, positional_embedding_selector
 
 Application-specific Interfaces
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -539,12 +541,26 @@ around the model backbones or specialized architectures that provide a more
 user-friendly interface for specific applications. Note that not all these
 classes are true diffusion models, but can also be used in conjunction with
 diffusion models. For instance, the CorrDiff example in
-:file:`examples/weather/corrdiff/README.md` uses the :class:`physicsnemo.models.diffusion.unet.UNet`
-class to implement the regression model.
+:file:`examples/weather/corrdiff/README.md` uses the :class:`~physicsnemo.models.diffusion.unet.UNet`
+class to implement a regression model.
 
 .. autoclass:: physicsnemo.models.diffusion.unet
     :show-inheritance:
+    :members: amp_mode
 
+
+Diffusion Preconditioners
+-------------------------
+
+Preconditioning is an essential technique to improve the performance of
+diffusion models. It consists in scaling the latent state and the noise
+level that are passed to a network. Some preconditioning also requires to
+re-scale the output of the network. PhysicsNeMo provides a set of preconditioning
+classes that are wrappers around backbones or specialized architectures.
+
+.. automodule:: physicsnemo.models.diffusion.preconditioning
+    :members:
+    :show-inheritance:
 
 
 Weather / Climate Models
