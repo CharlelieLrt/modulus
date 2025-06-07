@@ -103,8 +103,14 @@ and atmospheric parameters. These utilities are used extensively in weather pred
 Patching utils
 --------------
 
-Utilities for handling data patching operations, particularly useful in image-based deep learning
-models where processing needs to be done on patches of the input data.
+Patching utilities, particularly useful for patch-based diffusion, also called
+multi-diffusion. This method is used to scale diffusion to very large images.
+These patching utilities extract patches from 2D images, and typically gather
+them in the batch dimension. A batch of patches is therefore composed of multiple
+small patches extracted from each sample in the original batch of larger
+images. Diffusion models can then process these patches in independently. These
+utilities also support fusing operations to reconstruct the entire predicted
+image from the individual predicted patches.
 
 .. automodule:: physicsnemo.utils.patching
     :members:
