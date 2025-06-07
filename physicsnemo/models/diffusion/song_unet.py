@@ -1031,6 +1031,8 @@ class SongUNetPosEmbd(SongUNet):
             Typically this should be based on
             :meth:`physicsnemo.utils.patching.BasePatching2D.apply` method to
             maintain consistency with patch extraction.
+        embeds : Optional[torch.Tensor]
+            Optional tensor for combined positional and lead time embeddings tensor
 
         Return
         ------
