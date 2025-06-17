@@ -646,7 +646,7 @@ The following example shows how to use the specialized architecture
 multi-diffusion model. First, we create a ``SongUNetPosEmbd`` model similar to
 the one in :ref:`the conditional SongUnet example <example_song_unet_conditional>`
 with a global positional embedding grid of shape ``(C_pos_emb, res, res)``. We
-show that the model can be used with the emtire latent state (full domain).
+show that the model can be used with the entire latent state (full domain).
 
 .. code:: python
 
@@ -694,12 +694,13 @@ contains the indices of the pixels in the full domain, and we exctract *the same
 parameter. The model internally uses ``global_index`` to extract the corresponding
 patches from the positional embedding grid and concatenate them to the input
 ``x_cond_patches`` before the first UNet block. Note that conditional
-multi-diffusion still requires each patch to **be conditioned on the entire
-conditioning image** ``cond``, which is why we interpolate the conditioning image
+multi-diffusion still requires each patch to *be conditioned on the entire
+conditioning image* ``cond``, which is why we interpolate the conditioning image
 to the patch resolution and concatenate it to each individual patch.
 In practice it is not necessary to manually extract the patches from the latent
 state and the global grid, as PhysicsNeMo provides utilities to help with the
-patching operations, in :mod:`~physicsnemo.utils.patching`.
+patching operations, in :mod:`~physicsnemo.utils.patching`. For an example of how
+to use these utilities, see the `CorrDiff example <../examples/weather/corrdiff/README.rst>`_.
 
 .. code:: python
 
@@ -758,9 +759,9 @@ channel-wise concatenation to the latent-state before the first UNet block.
 
 Here we show an example extending the previous ones with lead-time information.
 We assume that we have a batch of 3 latent states at times :math:`T + 2 \Delta t`
-(2 time intervals forward), :math:`T + 2 \Delta t` (2 time intervals forward),
-and :math:`T + 0 \Delta t` (current time). The associated lead-time labels are
-``[2, 2, 0]``. In addition, the ``SongUNetPosLtEmbd`` model has the ability to
+(2 time intervals forward), :math:`T + 0 \Delta t` (current time),
+and :math:`T + \Delta t` (1 time interval forward). The associated lead-time labels are
+``[2, 0, 1]``. In addition, the ``SongUNetPosLtEmbd`` model has the ability to
 predict probabilities for some channels of the latent state, specified by the
 ``prob_channels`` parameter. Here we assume that channels 1 and 3 are
 probability (i.e. classification) outputs, while other channels are regression
@@ -796,15 +797,15 @@ outputs.
         prob_channels=[1, 3],  # Channels 1 and 3 fromn the latent state are probability outputs
     )
 
-    x = torch.randn(B, C_x, res, res)  # Latent state at times T+2*dt, T+2*dt, and T + 0*dt
+    x = torch.randn(B, C_x, res, res)  # Latent state at times T+2*dt, T+0*dt, and T + 1*dt
     cond = torch.randn(B, C_cond, res, res)
     x_cond = torch.cat([x, cond], dim=1)
     noise_labels = torch.randn(B)
     class_labels = torch.randn(B, 16)
-    lead_time_label = torch.tensor([2, 2, 0])  # Lead-time labels for each sample
+    lead_time_label = torch.tensor([2, 0, 1])  # Lead-time labels for each sample
 
     # The model internally extracts the lead-time embeddings corresponding to the
-    # lead-time labels 2, 2, 0 and concatenates them to the input x_cond before the first
+    # lead-time labels 2, 0, 1 and concatenates them to the input x_cond before the first
     # UNet block. In training mode, the model outputs logits for channels 1 and 3.
     out = model(x_cond, noise_labels, class_labels, lead_time_label=lead_time_label)
     print(out.shape)  # Shape: (B, C_x, res, res), same as the latent state
@@ -814,11 +815,23 @@ outputs.
     out = model(x_cond, noise_labels, class_labels, lead_time_label=lead_time_label)
 
 .. note::
+    The ``SongUNetPosLtEmbd`` *is not* an autoregressive model that performs a rollout
+    to produce future predictions. From the point of view of the ``SongUNetPosLtEmbd``,
+    the lead-time information is *frozen*. The lead-time dependent latent state :math:`\mathbf{x}`
+    might however be produced by such an autoregressive/rollout model.
+
+.. note::
     The ``SongUNetPosLtEmbd`` model cannot be scaled to very long lead-time
     horizons (controlled by the ``lead_time_steps`` parameter). This is because
     the lead-time embeddings are represented by a grid of learnable parameters of
     shape ``(lead_time_steps, C_LT, res, res)``. For very long lead-time, the
     size of this grid of embeddings becomes prohibitively large.
+
+.. note::
+    In a given input batch ``x``, the associated lead-times might be not necessarily
+    consecutive or in order. The do not even need to originate from the same forecast
+    trajectory. For example, the lead-time labels might be ``[0, 1, 2]`` instead of ``[2, 0, 1]``,
+    or even ``[2, 2, 1]``.
 
 .. _diffusion_application_specific_interfaces:
 
