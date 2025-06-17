@@ -863,7 +863,7 @@ class to implement a regression model.
     :members: positional_embedding_indexing, positional_embedding_selector
 
 
-.. autoclass:: physicsnemo.models.diffusion.unet
+.. autoclass:: physicsnemo.models.diffusion.unet.UNet
     :show-inheritance:
     :members: amp_mode
 

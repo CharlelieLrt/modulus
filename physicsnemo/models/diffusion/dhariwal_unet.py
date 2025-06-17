@@ -60,7 +60,7 @@ class MetaData(ModelMetaData):
 class DhariwalUNet(Module):
     r"""
     This architecture is a diffusion backbone for 2D image generation. It
-    reimplements the ADM architecture, a U-Net variant, with optional
+    reimplements the `ADM architecture <https://arxiv.org/abs/2105.05233>`_, a U-Net variant, with optional
     self-attention.
 
     It is highly similar to the U-Net backbone defined in

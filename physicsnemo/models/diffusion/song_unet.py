@@ -61,7 +61,9 @@ class MetaData(ModelMetaData):
 class SongUNet(Module):
     r"""
     This architecture is a diffusion backbone for 2D image generation.
-    It is a reimplementation of the DDPM++ and NCSN++ architectures, which are U-Net variants
+    It is a reimplementation of the `DDPM++
+    <https://proceedings.mlr.press/v139/nichol21a.html>`_ and `NCSN++ <https://arxiv.org/abs/2011.13456>`_
+    architectures, which are U-Net variants
     with optional self-attention, embeddings, and encoder-decoder components.
 
     This model supports conditional and unconditional setups, as well as several
