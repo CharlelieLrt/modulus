@@ -47,7 +47,7 @@ class tEDMPrecondMetaData(ModelMetaData):
 class tEDMPrecondSuperRes(EDMPrecondSuperResolution):
     """
     Preconditioning proposed in the paper `Heavy-Tailed Diffusion Models,
-    Pandey et al. <https://arxiv.org/abs/2410.14171>`_. A variant of
+    Pandey et al. <https://arxiv.org/abs/2410.14171>`_ (t-EDM). A variant of
     :class:`~physicsnemo.models.diffusion.preconditioning.EDMPrecondSuperResolution`
     that replaces the traditional Gaussian noise with a noise sampled from a
     Student-t distribution.
