@@ -177,6 +177,10 @@ class Module(torch.nn.Module):
                 raise ValueError(
                     f"Argument '{key}' cannot be overridden for " f"{cls.__name__}."
                 )
+            if key not in args:
+                raise ValueError(
+                    f"Unexpected argument '{key}' to override for " f"{cls.__name__}."
+                )
             args[key] = value
 
     @classmethod
@@ -428,12 +432,20 @@ class Module(torch.nn.Module):
         override_args : Optional[Dict[str, Any]], optional, default=None
             Dictionary of arguments to override the ``__init__`` method's
             arguments saved in the checkpoint. The override of arguments occurs
-            before the model is instantiated, which allows for *ad-hoc*
-            modifications to the model's initialization.
+            *before* the model is instantiated, which allows for *ad-hoc*
+            modifications to the model's initialization. Argument overrides are
+            however applied *before* the state-dict is loaded, which means that
+            for parameters or buffers saved in the state-dict, the values
+            contained in the state-dict will take precedence over the override.
+            This might also result in unexpected behavior if the model is
+            instantiated with different arguments than the ones saved in the
+            checkpoint, and some mismatching keys are saved in the state-dict.
 
             *Note*: Only arguments defined in ``cls._overridable_args`` can be
-            overridden. Attempting to override any other argument will raise a
-            ``ValueError``. This API should be used with caution and only if
+            overridden. ``Module``'s subclasses by default disable this
+            functionality, unless they explicity define an ``_overridable_args``
+            class attribute. Attempting to override any other argument will raise
+            a ``ValueError``. This API should be used with caution and only if
             you fully understand the implications of the override.
 
         Returns
