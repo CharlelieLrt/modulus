@@ -24,7 +24,7 @@ import tarfile
 import tempfile
 import warnings
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional, Set, Union
 
 import torch
 
@@ -64,7 +64,7 @@ class Module(torch.nn.Module):
     # __init__ arguments that can be overridden. By default all arguments are
     # protected. Subclasses can override this to allow for overriding of specific
     # __init__'s arguments with the ``from_checkpoint`` method.
-    _overridable_args: Dict[str, Any] = {}
+    _overridable_args: Set[str] = {}
 
     def __new__(cls, *args, **kwargs):
         out = super().__new__(cls)

@@ -249,6 +249,10 @@ class SongUNet(Module):
     torch.Size([1, 2, 16, 16])
     """
 
+    # Arguments of the __init__ method that can be overridden with the
+    # ``Module.from_checkpoint`` method.
+    _overridable_args = {"use_apex_gn", "act"}
+
     def __init__(
         self,
         img_resolution: Union[List[int], int],
