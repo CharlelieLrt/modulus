@@ -128,8 +128,8 @@ def test_unet_checkpoint(device):
 
 
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
-def test_unet_amp_mode_property(device):
-    """Test UNet wrappers amp_mode property"""
+def test_unet_properties(device):
+    """Test UNet wrappers amp_mode and profile_mode properties"""
 
     res, inc, outc = 32, 1, 1
 
@@ -160,6 +160,28 @@ def test_unet_amp_mode_property(device):
     for sub in model.model.modules():
         if hasattr(sub, "amp_mode"):
             assert sub.amp_mode is False
+
+    # Do the same for profile_mode
+    # Default value should be False
+    assert model.profile_mode is False
+
+    # Set to True and verify propagation
+    model.profile_mode = True
+    assert model.profile_mode is True
+    if hasattr(model.model, "profile_mode"):
+        assert model.model.profile_mode is True
+    for sub in model.model.modules():
+        if hasattr(sub, "profile_mode"):
+            assert sub.profile_mode is True
+
+    # Toggle back to False and verify again
+    model.profile_mode = False
+    assert model.profile_mode is False
+    if hasattr(model.model, "profile_mode"):
+        assert model.model.profile_mode is False
+    for sub in model.model.modules():
+        if hasattr(sub, "profile_mode"):
+            assert sub.profile_mode is False
 
 
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
