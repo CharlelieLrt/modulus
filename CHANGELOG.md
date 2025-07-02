@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - physicsnemo.utils.generative renamed into physicsnemo.utils.diffusion
-- In CorrDiff model wrappers (`EDMPercondSuperResolution` and `UNet`), the
+- In CorrDiff model wrappers (`EDMPrecondSuperResolution` and `UNet`), the
   arguments `profile_mode` and `amp_mode` cannot be overriden by
   `from_checkpoint`. They are now properties that can be dynamically changed
   *after* the model instantiation.
