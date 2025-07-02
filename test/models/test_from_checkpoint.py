@@ -97,12 +97,10 @@ def test_from_checkpoint_override(device):
     mock_model = MockModelWithOverride(1, 2).to(device)
     mock_model.save("checkpoint.mdlus")
     MockModelWithOverride.from_checkpoint("checkpoint.mdlus")
-    Path("checkpoint.mdlus").unlink(missing_ok=False)
 
     # Model with overrides, loading with allowed overrides (should work)
     MockModelWithOverride.from_checkpoint("checkpoint.mdlus", override_args={"w2": 3})
     assert torch.equal(mock_model.w2, torch.tensor(3, dtype=torch.float32))
-    Path("checkpoint.mdlus").unlink(missing_ok=False)
 
     # Model with overrides, loading with disallowed overrides (should fail)
     with pytest.raises(ValueError):
