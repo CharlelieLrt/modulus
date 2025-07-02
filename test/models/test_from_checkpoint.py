@@ -40,6 +40,26 @@ class NewMockModel(physicsnemo.Module):
         self.layer = torch.nn.Linear(layer_size, layer_size)
 
 
+class MockModelNoOverride(physicsnemo.Module):
+    """Fake model"""
+
+    def __init__(self, value1, value2):
+        super().__init__()
+        self.w1 = torch.nn.Parameter(torch.tensor(value1, dtype=torch.float32))
+        self.w2 = torch.nn.Parameter(torch.tensor(value2, dtype=torch.float32))
+
+
+class MockModelWithOverride(physicsnemo.Module):
+    """Fake model"""
+
+    _overridable_args = {"w2"}
+
+    def __init__(self, value1, value2):
+        super().__init__()
+        self.w1 = torch.nn.Parameter(torch.tensor(value1, dtype=torch.float32))
+        self.w2 = torch.nn.Parameter(torch.tensor(value2, dtype=torch.float32))
+
+
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 @pytest.mark.parametrize("LoadModel", [MockModel, NewMockModel])
 def test_from_checkpoint_custom(device, LoadModel):
@@ -53,4 +73,40 @@ def test_from_checkpoint_custom(device, LoadModel):
     # Load from checkpoint using class
     LoadModel.from_checkpoint("checkpoint.mdlus")
     # Delete checkpoint file (it should exist!)
+    Path("checkpoint.mdlus").unlink(missing_ok=False)
+
+
+@pytest.mark.parametrize("device", ["cuda:0", "cpu"])
+def test_from_checkpoint_override(device):
+    """Test checkpointing custom physicsnemo module with override"""
+    torch.manual_seed(0)
+
+    # Model with no overrides, loading without overrides
+    mock_model = MockModelNoOverride(1, 2).to(device)
+    mock_model.save("checkpoint.mdlus")
+    MockModelWithOverride.from_checkpoint("checkpoint.mdlus")
+
+    # Model with no overrides, loading with overrides (should fail)
+    with pytest.raises(ValueError):
+        MockModelWithOverride.from_checkpoint(
+            "checkpoint.mdlus", override_args={"w2": 3}
+        )
+    Path("checkpoint.mdlus").unlink(missing_ok=False)
+
+    # Model with overrides, loading without overrides
+    mock_model = MockModelWithOverride(1, 2).to(device)
+    mock_model.save("checkpoint.mdlus")
+    MockModelWithOverride.from_checkpoint("checkpoint.mdlus")
+    Path("checkpoint.mdlus").unlink(missing_ok=False)
+
+    # Model with overrides, loading with allowed overrides (should work)
+    MockModelWithOverride.from_checkpoint("checkpoint.mdlus", override_args={"w2": 3})
+    assert torch.equal(mock_model.w2, torch.tensor(3, dtype=torch.float32))
+    Path("checkpoint.mdlus").unlink(missing_ok=False)
+
+    # Model with overrides, loading with disallowed overrides (should fail)
+    with pytest.raises(ValueError):
+        MockModelWithOverride.from_checkpoint(
+            "checkpoint.mdlus", override_args={"w1": 3, "w2": 4}
+        )
     Path("checkpoint.mdlus").unlink(missing_ok=False)
