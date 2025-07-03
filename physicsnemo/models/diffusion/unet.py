@@ -16,7 +16,7 @@
 
 import importlib
 from dataclasses import dataclass
-from typing import Any, Dict, List, Literal, Tuple, Union
+from typing import Any, Dict, List, Literal, Set, Tuple, Union
 
 import torch
 
@@ -108,7 +108,7 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
     }
 
     # Classes that can be wrapped by this UNet class.
-    _wrapped_classes = {
+    _wrapped_classes: Set[str] = {
         "SongUNetPosEmbd",
         "SongUNetPosLtEmbd",
         "SongUNet",
@@ -119,7 +119,7 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
     # ``Module.from_checkpoint`` method. Here, since we use splatted arguments
     # for the wrapped model instance, we allow overriding of any overridable
     # argument of the wrapped classes.
-    _overridable_args = set.union(
+    _overridable_args: Set[str] = set.union(
         *(
             getattr(getattr(network_module, cls_name), "_overridable_args", set())
             for cls_name in _wrapped_classes

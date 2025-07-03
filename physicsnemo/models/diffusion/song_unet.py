@@ -16,7 +16,7 @@
 
 import contextlib
 from dataclasses import dataclass
-from typing import Callable, List, Literal, Optional, Union
+from typing import Callable, List, Literal, Optional, Set, Union
 
 import numpy as np
 import nvtx
@@ -251,7 +251,7 @@ class SongUNet(Module):
 
     # Arguments of the __init__ method that can be overridden with the
     # ``Module.from_checkpoint`` method.
-    _overridable_args = {"use_apex_gn", "act"}
+    _overridable_args: Set[str] = {"use_apex_gn", "act"}
 
     def __init__(
         self,
