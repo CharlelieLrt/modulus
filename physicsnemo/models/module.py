@@ -177,6 +177,9 @@ class Module(torch.nn.Module):
                 raise ValueError(
                     f"Argument '{key}' cannot be overridden for " f"{cls.__name__}."
                 )
+            # In this case we are not overriding, but we are adding a new arg
+            if key not in args:
+                warnings.warn(f"New argument '{key}' added for {cls.__name__}.")
             args[key] = value
 
     @classmethod
