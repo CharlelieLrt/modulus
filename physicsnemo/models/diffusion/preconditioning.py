@@ -22,7 +22,7 @@ Diffusion-Based Generative Models".
 import importlib
 import warnings
 from dataclasses import dataclass
-from typing import List, Literal, Tuple, Union
+from typing import Any, List, Literal, Tuple, Union
 
 import numpy as np
 import torch
@@ -797,7 +797,7 @@ class EDMPrecondSuperResolution(Module):
         sigma_data: float = 0.5,
         sigma_min=0.0,
         sigma_max=float("inf"),
-        **model_kwargs: dict,
+        **model_kwargs: Any,
     ):
         super().__init__(meta=EDMPrecondSuperResolutionMetaData)
 

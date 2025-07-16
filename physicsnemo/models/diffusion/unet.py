@@ -171,7 +171,7 @@ class UNet(Module):  # TODO a lot of redundancy, need to clean up
         model_type: Literal[
             "SongUNetPosEmbd", "SongUNetPosLtEmbd", "SongUNet", "DhariwalUNet"
         ] = "SongUNetPosEmbd",
-        **model_kwargs: dict,
+        **model_kwargs: Any,
     ):
         super().__init__(meta=MetaData)
 
