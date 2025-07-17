@@ -40,7 +40,7 @@ def test_corrdiff_lt_aware_ce_regression(device):
         str(
             Path(__file__).parents[1].resolve()
             / Path("data")
-            / Path("lt_aware_ce_regression_UNet_v1.0.1.mdlus")
+            / Path("corrdiff_lt_aware_ce_regression_UNet.mdlus")
         )
     ).to(device)
     reg_model = setup_model_lt_aware_ce_regression()
@@ -57,13 +57,15 @@ def test_corrdiff_lt_aware_ce_regression(device):
 
     # Compute loss with v1.0.1 checkpoint
     loss_chkpt = loss_fn(reg_model_chkpt, x_hr, x_lr, lead_time_label=lead_time_label)
-    validate_accuracy(loss_chkpt, file_name="lt_aware_ce_regression_loss_v1.1.1.pt")
+    assert validate_accuracy(
+        loss_chkpt, file_name="lt_aware_ce_regression_loss_v1.1.1.pth"
+    )
     loss_chkpt = loss_chkpt.sum() / B
     loss_chkpt.backward()
 
     # Compute loss with current model
     loss = loss_fn(reg_model, x_hr, x_lr, lead_time_label=lead_time_label)
-    validate_accuracy(loss, file_name="lt_aware_ce_regression_loss_v1.1.1.pt")
+    assert validate_accuracy(loss, file_name="lt_aware_ce_regression_loss_v1.1.1.pth")
     loss = loss.sum() / B
     loss.backward()
 
@@ -89,7 +91,7 @@ def test_corrdiff_lt_aware_patched_diffusion(device):
         str(
             Path(__file__).parents[1].resolve()
             / Path("data")
-            / Path("lt_aware_ce_regression_UNet_v1.0.1.mdlus")
+            / Path("corrdiff_lt_aware_ce_regression_UNet.mdlus")
         )
     ).to(device)
     reg_model = setup_model_lt_aware_ce_regression()
@@ -98,7 +100,7 @@ def test_corrdiff_lt_aware_patched_diffusion(device):
         str(
             Path(__file__).parents[1].resolve()
             / Path("data")
-            / Path("lt_aware_patched_diffusion_EDMPrecondSR_v1.0.1.mdlus")
+            / Path("corrdiff_lt_aware_patched_diffusion_EDMPrecondSR.mdlus")
         )
     ).to(device)
     diff_model = setup_model_lt_aware_patched_diffusion()
@@ -129,9 +131,9 @@ def test_corrdiff_lt_aware_patched_diffusion(device):
             lead_time_label=lead_time_label,
             use_patch_grad_acc=True,
         )
-        validate_accuracy(
+        assert validate_accuracy(
             loss_chkpt,
-            file_name=f"lt_aware_patched_diffusion_loss_iter_{patch_num_per_iter}_v1.1.1.pt",
+            file_name=f"lt_aware_patched_diffusion_loss_iter_{patch_num_per_iter}_v1.1.1.pth",
         )
         loss_chkpt = loss_chkpt.sum() / B
         loss_chkpt.backward()
@@ -148,9 +150,9 @@ def test_corrdiff_lt_aware_patched_diffusion(device):
             lead_time_label=lead_time_label,
             use_patch_grad_acc=True,
         )
-        validate_accuracy(
+        assert validate_accuracy(
             loss,
-            file_name=f"lt_aware_patched_diffusion_loss_iter_{patch_num_per_iter}_v1.1.1.pt",
+            file_name=f"lt_aware_patched_diffusion_loss_iter_{patch_num_per_iter}_v1.1.1.pth",
         )
         loss = loss.sum() / B
         loss.backward()

@@ -168,6 +168,11 @@ def validate_accuracy(
     # Load tensor dictionary and check
     else:
         tensor_dict = torch.load(str(file_name))
-        output_target = tuple([value.to(device) for value in tensor_dict.values()])
+        if isinstance(tensor_dict, dict):
+            output_target = tuple([value.to(device) for value in tensor_dict.values()])
+        elif isinstance(tensor_dict, Tensor):
+            output_target = tuple(tensor_dict.to(device))
+        else:
+            raise ValueError(f"Invalid tensor dictionary: {tensor_dict}")
 
         return compare_output(output, output_target, rtol, atol)

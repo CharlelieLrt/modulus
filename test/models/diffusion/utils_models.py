@@ -60,7 +60,6 @@ def setup_model_lt_aware_patched_diffusion():
         img_in_channels=2 * C_lr + N_grid_channels + lead_time_channels + C_hr,
         img_out_channels=C_hr,
         model_type="SongUNetPosLtEmbd",
-        scale_cond_input=False,
         model_channels=16,
         channel_mult=[1, 2, 2],
         channel_mult_emb=2,
