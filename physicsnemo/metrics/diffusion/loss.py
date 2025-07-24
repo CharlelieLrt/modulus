@@ -548,15 +548,15 @@ class ResidualLoss:
         Parameters
         ----------
         y : torch.Tensor
-            Latent state of shape (B, *). Only used to determine the shape of
+            Latent state of shape :math:`(B, *)`. Only used to determine the shape of
             the noise and create tensors on the same device.
 
         Returns
         -------
         Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-            - Noise ``n`` of shape (B, *) to be added to the latent state.
-            - Noise level ``sigma`` of shape (B, 1, 1, 1).
-            - Weight ``weight`` of shape (B, 1, 1, 1) to multiply the loss.
+            - Noise ``n`` of shape :math:`(B, *)` to be added to the latent state.
+            - Noise level ``sigma`` of shape :math:`(B, 1, 1, 1)`.
+            - Weight ``weight`` of shape :math:`(B, 1, 1, 1)` to multiply the loss.
         """
         # Sample noise level
         rnd_normal = torch.randn([y.shape[0], 1, 1, 1], device=y.device)

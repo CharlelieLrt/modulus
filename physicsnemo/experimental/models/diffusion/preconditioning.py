@@ -15,7 +15,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-from typing import Literal, Tuple, Union
+from typing import Any, Literal, Tuple, Union
 
 import numpy as np
 import torch
@@ -55,7 +55,7 @@ class tEDMPrecondSuperRes(EDMPrecondSuperResolution):
     Parameters
     ----------
     img_resolution : Union[int, Tuple[int, int]]
-        Spatial resolution `(H, W)` of the image. If a single int is provided,
+        Spatial resolution :math:`(H, W)` of the image. If a single int is provided,
         the image is assumed to be square.
     img_in_channels : int
         Number of input channels in the low-resolution input image.
@@ -94,7 +94,7 @@ class tEDMPrecondSuperRes(EDMPrecondSuperResolution):
         sigma_min=0.0,
         sigma_max=float("inf"),
         nu: int = 10,
-        **model_kwargs: dict,
+        **model_kwargs: Any,
     ):
         # NOTE: Check if nu is greater than 2. This is to ensure the variance of the
         # Student-t prior during sampling is finite.
@@ -123,7 +123,7 @@ class tEDMPrecondSuperRes(EDMPrecondSuperResolution):
         **model_kwargs: dict,
     ):
 
-        # Rescale sigma to account nu scaling
+        # Rescale sigma to account for nu scaling
         sigma *= np.sqrt(self.nu / (self.nu - 2))
 
         return super().forward(x, img_lr, sigma, force_fp32, **model_kwargs)
