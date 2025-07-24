@@ -25,14 +25,15 @@ from physicsnemo.models.diffusion import UNet
 from physicsnemo.utils.patching import RandomPatching2D
 
 
-def test_residualloss_initialization():
+@pytest.mark.parametrize("device", ["cuda:0", "cpu"])
+def test_residualloss_initialization(device):
     # Mock regression network
-    regression_net = torch.nn.Linear(1, 1)
+    regression_net = torch.nn.Linear(1, 1).to(device)
 
     # Test default parameters
     loss_func = tEDMResidualLoss(
         regression_net=regression_net,
-    )
+    ).to(device)
     assert loss_func.P_mean == 0.0
     assert loss_func.P_std == 1.2
     assert loss_func.sigma_data == 0.5
@@ -47,7 +48,7 @@ def test_residualloss_initialization():
         sigma_data=0.3,
         hr_mean_conditioning=True,
         nu=5,
-    )
+    ).to(device)
     assert loss_func.P_mean == 1.0
     assert loss_func.P_std == 2.0
     assert loss_func.sigma_data == 0.3
