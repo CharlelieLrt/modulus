@@ -224,7 +224,8 @@ def main(cfg: DictConfig) -> None:
             ResidualLoss = tEDMResidualLoss
             EDMPrecondSuperResolution = tEDMPrecondSuperRes
             logger0.info(
-                f"Using student-t distribution with nu={student_t_nu}. This is an experimental feature and APIs may change without notice. Use with caution."
+                f"Using student-t distribution with nu={student_t_nu}. "
+                f"This is an experimental feature and APIs may change without notice. Use with caution."
             )
 
     # Handle patch shape
