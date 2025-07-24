@@ -202,6 +202,14 @@ def main(cfg: DictConfig) -> None:
 
     # Parse the distribution type
     distribution = getattr(cfg.generation, "distribution", None)
+    if distribution is not None and not cfg.generation.inference_mode in [
+        "diffusion",
+        "all",
+    ]:
+        raise ValueError(
+            "cfg.generation.distribution should only be specified for "
+            "inference mode 'diffusion' or 'all'."
+        )
     if distribution not in ["normal", "student_t", None]:
         raise ValueError(f"Invalid distribution {distribution}")
     if distribution == "student_t":
