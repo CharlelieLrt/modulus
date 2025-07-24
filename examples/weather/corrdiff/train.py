@@ -215,7 +215,7 @@ def main(cfg: DictConfig) -> None:
         student_t_nu = getattr(cfg.training, "student_t_nu", None)
         if student_t_nu is None:
             raise ValueError(
-                "nu must be provided in cfg.training.student_t_nu for student_t distribution"
+                "student_t_nu must be provided in cfg.training.student_t_nu for student_t distribution"
             )
         elif student_t_nu <= 2:
             raise ValueError(f"Expected nu > 2, but got {student_t_nu}.")
@@ -224,8 +224,9 @@ def main(cfg: DictConfig) -> None:
             ResidualLoss = tEDMResidualLoss
             EDMPrecondSuperResolution = tEDMPrecondSuperRes
             logger0.info(
-                f"Using student-t distribution with nu={student_t_nu}. "
-                f"This is an experimental feature and APIs may change without notice. Use with caution."
+                f"Using student-t distribution with nu={student_t_nu}. \
+                This is an experimental feature and APIs may change without notice. \
+                Use with caution."
             )
 
     # Handle patch shape
