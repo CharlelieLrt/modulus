@@ -17,6 +17,7 @@
 import contextlib
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from functools import partial
+import warnings
 
 import hydra
 from omegaconf import OmegaConf, DictConfig
@@ -29,6 +30,9 @@ import nvtx
 import netCDF4 as nc
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.launch.logging import PythonLogger, RankZeroLoggingWrapper
+from physicsnemo.experimental.models.diffusion.preconditioning import (
+    tEDMPrecondSuperRes,
+)
 from physicsnemo.utils.patching import GridPatching2D
 from physicsnemo import Module
 from physicsnemo.utils.diffusion import deterministic_sampler, stochastic_sampler
@@ -196,9 +200,33 @@ def main(cfg: DictConfig) -> None:
     else:
         raise ValueError(f"Unknown sampling method {cfg.sampling.type}")
 
+    # Parse the distribution type
+    distribution = getattr(cfg.generation, "distribution", None)
+    if distribution not in ["normal", "student_t", None]:
+        raise ValueError(f"Invalid distribution {distribution}")
+    if distribution == "student_t":
+        nu = getattr(cfg.generation, "student_t_nu", None)
+        if nu is None:
+            raise ValueError(
+                "nu must be provided in cfg.generation.student_t_nu for student_t distribution"
+            )
+        elif nu <= 2:
+            raise ValueError(f"Expected nu > 2, but got {nu}.")
+        if net_res and not isinstance(net_res, tEDMPrecondSuperRes):
+            warnings.warn(
+                f"Student-t distribution sampling is supposed to be used with tEDMPrecondSuperRes model, but got {type(net_res)} instead."
+            )
+
     # Main generation definition
     def generate_fn():
         with nvtx.annotate("generate_fn", color="green"):
+
+            diffusion_step_kwargs = {}
+            if distribution is not None:
+                diffusion_step_kwargs["distribution"] = distribution
+            if nu is not None:
+                diffusion_step_kwargs["nu"] = nu
+
             # (1, C, H, W)
             img_lr = image_lr.to(memory_format=torch.channels_last)
 
@@ -234,6 +262,7 @@ def main(cfg: DictConfig) -> None:
                         device=device,
                         mean_hr=mean_hr,
                         lead_time_label=lead_time_label,
+                        **diffusion_step_kwargs,
                     )
             if cfg.generation.inference_mode == "regression":
                 image_out = image_reg
@@ -267,6 +296,7 @@ def main(cfg: DictConfig) -> None:
                     return None
             else:
                 return image_out
+        return
 
     # generate images
     output_path = getattr(cfg.generation.io, "output_filename", "corrdiff_output.nc")
