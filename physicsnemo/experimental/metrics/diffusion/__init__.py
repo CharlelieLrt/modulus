@@ -14,4 +14,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .loss import ResidualLoss
+from .loss import tEDMResidualLoss
