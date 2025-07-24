@@ -41,6 +41,11 @@ from physicsnemo.launch.utils import (
     save_checkpoint,
     get_checkpoint_dir,
 )
+from physicsnemo.experimental.metrics.diffusion import tEDMResidualLoss
+from physicsnemo.experimental.models.diffusion.preconditioning import (
+    tEDMPrecondSuperRes,
+)
+
 
 from datasets.dataset import init_train_valid_datasets_from_config, register_dataset
 from helpers.train_helpers import (
@@ -194,6 +199,34 @@ def main(cfg: DictConfig) -> None:
     if cfg.model.hr_mean_conditioning:
         img_in_channels += img_out_channels
 
+    # Handle distribution type
+    distribution = getattr(cfg.training, "distribution", None)
+    if distribution is not None and cfg.model.name not in [
+        "diffusion",
+        "patched_diffusion",
+        "lt_aware_patched_diffusion",
+    ]:
+        raise ValueError(
+            f"cfg.training.distribution should only be specified for diffusion models."
+        )
+    if distribution not in ["normal", "student_t", None]:
+        raise ValueError(f"Invalid distribution {distribution}")
+    if distribution == "student_t":
+        student_t_nu = getattr(cfg.training, "student_t_nu", None)
+        if student_t_nu is None:
+            raise ValueError(
+                "nu must be provided in cfg.training.student_t_nu for student_t distribution"
+            )
+        elif student_t_nu <= 2:
+            raise ValueError(f"Expected nu > 2, but got {student_t_nu}.")
+        # Reassign models and class for student-t distribution
+        else:
+            ResidualLoss = tEDMResidualLoss
+            EDMPrecondSuperResolution = tEDMPrecondSuperRes
+            logger0.info(
+                f"Using student-t distribution with nu={student_t_nu}. This is an experimental feature and APIs may change without notice. Use with caution."
+            )
+
     # Handle patch shape
     if cfg.model.name == "lt_aware_ce_regression":
         prob_channels = dataset.get_prob_channel_index()
@@ -243,6 +276,8 @@ def main(cfg: DictConfig) -> None:
         "use_fp16": fp16,
         "checkpoint_level": songunet_checkpoint_level,
     }
+    if student_t_nu is not None:
+        model_args["nu"] = student_t_nu
     if cfg.model.name == "lt_aware_ce_regression":
         model_args["prob_channels"] = prob_channels
     if hasattr(cfg.model, "model_args"):  # override defaults from config file
@@ -421,9 +456,13 @@ def main(cfg: DictConfig) -> None:
         "patched_diffusion",
         "lt_aware_patched_diffusion",
     ):
+        loss_init_kwargs = {}
+        if student_t_nu is not None:
+            loss_init_kwargs["nu"] = student_t_nu
         loss_fn = ResidualLoss(
             regression_net=regression_net,
             hr_mean_conditioning=cfg.model.hr_mean_conditioning,
+            **loss_init_kwargs,
         )
     elif cfg.model.name == "regression" or cfg.model.name == "lt_aware_regression":
         loss_fn = RegressionLoss()
