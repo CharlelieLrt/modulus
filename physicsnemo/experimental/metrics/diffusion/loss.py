@@ -57,7 +57,7 @@ class tEDMResidualLoss(ResidualLoss):
         nu: int = 10,
     ):
         if nu <= 2:
-            raise ValueError(f"Expected nu to be strictly greater than 2, but got {nu} instead.")
+            raise ValueError(f"Expected nu > 2, but got {nu}.")
         super().__init__(
             regression_net,
             P_mean=P_mean,

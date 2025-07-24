@@ -99,7 +99,7 @@ class tEDMPrecondSuperRes(EDMPrecondSuperResolution):
         # NOTE: Check if nu is greater than 2. This is to ensure the variance of the
         # Student-t prior during sampling is finite.
         if nu <= 2:
-            raise ValueError(f"Expected nu to be strictly greater than 2, but got {nu} instead.")
+            raise ValueError(f"Expected nu > 2, but got {nu}.")
 
         super().__init__(
             img_resolution=img_resolution,

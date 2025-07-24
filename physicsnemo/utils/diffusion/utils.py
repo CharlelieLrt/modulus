@@ -144,9 +144,7 @@ class StackedRandomGenerator:  # pragma: no cover
             )
         # Validation for nu
         if nu <= 2:
-            raise ValueError(
-                f"Expected nu to be strictly greater than 2, but got {nu} instead."
-            )
+            raise ValueError(f"Expected nu > 2, but got {nu}.")
 
         # Generate samples from Student-t distribution
         chi_dist = torch.distributions.Chi2(nu)
