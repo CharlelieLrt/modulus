@@ -17,24 +17,23 @@
 import pytest
 import torch
 
-from physicsnemo.experimental.metrics.diffusion import tEDMResidualLoss
-from physicsnemo.experimental.models.diffusion.preconditioning import (
-    tEDMPrecondSuperRes,
-)
 from physicsnemo.models.diffusion import UNet
 from physicsnemo.utils.patching import RandomPatching2D
 
 
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 def test_residualloss_initialization(device):
+
+    from physicsnemo.experimental.metrics.diffusion import tEDMResidualLoss
+
     # Mock regression network
     regression_net = torch.nn.Linear(1, 1).to(device)
 
     # Test default parameters
     loss_func = tEDMResidualLoss(
         regression_net=regression_net,
-    ).to(device)
-    assert loss_func.P_mean == 0.0
+    )
+    assert loss_func.P_mean == -1.2
     assert loss_func.P_std == 1.2
     assert loss_func.sigma_data == 0.5
     assert loss_func.hr_mean_conditioning is False
@@ -48,7 +47,7 @@ def test_residualloss_initialization(device):
         sigma_data=0.3,
         hr_mean_conditioning=True,
         nu=5,
-    ).to(device)
+    )
     assert loss_func.P_mean == 1.0
     assert loss_func.P_std == 2.0
     assert loss_func.sigma_data == 0.3
@@ -58,6 +57,8 @@ def test_residualloss_initialization(device):
 
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 def test_residualloss_call_method(device):
+    from physicsnemo.experimental.metrics.diffusion import tEDMResidualLoss
+
     def fake_residual_net(
         x,
         img_lr,
@@ -139,6 +140,11 @@ def test_residualloss_call_method(device):
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 def test_call_method_residualloss_with_unet(device):
 
+    from physicsnemo.experimental.metrics.diffusion import tEDMResidualLoss
+    from physicsnemo.experimental.models.diffusion.preconditioning import (
+        tEDMPrecondSuperRes,
+    )
+
     res, inc, outc = 64, 2, 3
     N_pos = 2
     regression_model = UNet(
@@ -174,6 +180,12 @@ def test_call_method_residualloss_with_unet(device):
 # Test with UNets and hr_mean_conditioning
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 def test_call_method_residualloss_with_unet_hr_mean_conditioning(device):
+
+    from physicsnemo.experimental.metrics.diffusion import tEDMResidualLoss
+    from physicsnemo.experimental.models.diffusion.preconditioning import (
+        tEDMPrecondSuperRes,
+    )
+
     res, inc, outc = 64, 2, 3
     N_pos = 2
     regression_model = UNet(
@@ -211,6 +223,12 @@ def test_call_method_residualloss_with_unet_hr_mean_conditioning(device):
 # Test with UNets, hr_mean_conditioning, and lead-time aware embedding
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 def test_call_method_residualloss_with_lt_unet_hr_mean_conditioning(device):
+
+    from physicsnemo.experimental.metrics.diffusion import tEDMResidualLoss
+    from physicsnemo.experimental.models.diffusion.preconditioning import (
+        tEDMPrecondSuperRes,
+    )
+
     res, inc, outc = 64, 2, 3
     N_pos, lead_time_channels = 2, 4
     prob_channels = [0, 2]

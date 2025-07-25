@@ -18,9 +18,6 @@ import pytest
 import torch
 from pytest_utils import import_or_fail
 
-from physicsnemo.experimental.models.diffusion.preconditioning import (
-    tEDMPrecondSuperRes,
-)
 from physicsnemo.models.module import Module
 
 
@@ -28,6 +25,10 @@ from physicsnemo.models.module import Module
 def test_EDMPrecondSuperResolution_forward(device):
     b, c_target, x, y = 1, 3, 8, 8
     c_cond = 4
+
+    from physicsnemo.experimental.models.diffusion.preconditioning import (
+        tEDMPrecondSuperRes,
+    )
 
     # Create an instance of the preconditioner
     model = tEDMPrecondSuperRes(
@@ -58,6 +59,9 @@ def test_EDMPrecondSuperResolution_forward(device):
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"])
 def test_EDMPrecondSuperResolution_serialization(tmp_path, pytestconfig, device):
 
+    from physicsnemo.experimental.models.diffusion.preconditioning import (
+        tEDMPrecondSuperRes,
+    )
     from physicsnemo.launch.utils import load_checkpoint, save_checkpoint
 
     module = tEDMPrecondSuperRes(8, 1, 1, nu=10).to(device)
