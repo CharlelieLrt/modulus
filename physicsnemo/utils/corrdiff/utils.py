@@ -179,7 +179,7 @@ def diffusion_step(
             raise ValueError("nu must be provided for student_t distribution")
         elif nu <= 2:
             raise ValueError(
-                "nu must be greater than 2 for student_t distribution, but got {nu}."
+                f"Expected nu > 2 for student_t distribution, but got {nu}."
             )
         else:
             warnings.warn(
@@ -213,11 +213,16 @@ def diffusion_step(
                 img_shape[1],
             ]
             if distribution == "normal":
-                latents = rnd.randn(latents_shape).to(memory_format=torch.channels_last)
+                latents = rnd.randn(
+                    latents_shape,
+                    device=device,
+                ).to(memory_format=torch.channels_last)
             elif distribution == "student_t":
-                latents = rnd.randt(nu, latents_shape).to(
-                    memory_format=torch.channels_last
-                )
+                latents = rnd.randt(
+                    nu,
+                    latents_shape,
+                    device=device,
+                ).to(memory_format=torch.channels_last)
 
             with torch.inference_mode():
                 images = sampler_fn(
