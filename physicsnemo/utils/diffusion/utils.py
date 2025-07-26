@@ -59,8 +59,8 @@ class EasyDict(dict):  # pragma: no cover
 
 class StackedRandomGenerator:  # pragma: no cover
     """
-    Wrapper for torch.Generator that allows specifying a different random seed
-    for each sample in a minibatch.
+    Wrapper for ``torch.Generator`` that allows specifying a different random
+    seed for each sample in a minibatch.
 
     Parameters
     ----------
@@ -117,13 +117,13 @@ class StackedRandomGenerator:  # pragma: no cover
     ) -> torch.Tensor:
         """
         Generate stacked samples from a standard Student-t distribution with
-        ``nu`` degrees of freedom. This is useful when sampling from heavy tailed
+        ``nu`` degrees of freedom. This is useful when sampling from heavy-tailed
         diffusion models.
 
         Parameters
         ----------
         nu : int
-            Degrees of freedom for the Student-t distribution.
+            Degrees of freedom for the Student-t distribution. Must be > 2.
         size : Sequence[int] | torch.Size
             Size of the output tensor. Accepts any sequence of integers or a
             ``torch.Size`` instance. First dimension must match the number of
@@ -159,6 +159,22 @@ class StackedRandomGenerator:  # pragma: no cover
         return eps / torch.sqrt(kappa)
 
     def randn_like(self, input: torch.Tensor) -> torch.Tensor:
+        """
+        Generate stacked samples from a standard normal distribution with the same
+        shape and data type as the input tensor.
+
+        Parameters
+        ----------
+        input : torch.Tensor
+            Input tensor to match the shape, data type, memory layout, and
+            device of.
+
+        Returns
+        -------
+        torch.Tensor
+            Stacked samples from a standard normal distribution. Shape matches
+            ``input.shape``.
+        """
         return self.randn(
             input.shape, dtype=input.dtype, layout=input.layout, device=input.device
         )
@@ -169,6 +185,26 @@ class StackedRandomGenerator:  # pragma: no cover
         size: torch.Size | Sequence[int],
         **kwargs: Any,
     ) -> torch.Tensor:
+        """
+        Generate stacked samples from a uniform distribution over the integers.
+
+        Parameters
+        ----------
+        *args : Any
+            Required positional arguments to pass to ``torch.randint``.
+        size : Sequence[int] | torch.Size
+            Size of the output tensor. Accepts any sequence of integers or a
+            ``torch.Size`` instance. First dimension must match the number of
+            random seeds.
+        **kwargs : Any
+            Additional keyword arguments to pass to ``torch.randint``.
+
+        Returns
+        -------
+        torch.Tensor
+            Stacked samples from a uniform distribution over the integers. Shape
+            matches ``size``.
+        """
         if size[0] != len(self.generators):
             raise ValueError(
                 f"Expected first dimension of size {len(self.generators)}, got {size[0]}"
