@@ -33,7 +33,7 @@ def test_residualloss_initialization(device):
     loss_func = tEDMResidualLoss(
         regression_net=regression_net,
     )
-    assert loss_func.P_mean == -1.2
+    assert loss_func.P_mean == 0.0
     assert loss_func.P_std == 1.2
     assert loss_func.sigma_data == 0.5
     assert loss_func.hr_mean_conditioning is False

@@ -50,7 +50,7 @@ class tEDMResidualLoss(ResidualLoss):
     def __init__(
         self,
         regression_net: torch.nn.Module,
-        P_mean: float = -1.2,
+        P_mean: float = 0.0,
         P_std: float = 1.2,
         sigma_data: float = 0.5,
         hr_mean_conditioning: bool = False,
