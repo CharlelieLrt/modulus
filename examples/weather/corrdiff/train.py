@@ -224,10 +224,13 @@ def main(cfg: DictConfig) -> None:
             ResidualLoss = tEDMResidualLoss
             EDMPrecondSuperResolution = tEDMPrecondSuperRes
             logger0.info(
-                f"Using student-t distribution with nu={student_t_nu}. \
-                This is an experimental feature and APIs may change without notice. \
-                Use with caution."
+                f"Using student-t distribution with nu={student_t_nu}. "
+                f"This is an experimental feature and APIs may change without notice."
             )
+
+    # Parse P_mean and P_std
+    P_mean = getattr(cfg.training, "P_mean", None)
+    P_std = getattr(cfg.training, "P_std", None)
 
     # Handle patch shape
     if cfg.model.name == "lt_aware_ce_regression":
@@ -461,6 +464,10 @@ def main(cfg: DictConfig) -> None:
         loss_init_kwargs = {}
         if student_t_nu is not None:
             loss_init_kwargs["nu"] = student_t_nu
+        if P_mean is not None:
+            loss_init_kwargs["P_mean"] = P_mean
+        if P_std is not None:
+            loss_init_kwargs["P_std"] = P_std
         loss_fn = ResidualLoss(
             regression_net=regression_net,
             hr_mean_conditioning=cfg.model.hr_mean_conditioning,

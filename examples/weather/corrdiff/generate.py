@@ -207,11 +207,11 @@ def main(cfg: DictConfig) -> None:
         "all",
     ]:
         raise ValueError(
-            "cfg.generation.distribution should only be specified for "
-            "inference mode 'diffusion' or 'all'."
+            f"cfg.generation.distribution should only be specified for "
+            f"inference mode 'diffusion' or 'all', but got {cfg.generation.inference_mode}."
         )
     if distribution not in ["normal", "student_t", None]:
-        raise ValueError(f"Invalid distribution {distribution}")
+        raise ValueError(f"Invalid distribution: {distribution}.")
     if distribution == "student_t":
         student_t_nu = getattr(cfg.generation, "student_t_nu", None)
         if student_t_nu is None:
@@ -226,6 +226,10 @@ def main(cfg: DictConfig) -> None:
                 f"tEDMPrecondSuperRes model, but got {type(net_res)} instead."
             )
 
+    # Parse P_mean and P_std
+    P_mean = getattr(cfg.generation, "P_mean", None)
+    P_std = getattr(cfg.generation, "P_std", None)
+
     # Main generation definition
     def generate_fn():
         with nvtx.annotate("generate_fn", color="green"):
@@ -235,6 +239,10 @@ def main(cfg: DictConfig) -> None:
                 diffusion_step_kwargs["distribution"] = distribution
             if student_t_nu is not None:
                 diffusion_step_kwargs["nu"] = student_t_nu
+            if P_mean is not None:
+                diffusion_step_kwargs["P_mean"] = P_mean
+            if P_std is not None:
+                diffusion_step_kwargs["P_std"] = P_std
 
             # (1, C, H, W)
             img_lr = image_lr.to(memory_format=torch.channels_last)
