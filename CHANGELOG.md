@@ -68,6 +68,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `++training.nu_student_t=<nu_value>`. For generation, this feature can be
   enabled with similar overrides: `++generation.distribution=student_t` and
   `++generation.nu_student_t=<nu_value>`.
+- CorrDiff example: the parameters `P_mean` and `P_std` (used to compute the
+  noise level `sigma`) are now configurable. They can be set with the hydra
+  overrides `++training.P_mean=<P_mean_value>` and
+  `++training.P_std=<P_std_value>` for training (and similar ones with
+  `training` replaced by `generation` for generation).
 
 ### Deprecated
 
