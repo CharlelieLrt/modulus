@@ -17,7 +17,6 @@
 import contextlib
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from functools import partial
-import warnings
 
 import hydra
 from omegaconf import OmegaConf, DictConfig
@@ -202,6 +201,7 @@ def main(cfg: DictConfig) -> None:
 
     # Parse the distribution type
     distribution = getattr(cfg.generation, "distribution", None)
+    student_t_nu = getattr(cfg.generation, "student_t_nu", None)
     if distribution is not None and not cfg.generation.inference_mode in [
         "diffusion",
         "all",
@@ -213,7 +213,6 @@ def main(cfg: DictConfig) -> None:
     if distribution not in ["normal", "student_t", None]:
         raise ValueError(f"Invalid distribution: {distribution}.")
     if distribution == "student_t":
-        student_t_nu = getattr(cfg.generation, "student_t_nu", None)
         if student_t_nu is None:
             raise ValueError(
                 "student_t_nu must be provided in cfg.generation.student_t_nu for student_t distribution"
@@ -221,10 +220,15 @@ def main(cfg: DictConfig) -> None:
         elif student_t_nu <= 2:
             raise ValueError(f"Expected nu > 2, but got {student_t_nu}.")
         if net_res and not isinstance(net_res, tEDMPrecondSuperRes):
-            warnings.warn(
+            logger0.warning(
                 f"Student-t distribution sampling is supposed to be used with "
-                f"tEDMPrecondSuperRes model, but got {type(net_res)} instead."
+                f"tEDMPrecondSuperRes model, but got {type(net_res)}."
             )
+    elif isinstance(net_res, tEDMPrecondSuperRes):
+        logger0.warning(
+            f"tEDMPrecondSuperRes model is supposed to be used with student-t "
+            f"distribution, but got {distribution}."
+        )
 
     # Parse P_mean and P_std
     P_mean = getattr(cfg.generation, "P_mean", None)

@@ -25,7 +25,7 @@ from physicsnemo.models.meta import ModelMetaData
 
 
 @dataclass
-class tEDMPrecondMetaData(ModelMetaData):
+class tEDMPrecondSuperResMetaData(ModelMetaData):
     """tEDMPrecondSuperRes meta data"""
 
     name: str = "tEDMPrecondSuperRes"
@@ -110,9 +110,10 @@ class tEDMPrecondSuperRes(EDMPrecondSuperResolution):
             sigma_data=sigma_data,
             sigma_min=sigma_min,
             sigma_max=sigma_max,
-            **model_kwargs
+            **model_kwargs,
         )
         self.nu = nu
+        self.meta = tEDMPrecondSuperResMetaData()
 
     def forward(
         self,

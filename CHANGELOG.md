@@ -64,15 +64,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for improved performance.
 - CorrDiff example: added option for Student-t EDM (t-EDM) in `train.py` and
   `generate.py`. When training a CorrDiff diffusion model, this feature can be
-  enabled with the hydra overrides `++training.distribution=student_t` and
-  `++training.nu_student_t=<nu_value>`. For generation, this feature can be
+  enabled with the hydra overrides `++training.hp.distribution=student_t` and
+  `++training.hp.nu_student_t=<nu_value>`. For generation, this feature can be
   enabled with similar overrides: `++generation.distribution=student_t` and
   `++generation.nu_student_t=<nu_value>`.
 - CorrDiff example: the parameters `P_mean` and `P_std` (used to compute the
   noise level `sigma`) are now configurable. They can be set with the hydra
-  overrides `++training.P_mean=<P_mean_value>` and
-  `++training.P_std=<P_std_value>` for training (and similar ones with
-  `training` replaced by `generation` for generation).
+  overrides `++training.hp.P_mean=<P_mean_value>` and
+  `++training.hp.P_std=<P_std_value>` for training (and similar ones with
+  `training.hp` replaced by `generation` for generation).
 
 ### Deprecated
 
