@@ -1,0 +1,212 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+import argparse
+import json
+import math
+from pathlib import Path
+from typing import Dict
+
+import torch
+
+from examples.geophysics.diffusion_fwi.datasets.dataset import EFWIDatapipe
+from physicsnemo.distributed import DistributedManager
+from physicsnemo.launch.logging import PythonLogger, RankZeroLoggingWrapper
+
+_VARIABLES = set()
+
+
+def main() -> None:
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser("Compute dataset statistics (mean/std/min/max)")
+    parser.add_argument(
+        "--dir",
+        type=str,
+        required=True,
+        help="Path to the dataset directory (containing the 'samples' folder)",
+    )
+    parser.add_argument("--batch_size", type=int, default=512, help="Batch size per device")
+    parser.add_argument("--num_workers", type=int, default=1, help="Number of workers per device")
+    args = parser.parse_args()
+
+    # Validate dataset directory
+    data_dir = Path(args.dir).expanduser().resolve()
+    if not (data_dir / "samples").is_dir():
+        raise FileNotFoundError(f"{data_dir}/samples not found.")
+
+    # Initialize distributed manager
+    DistributedManager.initialize()
+    dist = DistributedManager()
+    logger = PythonLogger("compute_stats")
+    logger0 = RankZeroLoggingWrapper(logger, dist)
+
+    logger.info(f"Rank: {dist.rank}, Device: {dist.device}")
+
+    # Build datapipes (train & test)
+    train_dp = EFWIDatapipe(
+        data_dir=data_dir,
+        phase="train",
+        batch_size_per_device=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        device=dist.device,
+        process_rank=dist.rank,
+        world_size=dist.world_size,
+    )
+    test_dp = EFWIDatapipe(
+        data_dir=data_dir,
+        phase="test",
+        batch_size_per_device=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        device=dist.device,
+        process_rank=dist.rank,
+        world_size=dist.world_size,
+    )
+
+    # Define statistics accumulators
+    def _init_stats(var_name: str, d: Dict[str, float]) -> None:
+        d[f"sum_{var_name}"] = torch.tensor(0.0, device=dist.device)
+        d[f"sum_{var_name}2"] = torch.tensor(0.0, device=dist.device)
+        d[f"min_{var_name}"] = torch.tensor(float("inf"), device=dist.device)
+        d[f"max_{var_name}"] = torch.tensor(float("-inf"), device=dist.device)
+        return
+
+    train_stats = {}
+    test_stats = {}
+    ns_train_local = 0  # number of samples processed on *this* rank
+    ns_test_local = 0
+
+    # TODO: can be removed?
+    train_dp.set_epoch(1)
+    test_dp.set_epoch(1)
+
+    # Accumulate statistics for train dataset
+    logger0.info("Accumulating statistics for train dataset...")
+    for batch in enumerate(train_dp):
+        B = next(iter(batch.values())).shape[0]
+        ns_train_local += B
+        for var_name, v in batch.items():
+            if f"sum_{var_name}" not in train_stats:
+                _init_stats(var_name, train_stats)
+                _VARIABLES.add(var_name)
+            nb_points = math.prod(v.shape[-2:])
+            train_stats[f"sum_{v}"] += v.sum() / nb_points
+            train_stats[f"sum_{v}2"] += (v ** 2).sum() / nb_points
+            train_stats[f"min_{v}"] = torch.minimum(train_stats[f"min_{v}"], torch.amin(v))
+            train_stats[f"max_{v}"] = torch.maximum(train_stats[f"max_{v}"], torch.amax(v))
+
+    logger0.info(f"Discovered variables: {', '.join(_VARIABLES)}")
+
+    if dist.world_size > 1:
+        torch.distributed.barrier()
+
+    # Accumulate statistics for test dataset
+    logger0.info("Accumulating statistics for test dataset...")
+    for batch in test_dp:
+        B = next(iter(batch.values())).shape[0]
+        ns_test_local += B
+        for var_name, v in batch.items():
+            if f"sum_{var_name}" not in test_stats:
+                _init_stats(var_name, test_stats)
+            nb_points = math.prod(v.shape[-2:])
+            test_stats[f"sum_{var_name}"] += v.sum() / nb_points
+            test_stats[f"sum_{var_name}2"] += (v ** 2).sum() / nb_points
+            test_stats[f"min_{var_name}"] = torch.minimum(test_stats[f"min_{var_name}"], torch.amin(v))
+            test_stats[f"max_{var_name}"] = torch.maximum(test_stats[f"max_{var_name}"], torch.amax(v))
+
+    if dist.world_size > 1:
+        torch.distributed.barrier()
+   
+    # Reduce across ranks (SUM for sums, MIN/MAX for extrema)
+    logger0.info("Reducing across ranks...")
+    if dist.world_size > 1:
+        ns = torch.tensor([ns_train_local, ns_test_local], device=dist.device)
+        torch.distributed.all_reduce(ns, op=torch.distributed.ReduceOp.SUM)
+        ns_train, ns_test = ns[0].item(), ns[1].item()
+
+        # Define reduction operations
+        opSUM = torch.distributed.ReduceOp.SUM
+        opMIN = torch.distributed.ReduceOp.MIN
+        opMAX = torch.distributed.ReduceOp.MAX
+
+        for v in _VARIABLES:
+            train_stats[f"sum_{v}"] = torch.distributed.all_reduce(train_stats[f"sum_{v}"], op=opSUM)
+            train_stats[f"sum_{v}2"] = torch.distributed.all_reduce(train_stats[f"sum_{v}2"], op=opSUM)
+            test_stats[f"sum_{v}"] = torch.distributed.all_reduce(test_stats[f"sum_{v}"], op=opSUM)
+            test_stats[f"sum_{v}2"] = torch.distributed.all_reduce(test_stats[f"sum_{v}2"], op=opSUM)
+            train_stats[f"min_{v}"] = torch.distributed.all_reduce(train_stats[f"min_{v}"], op=opMIN)
+            train_stats[f"max_{v}"] = torch.distributed.all_reduce(train_stats[f"max_{v}"], op=opMAX)
+            test_stats[f"min_{v}"] = torch.distributed.all_reduce(test_stats[f"min_{v}"], op=opMIN)
+            test_stats[f"max_{v}"] = torch.distributed.all_reduce(test_stats[f"max_{v}"], op=opMAX)
+    else:
+        ns_train, ns_test = ns_train_local, ns_test_local
+
+    if dist.world_size > 1:
+        torch.distributed.barrier()
+
+    # Final computation of mean/std/min/max (on rank 0 only)
+    logger0.info("Computing final statistics...")
+    if dist.rank == 0:
+        all_samples = ns_train + ns_test
+        final_stats: Dict[str, Dict] = {}
+        for v in _VARIABLES:
+            # TODO: check these computations and make sure they are correct
+            train_mean = train_stats[f"sum_{v}"] / ns_train
+            train_std = math.sqrt(train_stats[f"sum_{v}2"] / ns_train - train_mean ** 2)
+
+            test_mean = test_stats[f"sum_{v}"] / ns_test
+            test_std = math.sqrt(test_stats[f"sum_{v}2"] / ns_test - test_mean ** 2)
+
+            all_mean = (train_stats[f"sum_{v}"] + test_stats[f"sum_{v}"]) / all_samples
+            all_std = math.sqrt(
+                (train_stats[f"sum_{v}2"] + test_stats[f"sum_{v}2"]) / all_samples - all_mean ** 2
+            )
+
+            final_stats[v] = {
+                "train": {
+                    "min": train_stats[f"min_{v}"],
+                    "max": train_stats[f"max_{v}"],
+                    "mean": train_mean,
+                    "std": train_std,
+                },
+                "test": {
+                    "min": test_stats[f"min_{v}"],
+                    "max": test_stats[f"max_{v}"],
+                    "mean": test_mean,
+                    "std": test_std,
+                },
+                "all": {
+                    "min": min(train_stats[f"min_{v}"], test_stats[f"min_{v}"]),
+                    "max": max(train_stats[f"max_{v}"], test_stats[f"max_{v}"]),
+                    "mean": all_mean,
+                    "std": all_std,
+                },
+            }
+
+        # Save json file
+        out_file = data_dir / "stats.json"
+        with open(out_file, "w") as f:
+            json.dump(final_stats, f, indent=4)
+        logger0.success(f"Statistics written to {out_file}")
+
+    # Make sure all ranks wait for I/O completion
+    if dist.world_size > 1:
+        torch.distributed.barrier()
+
+if __name__ == "__main__":
+    main()

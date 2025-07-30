@@ -1,0 +1,62 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2024 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Model configuration
+model:
+  regression_checkpoint_path: regression_checkpoint/ElasticNet.0.85.mdlus  # Path to regression model checkpoint
+  diffusion_checkpoint_path: "./checkpoints/diffusion_fwi/latest.mdlus"  # Path to diffusion model checkpoint
+  checkpointing_level: 0  # Level of gradient checkpointing (0 for no checkpointing)
+
+# Dataset configuration
+dataset:
+  name: "CFB"  # Dataset name
+  directory: "../data/raw_dataset"  # Training data directory
+  nb_sources: 5  # Number of input channels for each input (ux, uz)
+  nb_timesteps: 1000  # Number of timesteps (height of the input image)
+  nb_receivers: 70  # Number of receivers (width of the input image)
+  subsurface_resolution: [70, 70]  # Resolution of subsurface image (shape of output image)
+  transform: "ZscoreNormalize"  # Data transform: "ZscoreNormalize" or "MinMaxNormalize"
+
+# Generation configuration
+generation:
+  batch_size: 16  # Batch size for generation
+  num_workers: 2  # Number of workers for data loading
+  sample_indices: [0, 1, 2, 3, 4]  # Indices of samples to generate
+  num_ensembles: 10  # Number of ensemble members to generate
+  inference_mode: "all"  # Options: "regression", "diffusion", or "all" (combines both)
+  seed: 42  # Random seed for reproducibility
+  force_fp16: false  # Whether to force half precision
+
+# Diffusion sampler configuration
+sampler:
+  type: "stochastic"  # Options: "deterministic" or "stochastic"
+  num_steps: 20  # Number of steps for the diffusion sampler
+  sigma_min: 0.002  # Minimum noise level
+  sigma_max: 80.0  # Maximum noise level
+  solver: "euler"  # ODE solver to use ("euler" or "heun")
+
+# I/O configuration
+io:
+  output_dir: "./outputs"  # Directory to save generated outputs
+  plot_results: true  # Whether to plot the generated results
+  save_numpy: true  # Whether to save the raw numpy arrays
+
+# Wandb configuration
+wandb:
+  mode: "offline"  # "online", "offline", or "disabled"
+  results_dir: "./wandb/"  # Directory to save wandb logs
+  entity: "modulus"  # Entity (username or team name) for Weights & Biases
+  wandb_id: null  # Set to a valid wandb ID to connect to an existing run (REQUIRED) 

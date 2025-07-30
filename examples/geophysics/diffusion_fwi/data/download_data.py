@@ -27,6 +27,11 @@ import numpy as np
 import yaml
 from tqdm import tqdm
 
+# TODO: rename process into reorg
+# TODO: remove stats computation from this script
+# TODO: add train/test in samples file name + in the datagen as well
+
+
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(processName)s - %(message)s"
 )

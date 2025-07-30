@@ -69,6 +69,8 @@ exploration:
 
 ## Getting started
 
+# TODO: add prerequisite in diffusion models + add links to other examples
+
 ## Dataset preprocessing
 
 > **⚠️  Warning:** Note that the E-FWI dataset is distributed under a non-commercial

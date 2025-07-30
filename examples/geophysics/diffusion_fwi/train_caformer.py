@@ -23,11 +23,11 @@ import datetime
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import to_absolute_path
 from torch.nn.parallel import DistributedDataParallel
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau,CosineAnnealingLR
 from functools import partial
 import mlflow
-
-from physicsnemo.datapipes.cae.efwi_datapipe import EFWIDatapipe
+import numpy as np
+from physicsnemo.datapipes.cae.efwi_datapipe_combined import EFWIDatapipe
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.launch.logging import PythonLogger, RankZeroLoggingWrapper
 from physicsnemo.launch.logging import LaunchLogger
@@ -38,12 +38,12 @@ from physicsnemo.launch.utils import (
     save_checkpoint,
     get_checkpoint_dir,
 )
-from physicsnemo.models.geophysics.diffusion import DiffusionFWIUNet
+from physicsnemo.models.geophysics.diffusion_improved import DiffusionPIO
 from physicsnemo.models.diffusion import edm_precond
-from physicsnemo.metrics.diffusion import BaseResidualLoss
+from physicsnemo.metrics.diffusion import NoResidualLoss
 from physicsnemo.models.diffusion.conditional import ConditionalDiffusionAdapter
-from physicsnemo.utils.transforms import ZscoreNormalize, MinMaxNormalize
-from physicsnemo import Module
+from physicsnemo.utils.transforms import MinMaxNormalize, Normalize
+# from physicsnemo import Module
 
 
 @hydra.main(version_base="1.3", config_path="conf", config_name="config")
@@ -60,16 +60,16 @@ def main(cfg: DictConfig) -> None:
     rank_zero_logger.file_logging(f"launch-{timestamp}.log")
 
     # Initialize Weights & Biases
-    checkpoint_dir = get_checkpoint_dir(str(cfg.io.checkpoint_dir), "diffusion_fwi")
+    checkpoint_dir = get_checkpoint_dir(str(cfg.io.checkpoint_dir), "caformer_noflip")
     if cfg.io.load_checkpoint:
         metadata = {"wandb_id": None}
-        load_checkpoint(checkpoint_dir, metadata=metadata)
+        load_checkpoint(checkpoint_dir, metadata_dict=metadata)
         wandb_id, resume = metadata["wandb_id"], "must"
         rank_zero_logger.info(f"Resuming wandb run with ID: {wandb_id}")
     else:
         wandb_id, resume = None, None
     initialize_wandb(
-        project="DiffusionFWI-Training",
+        project="DiffusionCaformer-Training",
         entity=cfg.wandb.entity if hasattr(cfg.wandb, "entity") else "PhysicsNeMo",
         mode=cfg.wandb.mode,
         config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True),
@@ -82,8 +82,8 @@ def main(cfg: DictConfig) -> None:
     # Initialize MLflow
     initialize_mlflow(
         experiment_name="Modulus-Launch",
-        experiment_desc="Diffusion FWI Training",
-        run_desc="Diffusion FWI Training run",
+        experiment_desc="Diffusion Caformer Training",
+        run_desc="Diffusion Caformer Training run",
         user_name="PhysicsNeMo User",
         mode="offline" if cfg.wandb.mode == "offline" else "online",
     )
@@ -97,11 +97,6 @@ def main(cfg: DictConfig) -> None:
 
     logger.info(f"Rank: {dist.rank}, Device: {dist.device}")
 
-    # Load pre-trained regression model
-    regression_checkpoint_path = to_absolute_path(cfg.model.regression_checkpoint_path)
-    regression_net = Module.from_checkpoint(regression_checkpoint_path)
-    regression_net.eval().requires_grad_(False).to(dist.device)
-    rank_zero_logger.success("Loaded the pre-trained regression model")
 
     # Initialize diffusion model
     model_args = {}
@@ -120,16 +115,17 @@ def main(cfg: DictConfig) -> None:
             f"Using conditioning model configuration: {conditioning_model_kwargs}"
         )
 
-    model_backbone = DiffusionFWIUNet(
+    model_backbone = DiffusionPIO(
         nb_sources=cfg.dataset.nb_sources,
         nb_timesteps=cfg.dataset.nb_timesteps,
         nb_receivers=cfg.dataset.nb_receivers,
         img_resolution=list(cfg.dataset.subsurface_resolution),
-        x_mean_conditioning=True,
-        conditioning_model_type=cfg.model.conditioning_model_type,
+        x_mean_conditioning=False,
+        state_channels=3,  # vp, vs, rho
         unet_kwargs=model_args,
-        conditioning_model_kwargs=conditioning_model_kwargs,
+        perceiver_args = conditioning_model_kwargs
     ).to(dist.device)
+    rank_zero_logger.info(f"Parameters : {sum(p.numel() for p in model_backbone.parameters())}")
     # Thin wrapper around the model_backbone to convert it into a conditional
     # diffusion model compatible with EDM preconditioning and ResidualLoss
     model = ConditionalDiffusionAdapter(
@@ -162,23 +158,35 @@ def main(cfg: DictConfig) -> None:
         device=dist.device,
         process_rank=dist.rank,
         world_size=dist.world_size,
+        folder_name = "samples_new"
     )
 
     # Define transforms (default to Normalize)
     transform_name = (
-        cfg.dataset.transform
-        if hasattr(cfg.dataset, "transform")
-        else "ZscoreNormalize"
+        cfg.dataset.transform if hasattr(cfg.dataset, "transform") else "Normalize"
     )
     rank_zero_logger.info(f"Using transform: {transform_name}")
     if transform_name == "MinMaxNormalize":
-        stats_min = train_dataset.get_stats("min")
-        stats_max = train_dataset.get_stats("max")
-        train_dataset = MinMaxNormalize(train_dataset, stats_min, stats_max)
+        transforms_u = MinMaxNormalize
+        transforms_v = MinMaxNormalize
+    elif transform_name == "Normalize":
+        transforms_u = Normalize
+        transforms_v = Normalize
+    elif transform_name == "Mixed":
+        transforms_u = MinMaxNormalize
+        transforms_v = Normalize
     else:
-        stats_mean = train_dataset.get_stats("mean")
-        stats_std = train_dataset.get_stats("std")
-        train_dataset = ZscoreNormalize(train_dataset, stats_mean, stats_std)
+        raise ValueError(
+            f"Unsupported transform: {transform_name}. "
+            "Supported transforms are 'MinMaxNormalize', 'Normalize', and 'Mixed'."
+        )
+        
+    train_dataset.set_transforms(
+        # ux=transforms_u,
+        # uz=transforms_u,
+        vp=transforms_v,
+        vs=transforms_v,
+    )
 
     # Initialize the validation dataset
     val_dataset = EFWIDatapipe(
@@ -191,15 +199,18 @@ def main(cfg: DictConfig) -> None:
         device=dist.device,
         process_rank=dist.rank,
         world_size=dist.world_size,
+        folder_name = "samples_new"
     )
-    if transform_name == "MinMaxNormalize":
-        val_dataset = MinMaxNormalize(val_dataset, stats_min, stats_max)
-    else:
-        val_dataset = ZscoreNormalize(val_dataset, stats_mean, stats_std)
+    val_dataset.set_transforms(
+        # ux=transforms_u,
+        # uz=transforms_u,
+        vp=transforms_v,
+        vs=transforms_v,
+    )
 
     # Initialize residual loss with pre-trained regression model
     # Always use hr_mean_conditioning=True
-    loss_fn = BaseResidualLoss(regression_model=regression_net)
+    loss_fn = NoResidualLoss(P_mean=0.0,P_std=1.0,sigma_data=0.5)
 
     # Create optimizer
     optimizer_class = None
@@ -224,10 +235,10 @@ def main(cfg: DictConfig) -> None:
     )
 
     # Learning rate scheduler
-    scheduler = ReduceLROnPlateau(
+    scheduler = CosineAnnealingLR(
         optimizer,
-        factor=cfg.training.scheduler.factor,
-        patience=cfg.training.scheduler.patience,
+        T_max=cfg.training.max_epochs,   # number of epochs over which to anneal
+        eta_min=5e-6                        # minimum LR at the end of the cycle
     )
 
     # Load checkpoint if explicitly requested
@@ -242,11 +253,12 @@ def main(cfg: DictConfig) -> None:
             optimizer=optimizer,
             scheduler=scheduler,
             device=dist.device,
-            metadata=metadata,
+            metadata_dict=metadata,
         )
         total_samples_trained = metadata["total_samples_trained"]
 
     # Log initial learning rate
+    optimizer.param_groups[0]["lr"] = 5e-4
     current_lr = optimizer.param_groups[0]["lr"]
     rank_zero_logger.info(f"Starting learning rate: {current_lr}")
     if dist.rank == 0:
@@ -267,8 +279,16 @@ def main(cfg: DictConfig) -> None:
             "train", epoch=epoch, num_mini_batch=len(train_dataset), epoch_alert_freq=1
         ) as launchlog:
             for i, data in enumerate(train_dataset):
-                ux, uz = data["ux"], data["uz"]
-                vp_target, vs_target = data["vp"], data["vs"]
+                ux = torch.nn.functional.pad(data["vx"].permute(0, 1, 3, 2),pad=(0,1))
+                uz = torch.nn.functional.pad(data["vz"].permute(0, 1, 3, 2),pad=(0,1))
+                vp_target, vs_target, rho_target = data["vp"][:,None], data["vs"][:,None], data["rho"][:,None]
+                # #Augmentation
+                # if np.random.random() < 0.5:
+                #     ux= torch.flip(ux,dims=[-3,-1])
+                #     vp_target= torch.flip(vp_target,dims=[-1])
+                #     uz= torch.flip(uz,dims=[-3,-1])
+                #     vs_target= torch.flip(vs_target,dims=[-1])
+
                 batch_size = ux.shape[0]
                 epoch_samples += batch_size
 
@@ -276,9 +296,8 @@ def main(cfg: DictConfig) -> None:
 
                 loss = loss_fn(
                     diffusion_model=model_fn,  # Use model_fn instead of model
-                    x=torch.cat([vp_target, vs_target], dim=1),
+                    x=torch.cat([vp_target, vs_target, rho_target], dim=1),
                     condition={"ux": ux, "uz": uz},
-                    regression_args=(ux, uz),
                 )
                 loss = torch.mean(loss)
 
@@ -348,8 +367,7 @@ def main(cfg: DictConfig) -> None:
             rank_zero_logger.info(f"epoch: {epoch}, val loss: {mean_val_loss}")
 
         # Adjust learning rate based on validation loss
-        scheduler.step(mean_val_loss)
-
+        scheduler.step()
         # Save checkpoint periodically
         if dist.world_size > 1:
             torch.distributed.barrier()
@@ -383,22 +401,22 @@ def validation_step(model, dataset, loss_fn, dist):
     num_samples = 0.0
 
     for i, data in enumerate(dataset):
-        ux, uz = data["ux"], data["uz"]
-        vp_target, vs_target = data["vp"], data["vs"]
+        ux = torch.nn.functional.pad(data["vx"].permute(0, 1, 3, 2),pad=(0,1))
+        uz = torch.nn.functional.pad(data["vz"].permute(0, 1, 3, 2),pad=(0,1))
+        vp_target, vs_target, rho_target = data["vp"][:,None], data["vs"][:,None], data["rho"][:,None]
 
         # Forward pass with validation data
         loss = loss_fn(
             diffusion_model=model,
-            x=torch.cat([vp_target, vs_target], dim=1),
+            x=torch.cat([vp_target, vs_target, rho_target], dim=1),
             condition={"ux": ux, "uz": uz},
-            regression_args=(ux, uz),
         )
         loss = torch.mean(loss)
         loss_epoch += loss.item() * ux.shape[0]
         num_samples += ux.shape[0]
 
     # Average validation loss across all ranks
-    mean_val_loss = average_loss(dist, loss_epoch, num_samples)
+    mean_val_loss, num_samples_all_ranks = average_loss(dist, loss_epoch, num_samples)
 
     return mean_val_loss
 
@@ -417,4 +435,3 @@ def average_loss(dist, loss_value: float, sample_count: int) -> float:
 
 if __name__ == "__main__":
     main()
-
