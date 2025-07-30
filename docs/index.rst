@@ -115,6 +115,13 @@ models at scale.
 
 .. toctree::
    :maxdepth: 1
+   :caption: Examples: Geophysics
+   :name: Examples: Geophysics
+
+   examples/geophysics/diffusion_fwi/README.rst
+
+.. toctree::
+   :maxdepth: 1
    :caption: Examples: Molecular Dynamics
    :name: Examples: Molecular Dynamics
 
