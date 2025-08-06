@@ -19,6 +19,7 @@ import logging
 import glob
 import argparse
 from pathlib import Path
+from typing import Dict
 
 import numpy as np
 import torch
@@ -66,19 +67,19 @@ def classify_lithology(
         - Gray & Head (2000), "Modeling, migration, and velocity analysis in salt", Geophysics
     """
 
-    vpr = vp / vs  # Vp/Vs ratio
-    lith = np.full(vp.shape, "Unknown", dtype=object)
-    alpha = np.zeros_like(vp, dtype=float)
-    beta = np.zeros_like(vp, dtype=float)
+    vpr: np.ndarray = vp / vs  # Vp/Vs ratio
+    lith: np.ndarray = np.full(vp.shape, "Unknown", dtype=object)
+    alpha: np.ndarray = np.zeros_like(vp, dtype=float)
+    beta: np.ndarray = np.zeros_like(vp, dtype=float)
 
     # Lithology Masks
-    shale_mask = vpr > 2.0  # Castagna et al., 1985
+    shale_mask: np.ndarray = vpr > 2.0  # Castagna et al., 1985
 
-    sandstone_mask = (
+    sandstone_mask: np.ndarray = (
         (vpr >= 1.6) & (vpr <= 2.2) & (vp >= 2500) & (vp <= 5000) & ~shale_mask
     )
 
-    limestone_mask = (
+    limestone_mask: np.ndarray = (
         (vp >= 5000)
         & (vp <= 6500)
         & (vpr >= 1.7)
@@ -87,7 +88,7 @@ def classify_lithology(
         & ~sandstone_mask
     )
 
-    dolomite_mask = (
+    dolomite_mask: np.ndarray = (
         (vp >= 5500)
         & (vp <= 7000)
         & (vpr >= 1.65)
@@ -97,7 +98,7 @@ def classify_lithology(
         & ~limestone_mask
     )
 
-    coal_mask = (
+    coal_mask: np.ndarray = (
         (vp < 3600)
         & (vpr > 1.8)
         & ~shale_mask
@@ -106,7 +107,7 @@ def classify_lithology(
         & ~dolomite_mask
     )
 
-    anhydrite_mask = (
+    anhydrite_mask: np.ndarray = (
         (vp >= 5800)
         & (vp <= 6800)
         & (vpr <= 1.8)
@@ -116,7 +117,7 @@ def classify_lithology(
     )
 
     # Salt: Vp ~4500 m/s, Vs ≈ 0 → large Vp/Vs
-    salt_mask = (
+    salt_mask: np.ndarray = (
         (vp >= 4300)
         & (vp <= 4700)
         & (vs < 700)
@@ -147,7 +148,7 @@ def classify_lithology(
     # Do not assign alpha/beta for salt, use fixed density
 
     # Fallback
-    fallback_mask = (alpha == 0) & (~salt_mask)
+    fallback_mask: np.ndarray = (alpha == 0) & (~salt_mask)
     lith[fallback_mask] = "Unknown"
     alpha[fallback_mask], beta[fallback_mask] = 0.31, 0.25  # Generic fallback
 
@@ -185,22 +186,28 @@ def compute_density(
         :math:`\rho = 2.15 \text{ g/cm}^3`
         (Gray & Head, 2000; Mavko et al.)
     """
-    rho = alpha * vp**beta
+    rho: np.ndarray = alpha * vp**beta
     if salt_mask is not None:
-        rho = np.where(salt_mask, 2.15, rho)
-    return rho
+        rho: np.ndarray = np.where(salt_mask, 2.15, rho)
+    return rho.astype(float)
 
 
 # Core processing function for a single file
-def process_file(filepath: str, device_id: int) -> tuple[str, str]:
+def process_file(
+    input_path: str,
+    output_path: str,
+    device_id: int | str,
+) -> tuple[str, str]:
     """
     Process a single file and save the results.
 
     Parameters
     ----------
-    filepath : str
+    input_path : str
         Path to the input file.
-    device_id : int
+    output_path : str
+        Path to the output directory.
+    device_id : int | str
         GPU ID to use for processing. If value provided is not an integer,
         the function will run on CPU.
 
@@ -211,20 +218,20 @@ def process_file(filepath: str, device_id: int) -> tuple[str, str]:
     """
 
     try:
-        device = (
+        device: torch.device = (
             torch.device(f"cuda:{device_id}")
             if isinstance(device_id, int)
             else torch.device("cpu")
         )
 
-        original_data = np.load(filepath)
-        vp_np = original_data["vp"]
-        vs_np = original_data["vs"]
+        original_data: Dict[str, np.ndarray] = np.load(input_path)
+        vp_np: np.ndarray = original_data["vp"]
+        vs_np: np.ndarray = original_data["vs"]
 
         if vp_np.ndim > 2:
-            vp_np = vp_np.reshape(-1, 70, 70)[0]
+            vp_np: np.ndarray = vp_np.reshape(-1, 70, 70)[0]
         if vs_np.ndim > 2:
-            vs_np = vs_np.reshape(-1, 70, 70)[0]
+            vs_np: np.ndarray = vs_np.reshape(-1, 70, 70)[0]
 
         # pr_np = compute_poisson_ratio(vp_np, vs_np)
         # rock_type = infer_rock_type(pr_np)
@@ -232,28 +239,29 @@ def process_file(filepath: str, device_id: int) -> tuple[str, str]:
         # rho_np = gardner_density(vp_np, a, b)
 
         lith, alpha, beta, salt_mask = classify_lithology(vp_np, vs_np)
-        rho_np = compute_density(vp_np, alpha, beta, salt_mask)
+        rho_np: np.ndarray = compute_density(vp_np, alpha, beta, salt_mask)
 
-        vp = torch.from_numpy(vp_np).float().to(device)
-        vs = torch.from_numpy(vs_np).float().to(device)
-        rho = torch.from_numpy(rho_np).float().to(device)
+        vp: torch.Tensor = torch.from_numpy(vp_np).float().to(device)
+        vs: torch.Tensor = torch.from_numpy(vs_np).float().to(device)
+        rho: torch.Tensor = torch.from_numpy(rho_np).float().to(device)
 
-        ny, nx = 70, 70
-        dx = 5.0
-        nt = 1000
-        dt = 0.001
-        freq = 15
-        peak_time = 1.5 / freq
-        n_shots = 5
-        source_depth = 1
-        receiver_depth = 1
-        n_receivers_per_shot = 69
+        # ny: int = 70
+        # nx: int = 70
+        dx: float = 5.0
+        nt: int = 1000
+        dt: float = 0.001
+        freq: int = 15
+        peak_time: float = 1.5 / freq
+        n_shots: int = 5
+        source_depth: int = 1
+        receiver_depth: int = 1
+        n_receivers_per_shot: int = 69
 
-        source_locations = torch.zeros(n_shots, 1, 2, dtype=torch.long, device=device)
+        source_locations: torch.Tensor = torch.zeros(n_shots, 1, 2, dtype=torch.long, device=device)
         source_locations[..., 0] = source_depth
         source_locations[:, 0, 1] = torch.arange(n_shots) * 17
 
-        receiver_locations = torch.zeros(
+        receiver_locations: torch.Tensor = torch.zeros(
             n_shots, n_receivers_per_shot, 2, dtype=torch.long, device=device
         )
         receiver_locations[..., 0] = receiver_depth
@@ -282,7 +290,7 @@ def process_file(filepath: str, device_id: int) -> tuple[str, str]:
             pml_width=[20, 20, 20, 20],
         )[-2:]
 
-        output_data = {
+        output_data: Dict[str, np.ndarray | torch.Tensor] = {
             "vp": vp_np,
             "vs": vs_np,
             "rho": rho_np,
@@ -290,18 +298,15 @@ def process_file(filepath: str, device_id: int) -> tuple[str, str]:
             "vz": receiver_amplitudes_z.cpu().numpy(),
         }
 
-        output_dir = os.path.dirname(filepath).replace(
-            f"{os.path.sep}samples", f"{os.path.sep}samples_new"
-        )
-        os.makedirs(output_dir, exist_ok=True)
-        output_filepath = os.path.join(output_dir, os.path.basename(filepath))
+        os.makedirs(output_path, exist_ok=True)
+        output_filepath: str = os.path.join(output_path, os.path.basename(input_path))
 
         np.savez(output_filepath, **output_data)
         return (output_filepath, "Success")
 
     except Exception as e:
-        logging.error(f"FAILED to process {filepath}: {e}", exc_info=True)
-        return (filepath, f"Failed: {e}")
+        logging.error(f"FAILED to process {input_path}: {e}", exc_info=True)
+        return (input_path, f"Failed: {e}")
 
 
 def process_file_wrapper(args_tuple):
@@ -319,43 +324,64 @@ def main():
     """
 
     # Setup argument parser
-    parser = argparse.ArgumentParser(
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
         description="Process individual vs and vp samples in .npz files. "
         "Infers lithology and density for each sample and generate "
         "new .npz files with vx and vz."
     )
     parser.add_argument(
-        "--path",
+        "--in_dir",
         type=str,
         required=True,
-        help="Path to the dataset directory containing the .npz files.",
+        help="Path to the dataset directory containing the .npz files. "
+        "Samples files are expected to be of the form in_dir/samples/train_sample_<idx>.npz "
+        "or in_dir/samples/test_sample_<idx>.npz.",
+    )
+    parser.add_argument(
+        "--out_dir",
+        type=str,
+        required=True,
+        help="Path to the output directory where the new .npz files will be saved. "
+        "New files will be of the form out_dir/samples/train_sample_<idx>.npz "
+        "or out_dir/samples/test_sample_<idx>.npz.",
     )
     args = parser.parse_args()
 
-    dataset_path = Path(args.path) / "samples"
-    file_list = glob.glob(os.path.join(dataset_path, "sample_*.npz"))
+    dataset_path: Path = Path(args.in_dir) / "samples"
+    output_path: Path = Path(args.out_dir) / "samples"
+    file_list: list[str] = (
+        sorted(
+            glob.glob(os.path.join(dataset_path, "train_sample_*.npz")),
+            key=lambda x: int(x.stem.split("_")[-1]),
+        )
+        + sorted(
+            glob.glob(os.path.join(dataset_path, "test_sample_*.npz")),
+            key=lambda x: int(x.stem.split("_")[-1]),
+        )
+    )
 
     if not file_list:
         logging.warning(f"No files found in {dataset_path}. Please check paths.")
         return
 
-    total_files = len(file_list)
-    logging.info(f"Found {total_files} files to process.")
+    total_files: int = len(file_list)
+    logging.info(f"Found {total_files} files to process in {dataset_path}.")
+    logging.info(f"Saving files to {output_path}.")
 
-    results = []
-    num_gpus = torch.cuda.device_count()
+    results: list[tuple[str, str]] = []
+    num_gpus: int = torch.cuda.device_count()
 
     if num_gpus == 0:
         logging.warning("No GPUs found. Running on CPU. This will be very slow.")
-        args = [(filepath, "cpu") for filepath in file_list]
+        args: list[tuple[str, str, str]] = [(filepath, output_path, "cpu") for filepath in file_list]
 
         for i, arg in enumerate(args):
             results.append(process_file(*arg))
             if (i + 1) % 1000 == 0:
-                logging.info(f"--- Processed {i + 1} / {total_files} files ---")
+                logging.info(f"Processed {i + 1} / {total_files} files")
     else:
         logging.info(f"Found {num_gpus} GPUs. Starting parallel processing.")
-        args = [(filepath, i % num_gpus) for i, filepath in enumerate(file_list)]
+        args: list[tuple[str, str, int]] = [(filepath, output_path, i % num_gpus) for i, filepath in enumerate(file_list)]
 
         with mp.get_context("spawn").Pool(processes=num_gpus) as pool:
             iterator = pool.imap_unordered(process_file_wrapper, args)
@@ -363,17 +389,17 @@ def main():
             for i, result in enumerate(iterator):
                 results.append(result)
                 if (i + 1) % 1000 == 0:
-                    logging.info(f"--- Processed {i + 1} / {total_files} files ---")
+                    logging.info(f"Processed {i + 1} / {total_files} files")
 
-    success_count = sum(1 for r in results if r[1] == "Success")
-    logging.info(f"\n--- Processing Complete ---")
+    success_count: int = sum(1 for r in results if r[1] == "Success")
+    logging.info("Processing Complete.")
     logging.info(f"{success_count} / {total_files} files processed successfully.")
 
     failed_files = [r for r in results if r[1] != "Success"]
     if failed_files:
-        logging.warning("\n--- Failed Files ---")
+        logging.warning("Failed Files")
         for f, reason in failed_files:
-            logging.warning(f"- {os.path.basename(f)}: {reason}")
+            logging.warning(f"{os.path.basename(f)}: {reason}")
 
 
 if __name__ == "__main__":

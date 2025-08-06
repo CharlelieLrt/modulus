@@ -17,19 +17,14 @@
 from pathlib import Path
 import sys
 import argparse
-import math
 import requests
 import os
 import subprocess
 import logging
+from typing import Dict, List
 
 import numpy as np
-import yaml
 from tqdm import tqdm
-
-# TODO: rename process into reorg
-# TODO: remove stats computation from this script
-# TODO: add train/test in samples file name + in the datagen as well
 
 
 logging.basicConfig(
@@ -37,8 +32,8 @@ logging.basicConfig(
 )
 
 # URLs for HuggingFace dataset parts
-HF_BASE_URL = "https://huggingface.co/datasets/ashynf/EFWI/resolve/main"
-DATASETS = {
+HF_BASE_URL: str = "https://huggingface.co/datasets/ashynf/EFWI/resolve/main"
+DATASETS: Dict[str, List[str]] = {
     "CFB": [
         f"{HF_BASE_URL}/CFB/CFB_split.zip",
         f"{HF_BASE_URL}/CFB/CFB_split.z01",
@@ -84,7 +79,7 @@ DATASETS = {
         f"{HF_BASE_URL}/FVB/FVB_split.z02",
     ],
 }
-DATASETS_INFO = {
+DATASETS_INFO: Dict[str, Dict[str, int]] = {
     "CFB": {"SAMPLES_PER_FILE": 500, "TRAIN_SAMPLES": 48000, "TEST_SAMPLES": 6000},
     "CFA": {"SAMPLES_PER_FILE": 500, "TRAIN_SAMPLES": 48000, "TEST_SAMPLES": 6000},
     "FFB": {"SAMPLES_PER_FILE": 500, "TRAIN_SAMPLES": 48000, "TEST_SAMPLES": 6000},
@@ -115,9 +110,9 @@ def download_file_from_url(url: str, local_filename: str) -> str:
     logging.info(f"Downloading {os.path.basename(local_filename)} from {url}...")
 
     response = requests.head(url)
-    file_size = int(response.headers.get("content-length", 0))
+    file_size: int = int(response.headers.get("content-length", 0))
 
-    progress = tqdm(
+    progress: tqdm = tqdm(
         total=file_size,
         unit="B",
         unit_scale=True,
@@ -148,21 +143,21 @@ def download(name: str) -> None:
     if name not in DATASETS:
         raise ValueError(f"Unsupported dataset: {name}")
 
-    output_dir = Path(f"./{name}")
+    output_dir: Path = Path(f"./{name}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Download all parts of the zip archive
-    zip_parts = []
+    zip_parts: list[Path] = []
     for url in DATASETS[name]:
-        filename = os.path.basename(url)
-        output_path = output_dir / filename
+        filename: str = os.path.basename(url)
+        output_path: Path = output_dir / filename
         download_file_from_url(url, output_path)
         zip_parts.append(output_path)
     logging.info(f"All parts of {name} dataset downloaded successfully.")
 
     # Combine multi-part zip archive into a single file
     logging.info(f"Combining zip parts for {name} dataset...")
-    combined_zip = output_dir / "_temp_combined.zip"
+    combined_zip: Path = output_dir / "_temp_combined.zip"
     try:
         subprocess.run(
             [
@@ -198,119 +193,79 @@ def download(name: str) -> None:
     logging.info(f"Download and extraction of {name} dataset completed.")
 
 
-def preprocess(
+def reorganize(
     dataset_names: list[str], clean: bool = False, shuffle: bool = False
 ) -> None:
     """
-    Preprocess the dataset by:
+    Reorganize the dataset by:
     1. Reorganizing files into individual samples
     2. Combine individual samples files into a single directory
-    3. Computing statistics (mean, std, min, max) for training, test, and all data
-    4. Saving statistics to a stats.yaml file
 
     Parameters
     ----------
     dataset_names : list[str]
-        List of dataset names to preprocess.
+        List of dataset names to reorganize.
     clean : bool, optional
-        Whether to delete original files after processing.
+        Whether to delete original files after reorganizing.
     shuffle : bool, optional
         Whether to shuffle train and test samples.
     """
     # Process all datasets if 'all' is in the list
     if "all" in dataset_names:
-        names = list(DATASETS.keys())
+        names: list[str] = list(DATASETS.keys())
     else:
         # Validate dataset names
         for name in dataset_names:
             if name not in DATASETS:
                 raise ValueError(f"Unsupported dataset: {name}")
-        names = dataset_names
+        names: list[str] = dataset_names
 
     # Size of the combined dataset
-    train_samples_all = sum(DATASETS_INFO[name]["TRAIN_SAMPLES"] for name in names)
-    test_samples_all = sum(DATASETS_INFO[name]["TEST_SAMPLES"] for name in names)
-    total_samples_all = train_samples_all + test_samples_all
+    train_samples_all: int = sum(DATASETS_INFO[name]["TRAIN_SAMPLES"] for name in names)
+    test_samples_all: int = sum(DATASETS_INFO[name]["TEST_SAMPLES"] for name in names)
+    total_samples_all: int = train_samples_all + test_samples_all
 
     # Setup shuffling
     if shuffle:
         logging.info("Shuffling enabled.")
         np.random.seed(123)
         # Generate a random set of file indices from 0 to total_samples-1
-        random_indices = np.random.permutation(total_samples_all).tolist()
+        random_indices: np.ndarray = np.random.permutation(total_samples_all).tolist()
     else:
         # If not shuffling, just use sequential indices
-        random_indices = np.arange(total_samples_all).tolist()
+        random_indices: np.ndarray = np.arange(total_samples_all).tolist()
 
-    # Initialize dictionaries to accumulate data for statistics
-    train_stats = {
-        "sum_vs": 0,
-        "sum_vp": 0,
-        "sum_ux": 0,
-        "sum_uz": 0,
-        "sum_vs2": 0,
-        "sum_vp2": 0,
-        "sum_ux2": 0,
-        "sum_uz2": 0,
-        "min_vs": float("inf"),
-        "min_vp": float("inf"),
-        "min_ux": float("inf"),
-        "min_uz": float("inf"),
-        "max_vs": float("-inf"),
-        "max_vp": float("-inf"),
-        "max_ux": float("-inf"),
-        "max_uz": float("-inf"),
-    }
-    test_stats = {
-        "sum_vs": 0,
-        "sum_vp": 0,
-        "sum_ux": 0,
-        "sum_uz": 0,
-        "sum_vs2": 0,
-        "sum_vp2": 0,
-        "sum_ux2": 0,
-        "sum_uz2": 0,
-        "min_vs": float("inf"),
-        "min_vp": float("inf"),
-        "min_ux": float("inf"),
-        "min_uz": float("inf"),
-        "max_vs": float("-inf"),
-        "max_vp": float("-inf"),
-        "max_ux": float("-inf"),
-        "max_uz": float("-inf"),
-    }
-
-    output_dir = Path("_".join(names)) / "samples"
+    output_dir: Path = Path("_".join(names)) / "samples"
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for name in names:
-        logging.info(f"Preprocessing {name} dataset...")
-        dataset_dir = Path(f"./{name}")
+        logging.info(f"Reorganizing {name} dataset...")
+        dataset_dir: Path = Path(f"./{name}")
 
         # Get list of file indices by looking at vs files
-        vs_files = sorted(
+        vs_files: list[Path] = sorted(
             dataset_dir.glob("vs_*.npy"), key=lambda x: int(x.stem.split("_")[-1])
         )
         if not vs_files:
             logging.warning(
-                f"No files found for dataset {name}. Skipping preprocessing."
+                f"No files found for dataset {name}. Skipping reorganizing."
             )
             continue
 
         # Keep track of processed files to delete later
-        processed_files = set()
+        processed_files: set[Path] = set()
 
         # Process each file
         for file_idx, vs_file in enumerate(
             tqdm(vs_files, desc="Processing files", unit="file")
         ):
-            file_num = int(vs_file.stem.split("_")[-1])
+            file_num: int = int(vs_file.stem.split("_")[-1])
 
             # Define file paths
-            vs_file_path = dataset_dir / f"vs_{file_num}.npy"
-            vp_file_path = dataset_dir / f"vp_{file_num}.npy"
-            data_x_file_path = dataset_dir / f"data_x_{file_num}.npy"
-            data_z_file_path = dataset_dir / f"data_z_{file_num}.npy"
+            vs_file_path: Path = dataset_dir / f"vs_{file_num}.npy"
+            vp_file_path: Path = dataset_dir / f"vp_{file_num}.npy"
+            data_x_file_path: Path = dataset_dir / f"data_x_{file_num}.npy"
+            data_z_file_path: Path = dataset_dir / f"data_z_{file_num}.npy"
 
             # Add files to processed list
             processed_files.add(vs_file_path)
@@ -320,20 +275,20 @@ def preprocess(
 
             # Load all quantities for this file index
             try:
-                vs_data = np.load(vs_file_path, mmap_mode="r")
-                vp_data = np.load(vp_file_path, mmap_mode="r")
-                data_x = np.load(data_x_file_path, mmap_mode="r")
-                data_z = np.load(data_z_file_path, mmap_mode="r")
+                vs_data: np.ndarray = np.load(vs_file_path, mmap_mode="r")
+                vp_data: np.ndarray = np.load(vp_file_path, mmap_mode="r")
+                data_x: np.ndarray = np.load(data_x_file_path, mmap_mode="r")
+                data_z: np.ndarray = np.load(data_z_file_path, mmap_mode="r")
             except FileNotFoundError as e:
                 logging.warning(f"Error loading files for index {file_num}: {e}")
                 continue
 
             # Get number of samples in this file
-            num_samples = len(vs_data)
+            num_samples: int = len(vs_data)
 
             # Create individual files for each sample
             for sample_idx in range(num_samples):
-                sample_data = {
+                sample_data: Dict[str, np.ndarray] = {
                     "vs": vs_data[sample_idx],
                     "vp": vp_data[sample_idx],
                     "ux": data_x[sample_idx],
@@ -341,33 +296,14 @@ def preprocess(
                 }
 
                 # Get next file index and remove it
-                rnd_global_sample_idx = random_indices.pop(0)
+                rnd_global_sample_idx: int = random_indices.pop(0)
 
                 # Save the combined sample data
-                output_file = output_dir / f"sample_{rnd_global_sample_idx}.npz"
+                is_train: bool = rnd_global_sample_idx < train_samples_all
+                output_file: Path = (
+                    output_dir / f"{'train' if is_train else 'test'}_sample_{rnd_global_sample_idx}.npz"
+                )
                 np.savez(output_file, **sample_data)
-
-                # Collect data for statistics
-                is_train = rnd_global_sample_idx < train_samples_all
-                stats_dict = train_stats if is_train else test_stats
-                for var, value in zip(
-                    ("vs", "vp", "ux", "uz"),
-                    (
-                        sample_data["vs"],
-                        sample_data["vp"],
-                        sample_data["ux"],
-                        sample_data["uz"],
-                    ),
-                ):
-                    nb_points = math.prod(value.shape)
-                    stats_dict[f"sum_{var}"] += np.sum(value) / nb_points
-                    stats_dict[f"sum_{var}2"] += np.sum(value**2) / nb_points
-                    stats_dict[f"min_{var}"] = min(
-                        stats_dict[f"min_{var}"], np.amin(value)
-                    )
-                    stats_dict[f"max_{var}"] = max(
-                        stats_dict[f"max_{var}"], np.amax(value)
-                    )
 
                 del sample_data
 
@@ -383,7 +319,7 @@ def preprocess(
 
                 # Find and delete other files with the same index pattern
                 # (like pm_* and pr_*)
-                other_pattern_files = list(dataset_dir.glob(f"*_{file_num}.npy"))
+                other_pattern_files: list[Path] = list(dataset_dir.glob(f"*_{file_num}.npy"))
                 for file_path in other_pattern_files:
                     if file_path not in processed_files:
                         try:
@@ -391,81 +327,27 @@ def preprocess(
                         except FileNotFoundError:
                             pass
                 logging.info("All original files have been deleted.")
-        logging.info(f"Preprocessing of {name} dataset completed successfully!")
-
-    # Compute statistics for the combined dataset
-    logging.info("Computing statistics...")
-    stats = {}
-    for var in ["vs", "vp", "ux", "uz"]:
-        # Create nested dictionary for each variable
-        train_mean = float(train_stats[f"sum_{var}"] / train_samples_all)
-        train_std = float(
-            math.sqrt(train_stats[f"sum_{var}2"] / train_samples_all - train_mean**2)
-        )
-        test_mean = float(test_stats[f"sum_{var}"] / test_samples_all)
-        test_std = float(
-            math.sqrt(test_stats[f"sum_{var}2"] / test_samples_all - test_mean**2)
-        )
-        all_samples = train_samples_all + test_samples_all
-        all_mean = float(
-            (train_stats[f"sum_{var}"] + test_stats[f"sum_{var}"]) / all_samples
-        )
-        all_std = float(
-            math.sqrt(
-                (train_stats[f"sum_{var}2"] + test_stats[f"sum_{var}2"]) / all_samples
-                - all_mean**2
-            )
-        )
-
-        # Combine train and test statistics into a single dictionary for saving
-        stats[var] = {
-            "train": {
-                "min": float(train_stats[f"min_{var}"]),
-                "max": float(train_stats[f"max_{var}"]),
-                "mean": train_mean,
-                "std": train_std,
-            },
-            "test": {
-                "min": float(test_stats[f"min_{var}"]),
-                "max": float(test_stats[f"max_{var}"]),
-                "mean": test_mean,
-                "std": test_std,
-            },
-            "all": {
-                "min": float(min(train_stats[f"min_{var}"], test_stats[f"min_{var}"])),
-                "max": float(max(train_stats[f"max_{var}"], test_stats[f"max_{var}"])),
-                "mean": all_mean,
-                "std": all_std,
-            },
-        }
-
-    # Save statistics to YAML file
-    stats_file = output_dir / "stats.yaml"
-    logging.info(f"Saving statistics to {stats_file}...")
-    with open(stats_file, "w") as f:
-        yaml.dump(stats, f, default_flow_style=False)
-    logging.info(f"Statistics saved to {stats_file}.")
+        logging.info(f"Reorganizing of {name} dataset completed successfully!")
 
 
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Download and preprocess (reorganize into individual samples "
-        "files and compute statistics) EFWI datasets."
+        description="Download and reorganize into individual samples files E-FWI datasets."
     )
 
     parser.add_argument("--download", action="store_true", help="Download the dataset")
 
     parser.add_argument(
-        "--preprocess",
+        "--reorganize",
         action="store_true",
-        help="Preprocess the dataset: reorganize files and compute statistics",
+        help="Reorganize the dataset into individual samples files",
     )
 
     parser.add_argument(
         "--clean",
         action="store_true",
-        help="Delete original files after processing",
+        help="Delete original files after reorganizing",
     )
 
     parser.add_argument(
@@ -498,8 +380,8 @@ if __name__ == "__main__":
                 sys.exit(1)
 
     # Check if at least one action is specified
-    if not (args.download or args.preprocess):
-        logging.error("Error: No action specified. Use --download or --preprocess")
+    if not (args.download or args.reorganize):
+        logging.error("Error: No action specified. Use --download or --reorganize")
         sys.exit(1)
 
     # Download if requested
@@ -511,6 +393,6 @@ if __name__ == "__main__":
             for dataset in args.name:
                 download(dataset)
 
-    # Preprocess if requested
-    if args.preprocess:
-        preprocess(args.name, args.clean, args.shuffle)
+    # Reorganize if requested
+    if args.reorganize:
+        reorganize(args.name, args.clean, args.shuffle)
