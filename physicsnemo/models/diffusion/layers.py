@@ -22,12 +22,14 @@ Diffusion-Based Generative Models".
 import contextlib
 import importlib
 import math
-from typing import Any, Dict, List, Set
+from contextvars import ContextVar
+from typing import Any, Dict, Generator, List, Literal, Set
 
 import numpy as np
 import nvtx
 import torch
 from einops import rearrange
+from torch.nn.attention import SDPBackend, sdpa_kernel
 from torch.nn.functional import elu, gelu, leaky_relu, relu, sigmoid, silu, tanh
 
 from physicsnemo.models.diffusion import weight_init
@@ -656,6 +658,14 @@ class Attention(torch.nn.Module):
     -------
     torch.Tensor
         Output tensor of the same shape as input: :math:`(B, C, H, W)`.
+
+    .. important::
+
+        This implementation uses by default the implementation of scaled dot product attention (SDPA) from
+        `torch.nn.functional.scaled_dot_product_attention`<https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html>_.
+        This operator is optimized for performance, but is still in beta and its results might be affected by numerical errors.
+        To use a pure python implementation, set the SDPA backend to "python" using the
+        :meth:`SDPA_backend` context manager.
     """
 
     def __init__(
@@ -682,6 +692,7 @@ class Attention(torch.nn.Module):
                 f"`out_channels` must be divisible by `num_heads`, but got {out_channels} and {num_heads}"
             )
         self.num_heads = num_heads
+        self._sdpa_backend = None
         self.norm = get_group_norm(
             num_channels=out_channels,
             eps=eps,
@@ -705,29 +716,94 @@ class Attention(torch.nn.Module):
             **init_zero,
         )
 
+    # Variables for selecting SDPA backend with cotext manager
+    _SDPA_BACKEND: ContextVar[Any] = ContextVar("sdpa_backend", default=None)
+
+    @classmethod
+    def _get_sdpa_backend(
+        cls,
+    ) -> None | SDPBackend | List[SDPBackend] | Literal["python"]:
+        return cls._SDPA_BACKEND.get()
+
+    @staticmethod
+    @contextlib.contextmanager
+    def SDPA_backend(
+        backend: None | SDPBackend | List[SDPBackend] | Literal["python"],
+    ) -> Generator[None, None, None]:
+        """
+        Context manager to select the SDPA backend.
+
+        Parameters
+        ----------
+        backend : None | SDPBackend | List[SDPBackend] | Literal["python"]
+            - If ``None``, the default implementation based on
+              ``torch.nn.functional.scaled_dot_product_attention`` is used without
+              any specific backend.
+            - If ``"python"``, a custom python implementation of attention
+              based on :class:`~physicsnemo.models.diffusion.layers.AttentionOp`
+              is used. This backend is less performant but less sensitive to
+              numerical errors.
+            - In all other cases, the ``backend`` parameter is simply passed to
+              the
+              `torch.nn.attention.sdpa_kernel`<https://docs.pytorch.org/docs/stable/generated/torch.nn.attention.sdpa_kernel.html>_
+              context manager, which is used to select the backend to use in
+              ``torch.nn.functional.scaled_dot_product_attention``.
+
+        Examples
+        --------
+        >>> from physicsnemo.models.diffusion.layers import Attention
+        >>> from torch.nn.attention import SDPBackend
+        >>> import torch
+        >>> model = Attention(out_channels=16, num_heads=2)
+        >>> x = torch.randn(1, 16, 8, 8)
+        >>> # Default: use torch.nn.functional.scaled_dot_product_attention
+        >>> # without specific backend
+        >>> y0 = model(x)
+        >>> # Use custom python implementation of attention
+        >>> with Attention.SDPA_backend("python"):
+        ...     y1 = model(x)
+        >>> # Use specific backend (C++ backend provided in pytorch)
+        >>> with Attention.SDPA_backend(SDPBackend.MATH):
+        ...     y2 = model(x)
+        """
+        token = Attention._SDPA_BACKEND.set(backend)
+        try:
+            if backend is None or backend == "python":
+                yield
+            else:
+                with sdpa_kernel(backend) as resource:
+                    yield resource
+        finally:
+            Attention._SDPA_BACKEND.reset(token)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x1: torch.Tensor = self.qkv(self.norm(x))
 
-        # # NOTE: V1.0.1 implementation
-        # q, k, v = x1.reshape(
-        #     x.shape[0] * self.num_heads, x.shape[1] // self.num_heads, 3, -1
-        # ).unbind(2)
-        # w = AttentionOp.apply(q, k)
-        # attn = torch.einsum("nqk,nck->ncq", w, v)
+        # Get SDPA backend
+        _sdpa_backend = self.__class__._get_sdpa_backend()
 
-        q, k, v = (
-            (
-                x1.reshape(
-                    x.shape[0], self.num_heads, x.shape[1] // self.num_heads, 3, -1
+        # Custom python implementation (V1.0.1 implementation)
+        if _sdpa_backend == "python":
+            q, k, v = x1.reshape(
+                x.shape[0] * self.num_heads, x.shape[1] // self.num_heads, 3, -1
+            ).unbind(2)
+            w = AttentionOp.apply(q, k)
+            attn = torch.einsum("nqk,nck->ncq", w, v)
+        # Implementation based on torch.nn.functional.scaled_dot_product_attention
+        else:
+            q, k, v = (
+                (
+                    x1.reshape(
+                        x.shape[0], self.num_heads, x.shape[1] // self.num_heads, 3, -1
+                    )
                 )
+                .permute(0, 1, 4, 3, 2)
+                .unbind(-2)
             )
-            .permute(0, 1, 4, 3, 2)
-            .unbind(-2)
-        )
-        attn = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v, scale=1 / math.sqrt(k.shape[-1])
-        )
-        attn = attn.transpose(-1, -2)
+            attn = torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, scale=1 / math.sqrt(k.shape[-1])
+            )
+            attn = attn.transpose(-1, -2)
 
         x: torch.Tensor = self.proj(attn.reshape(*x.shape)).add_(x)
         return x

@@ -24,6 +24,7 @@ from .layers import (
     Linear,
     PositionalEmbedding,
     UNetBlock,
+    Attention,
 )
 from .song_unet import SongUNet, SongUNetPosEmbd, SongUNetPosLtEmbd
 from .dhariwal_unet import DhariwalUNet

@@ -98,10 +98,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Module.from_checkpoint` that now exposes a `strict` parameter to raise error
   on missing/unexpected keys, similar to that used in
   `torch.nn.Module.load_state_dict`.
-  
-### Deprecated
-
-### Removed
+- Diffusion models: adds a context manager `Attention.SDPA_backend` to control
+  the backend used for the attention mechanism defined in
+  `physicsnemo.models.diffusion.layers.Attention`. Gives the possibility to
+  select attention computation based on `torch.nn.scaled_dot_product_attention`
+  or on a custom python implementation.
 
 ### Fixed
 
