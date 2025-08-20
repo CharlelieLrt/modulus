@@ -91,7 +91,7 @@ DATASETS_INFO: Dict[str, Dict[str, int]] = {
 }
 
 
-def download_file_from_url(url: str, local_filename: str) -> str:
+def download_file_from_url(url: str, local_filename: str, resume: bool = True) -> str:
     """
     Download a file from a direct URL and save it locally.
 
@@ -101,6 +101,10 @@ def download_file_from_url(url: str, local_filename: str) -> str:
         The URL to download from.
     local_filename : str
         The path to save the file to.
+    resume : bool, optional
+        Whether to resume download of a multi-part zip archive. If True, the
+        download will start from the last downloaded chunk. If False, the download
+        will start from the beginning.
 
     Returns
     -------
@@ -119,19 +123,23 @@ def download_file_from_url(url: str, local_filename: str) -> str:
         desc=os.path.basename(local_filename),
     )
 
-    with requests.get(url, stream=True) as r:
-        r.raise_for_status()
-        with open(local_filename, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    progress.update(len(chunk))
-    progress.close()
+    if resume and os.path.exists(local_filename):
+        logging.info(f"{os.path.basename(local_filename)} already exists, skipping download.")
+        progress.close()
+    else:
+        with requests.get(url, stream=True) as r:
+            r.raise_for_status()
+            with open(local_filename, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        progress.update(len(chunk))
+        progress.close()
 
     return local_filename
 
 
-def download(name: str) -> None:
+def download(name: str, resume: bool = True) -> None:
     """
     Download a dataset from Hugging Face.
 
@@ -139,6 +147,10 @@ def download(name: str) -> None:
     ----------
     name : str
         Name of the dataset to download.
+    resume : bool, optional
+        Whether to resume download of a multi-part zip archive. If True, the
+        download will start from the last downloaded chunk. If False, the download
+        will start from the beginning.
     """
     if name not in DATASETS:
         raise ValueError(f"Unsupported dataset: {name}")
@@ -151,7 +163,7 @@ def download(name: str) -> None:
     for url in DATASETS[name]:
         filename: str = os.path.basename(url)
         output_path: Path = output_dir / filename
-        download_file_from_url(url, output_path)
+        download_file_from_url(url, output_path, resume)
         zip_parts.append(output_path)
     logging.info(f"All parts of {name} dataset downloaded successfully.")
 
@@ -339,6 +351,13 @@ def parse_args():
     parser.add_argument("--download", action="store_true", help="Download the dataset")
 
     parser.add_argument(
+        "--resume-download",
+        action="store_true",
+        help="Resume download of a multi-part zip archive. "
+        "Otherwise, the download will start from the beginning.",
+    )
+
+    parser.add_argument(
         "--reorganize",
         action="store_true",
         help="Reorganize the dataset into individual samples files",
@@ -388,10 +407,10 @@ if __name__ == "__main__":
     if args.download:
         if "all" in args.name:
             for dataset in DATASETS.keys():
-                download(dataset)
+                download(dataset, resume=args.resume_download)
         else:
             for dataset in args.name:
-                download(dataset)
+                download(dataset, resume=args.resume_download)
 
     # Reorganize if requested
     if args.reorganize:
