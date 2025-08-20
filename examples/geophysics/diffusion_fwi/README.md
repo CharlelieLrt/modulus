@@ -188,29 +188,37 @@ training.
 >[hydra](https://hydra.cc/docs/intro/) based on the contents of the `config`
 >directory. Hydra allows for YAML-based modular and hierarchical configuration
 >management and supports command-line overrides for quick testing and
->experimentation. The `config` directory includes the following subdirectories:
-> - `dataset`: specifies the dataset used for training as well as the resolution, number of variables, and other parameters of the dataset
-> - `model`: specifies the model type and model-specific hyperparameters
-> - `sampler`: specifies hyperparameters used in the sampling process for diffusion models
-> - `training`: specifies training-specific hyperparameters and settings like checkpoint/log frequency and where to save training outputs
-> - `inference` specifies inference-specific settings like which initial condition to run, which model checkpoints to use, etc.
-> - `hydra`: specifies basic hydra settings, like where to store outputs (based on the training or inference outputs directories)
+>experimentation. The `conf/config_train.yaml` file includes the default
+>parameters for training a diffusion model for FWI. It contains some fields
+>that must be provided by the user at runtime. This can be done by directly
+>editing the `conf/config_train.yaml` file (or a copy of it), or by using hydra
+>overrides. For example, to specify a dataset and use a different batch size, one
+>can run:
+>
+>```bash
+>python train.py --config-name=config_train ++dataset.directory=<path_to_dataset_directory> ++training.batch_size_per_device=1024
+>```
+>
 
 
-More extensive configuration modifications can be made by creating a new top-level configuration file similar to `regression` or `diffusion`. See `diffusion.yaml` for an example of how to specify a top-level config that uses default configuration settings with additional custom modifications added on top.
+At runtime, hydra will parse the config subdirectory and command line
+over-rides into a runtime configuration object `cfg`, which will have all
+settings accessible via both attribute or dictionary-like interfaces. For
+example, the batch size per device can be accessed either as
+`cfg.training.batch_size_per_device` or `cfg['training']['batch_size_per_device']`.
 
-At runtime, hydra will parse the config subdirectory and command line over-rides into a runtime configuration object `cfg`, which will have all settings accessible via both attribute or dictionary-like interfaces. For example, the total training batch size can be accessed either as `cfg.training.batch_size` or `cfg['training']['batch_size']`.
+The training script `train.py` will initialize the training experiment and launch
+the main training loop.
 
-The training script `train.py` will initialize the training experiment and launch the main training loop, which is defined in `utils/trainer.py`. Outputs (training logs, checkpoints, etc.) will be saved to a directory specified by the following `training` config items:
-```yaml
-training.outdir: 'rundir' # Root path under which to save training outputs
-training.experiment_name: 'stormcast' # Name for the training experiment
-training.run_id: '0' # Unique ID to use for this training run 
-training.rundir: ./${training.outdir}/${training.experiment_name}/${training.run_id} # Path where experiement outputs will be saved
+If running on a machine with multiple GPUs, the training script can be
+parallelized with Distributed Data Parallel (DDP). To do so, run:
+
+```bash
+torchrun --standalone --nnodes=<NUM_NODES> --nproc_per_node=<NUM_GPUS_PER_NODE> train.py --config-name=config_train ++dataset.directory=<path_to_dataset_directory> ++training.batch_size_per_device=1024
 ```
-As you can see, the `training.run_id` setting can be used for distinguishing between different runs of the same configuration. The final training output directory is constructed by composing together the `training.outdir` root path (defaults to `rundir`), the `training.experiment_name`, and the `training.run_id`. For inference runs, equivalent options are available in the `stormcast_inference.yaml` config file used with the `inference.py` script.
 
-
+<!-- TODO: add comments on the output + logging -->
+<!-- TODO: add details about model + EDM + denoising score matching -->
 
 ## Sampling and model evaluation
 

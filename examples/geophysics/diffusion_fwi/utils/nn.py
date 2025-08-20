@@ -16,267 +16,249 @@
 
 import math
 from dataclasses import dataclass
-from typing import List, Optional, Tuple, Union
+from typing import Any, List
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from physicsnemo.models.diffusion import UNetBlock
-from physicsnemo.models.diffusion.layers import Conv2d
+from timm.models.layers import Mlp
+
 from physicsnemo.models.diffusion.song_unet import SongUNetPosEmbd
-from physicsnemo.models.fno.fno import FNO
-from physicsnemo.models.geophysics.elastic_net import _center_crop
 from physicsnemo.models.meta import ModelMetaData
 from physicsnemo.models.module import Module
 
 
-@torch.no_grad()
-def _get_output_dimensions(
-    module: torch.nn.Module, input_shape: Tuple[int, int]
-) -> Tuple[int, int]:
-    """
-    Determines the output dimensions by passing a dummy tensor through the module.
-    Works with both Conv2D and UNetBlock.
-    """
-    dummy_input = torch.zeros([1, module.in_channels] + list(input_shape))
-    output = module(dummy_input)
-    del dummy_input
-    return tuple(output.shape[-2:])
-
-
-@dataclass
-class ResNetEncoderMetaData(ModelMetaData):
-    """
-    Metadata for the ResNetEncoder model.
-    """
-
-    name: str = "ResNetEncoder"
-    # Optimization
-    jit: bool = False
-    cuda_graphs: bool = True
-    amp: bool = True
-    # Inference
-    onnx_cpu: bool = True
-    onnx_gpu: bool = True
-    onnx_runtime: bool = True
-    # Physics informed
-    var_dim: int = 1
-    func_torch: bool = False
-    auto_grad: bool = False
-
-
-# TODO: make the embedding number of channels configurable. This will require
-# another phase where the resolution does not change and only the number of
-# channels changes until reaching the target.
-class ResNetEncoder(Module):
-    """
-    ResNetEncoder model that encodes concatenated seismic data (ux and uz)
-    into a latent representation using UNetBlocks.
+class AttentionPool(nn.Module):
+    r"""Cross-attention pooling from variable-length inputs to fixed-length
+    outputs.
 
     Parameters
     ----------
-    - nb_sources : int
-        Number of input channels for each input image (ux and uz). The
-        number of input channels `in_channels` is nb_sources * 2.
-    - nb_timesteps : int
-        Height of the input images (number of timesteps in the seismic data).
-    - nb_receivers : int
-        Width of the input image (number of receivers in the seismic data).
-    - embedding_dimension : Tuple[int, int]
-        Shape of the latent representation (height, width).
-    - initial_channels : Optional[int]
-        Number of channels after the first convolution. If None, computes as the
-        next power of 2 greater than in_channels (2*nb_sources). Default: None
-    - checkpointing_level : Optional[int]
-        Level of gradient checkpointing to apply. None means no checkpointing.
-        Higher values mean checkpointing is applied to more layers. Default: None
+    num_channels : int
+        Number of input/output channels :math:`C`.
+    out_length : int
+        Desired fixed output length :math:`L_{out}`.
 
     Forward
     -------
-    Should be called with `output = model(ux, uz)`.
-    Input:
-        - ux: torch.Tensor, shape (B, nb_sources, nb_timesteps, nb_receivers)
-          Input tensor for u_x component.
-        - uz: torch.Tensor, shape (B, nb_sources, nb_timesteps, nb_receivers)
-          Input tensor for u_z component.
+    x : torch.Tensor
+        Input tensor of shape :math:`(B, L_{in}, C)`.
 
-    Output:
-        - torch.Tensor, shape (B, out_channels, embedding_dimension[0], embedding_dimension[1])
-          Encoded latent representation.
+    Outputs
+    -------
+    y : torch.Tensor
+        Output tensor of shape :math:`(B, L_{out}, C)`.
     """
+    def __init__(self, num_channels: int, out_length: int):
+        super().__init__()
+        self.num_channels = num_channels
+        self.out_length = out_length
 
+        # Learned queries (one per output slot)
+        self.query_tokens = nn.Parameter(
+            torch.randn(out_length, num_channels) / math.sqrt(num_channels))
+
+        self.kv_proj = nn.Linear(num_channels, 2 * num_channels)
+        nn.init.xavier_uniform_(self.kv_proj.weight)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        B, L_in, C = x.shape
+
+        # Validate inputs
+        if C != self.num_channels:
+            raise ValueError(
+                f"x last dim must match num_channels: {C} != {self.num_channels}")
+
+        # Build batch of learned queries
+        q = self.query_tokens.unsqueeze(0).expand(B, 1, 1)  # (B, L_out, C)
+
+        kv = self.kv_proj(x)  # (B, L_in, 2C)
+        k, v = torch.chunk(kv, 2, dim=2)      # (B, L_in, C), (B, L_in, C)
+        y = F.scaled_dot_product_attention(
+            q.unsqueeze(1),  # (B, 1, L_out, C)
+            k.unsqueeze(1),  # (B, 1, L_in, C)
+            v.unsqueeze(1),  # (B, 1, L_in, C)
+        )  # (B, 1, L_out, C)
+
+        return y.squeeze(1)  # (B, L_out, C)
+
+
+class GlobalFilterBlock1D(nn.Module):
+    r"""
+    Global filter layer that applies a learnable global filter to the input
+    tensor, followed by a layer norm and a MLP.
+
+    Parameters
+    ----------
+    num_channels : int
+        Number of input/output channels :math:`C`.
+    length : int
+        Length of the input tensor :math:`L`.
+
+    Forward
+    -------
+    x : torch.Tensor
+        Input tensor of shape :math:`(B, L, C)`.
+
+    Outputs
+    -------
+    y : torch.Tensor
+        Output tensor of shape :math:`(B, L, C)`.
+    """
+    def __init__(self, num_channels: int, length: int):
+        super().__init__()
+        self.complex_weight = nn.Parameter(
+            torch.randn(length, num_channels, 2, dtype=torch.float32) / num_channels)
+        self.length = length
+        self.num_channels = num_channels
+        self.layer_norm = nn.LayerNorm(num_channels)
+        self.mlp = Mlp(num_channels, 4 * num_channels, num_channels)
+
+    def forward(
+        self,
+        x: torch.Tensor,  # (B, L, C)
+    ) -> torch.Tensor:
+        B, L, C = x.shape
+
+        if L != self.length or C != self.num_channels:
+            raise ValueError(f"x shape mismatch: expected {(B, L, C)}, but got {x.shape}")
+
+        y = torch.fft.rfft(x, dim=1, norm='ortho')  # (B, L, C)
+        weight = torch.view_as_complex(self.complex_weight)  # (L, C)
+        y = y * weight
+        y = torch.fft.irfft(y, n=self.length, dim=1, norm='ortho')  # (B, L, C)
+
+        y = self.layer_norm(y)
+        y = self.mlp(y)
+
+        y += x
+
+        return y
+
+
+class TimeSignalEncoder(nn.Module):
+    r"""
+    Encodes a 2D image consisting of multiple individual time signals into a
+    fixed-length embedding. Combines a lifting network with a series of
+    ``GlobalFilterBlock1D`` layers.
+
+    Parameters
+    ----------
+    in_channels : int
+        Number of channels :math:`C_{in}` in the input image.
+    out_channels : int
+        Number of channels :math:`C_{out}` in the output image.
+    hidden_channels : int
+        Number of hidden channels :math:`C_{h}` in the encoder.
+    out_length : int
+        Length :math:`L_{out}` of the output embedding.
+    num_encoder_blocks : int, optional, default=4
+        Number of encoder blocks.
+
+    Forward
+    -------
+    y : torch.Tensor
+        Two-dimensional image of shape :math:`(B, C_{in}, H, W)`. Each column
+        along `dim=2` is assumed to correspond to a an individuel time signal
+        of length :math:`H` (and with :math:`C_{in}` channels).
+        The input tensor consists of :math:`W` such signals combined into a
+        single two-dimensional image.
+
+    Outputs
+    -------
+    y : torch.Tensor
+        Two-dimensional image of shape :math:`(B, C_{out}, L_{out}, W)`. Each
+        time-signal is embedded into a fixed-length embedding of length
+        :math:`L_{out}`. The embedded signals are then recombined into a
+        single two-dimensional image.
+    """
     def __init__(
         self,
-        nb_sources: int,
-        nb_timesteps: int,
-        nb_receivers: int,
-        embedding_dimension: Tuple[int, int],
-        initial_channels: Optional[int] = None,
-        checkpointing_level: Optional[int] = None,
+        in_channels: int,
+        out_channels: int,
+        hidden_channels: int,
+        out_length: int,
+        num_encoder_blocks: int = 4,
     ):
         super().__init__()
-        self.meta = ResNetEncoderMetaData()
-        self.nb_timesteps = nb_timesteps
-        self.nb_receivers = nb_receivers
-        self.embedding_dimension = embedding_dimension
-        self.checkpointing_level = checkpointing_level
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.hidden_channels = hidden_channels
+        self.out_length = out_length
+        self.num_encoder_blocks = num_encoder_blocks
 
-        # Double the input channels since we're concatenating ux and uz
-        in_channels = nb_sources * 2
-        if initial_channels is None:
-            initial_channels = 2 ** math.ceil(math.log2(in_channels))
-        self.initial_channels = initial_channels
-
-        # Set the threshold for checkpointing based on image resolution
-        if self.checkpointing_level is not None:
-            self.checkpoint_threshold = (
-                max(nb_timesteps, nb_receivers) >> self.checkpointing_level
-            ) + 1
-        else:
-            self.checkpoint_threshold = 0
-
-        self.encoder_blocks, self.out_channels = self._make_encoder(
-            in_channels,
-            nb_timesteps,
-            nb_receivers,
-            initial_channels,
-            embedding_dimension,
+        # Lifting network
+        self.lift_network = nn.Sequential(
+            nn.Linear(in_channels + 1, hidden_channels),
+            nn.GELU(),
+            nn.Linear(hidden_channels, hidden_channels),
+            nn.GELU(),
         )
 
-    def _make_encoder(
+        # Encoder blocks
+        self.encoder = nn.ModuleList([
+            GlobalFilterBlock1D(hidden_channels, out_length)
+            for _ in range(self.num_encoder_blocks)
+        ])
+
+        # Output/decoder blocks
+        self.attn_pool = AttentionPool(in_channels, out_length)
+        self.output_head = nn.Sequential(
+            nn.LayerNorm(hidden_channels),
+            Mlp(hidden_channels, 4 * hidden_channels, out_channels),
+        )
+
+    def forward(
         self,
-        in_channels: int,
-        height: int,
-        width: int,
-        initial_channels: int,
-        target_shape: Tuple[int, int],
-    ) -> Tuple[nn.ModuleList, int]:
-        """
-        Create encoder blocks that progressively reduce the spatial dimensions
-        until reaching the target shape.
+        y: torch.Tensor,  # (B, C_in, T, W)
+    ) -> torch.Tensor:
 
-        Parameters
-        ----------
-        - in_channels : int
-            Number of input channels (combined ux and uz).
-        - height : int
-            Height of the input image.
-        - width : int
-            Width of the input image.
-        - initial_channels : int
-            Number of channels after the first convolution.
-        - target_shape : Tuple[int, int]
-            Target shape for the latent representation.
+        B, C_in, T, W = y.shape
 
-        Returns
-        -------
-        - Tuple[nn.ModuleList, int]
-            A tuple containing:
-            - The encoder blocks as nn.ModuleList
-            - The number of output channels in the final encoder block
-        """
-        encoder_blocks = nn.ModuleList()
-        current_shape = (height, width)
-        current_channels = in_channels
-
-        initial_conv = Conv2d(
-            in_channels=current_channels,
-            out_channels=initial_channels,
-            kernel=3,
-        )
-        encoder_blocks.append(initial_conv)
-        current_shape = _get_output_dimensions(initial_conv, current_shape)
-        current_channels = initial_channels
-
-        # Identify which dimension is larger
-        is_height_larger = current_shape[0] > current_shape[1]
-        idx_larger = 0 if is_height_larger else 1
-        idx_smaller = 1 if is_height_larger else 0
-
-        # Phase 1: Make the image more square by downsampling the largest dimension
-        # Also ensure the downsampled dimension doesn't go below target shape
-        while (
-            current_shape[idx_larger] > 2 * current_shape[idx_smaller]
-            and current_shape[idx_larger] > 2 * target_shape[idx_larger]
-        ):
-            next_channels = current_channels * 2
-            encoder_block = UNetBlock(
-                in_channels=current_channels,
-                out_channels=next_channels,
-                emb_channels=0,  # Not used when use_embedding=False
-                down=[is_height_larger, not is_height_larger],
-                use_embedding=False,
+        # Validate inputs
+        if C_in != self.in_channels:
+            raise ValueError(
+                f"x last dim must match in_channels: expected {self.in_channels}, "
+                f"but got {C_in}"
             )
-            encoder_blocks.append(encoder_block)
-            current_shape = _get_output_dimensions(encoder_block, current_shape)
-            current_channels = next_channels
+        # Consider all time signals as batched elements
+        y = rearrange(y, "b c t w -> (b w) t c")  # (B * W, T, C_in)
 
-        # Phase 2: If any dimension is below target, upsample it by adding
-        # blocks that upsample until we reach the target shape
-        while current_shape[0] < target_shape[0] or current_shape[1] < target_shape[1]:
-            encoder_block = UNetBlock(
-                in_channels=current_channels,
-                out_channels=current_channels,
-                emb_channels=0,
-                up=[
-                    current_shape[0] < target_shape[0],
-                    current_shape[1] < target_shape[1],
-                ],
-                use_embedding=False,
-            )
-            encoder_blocks.append(encoder_block)
-            current_shape = _get_output_dimensions(encoder_block, current_shape)
+        # Add time steps information
+        time_steps = torch.linspace(
+            0, 1, T, device=y.device, dtype=y.dtype
+        )[None, :, None].expand(B * W, T, 1)  # (B * W, T, 1)
+        y = torch.cat((y, time_steps), dim=2)  # (B * W, T, C_in + 1)
 
-        # Final block after center cropping
-        final_block = UNetBlock(
-            in_channels=current_channels,
-            out_channels=current_channels,
-            emb_channels=0,
-            use_embedding=False,
-        )
-        encoder_blocks.append(final_block)
+        # Apply lifting network to lift hidden dim
+        y = self.lift_network(y)  # (B * W, T, C_hidden)
 
-        return encoder_blocks, current_channels
+        # Apply encoder blocks
+        for enc in self.encoder:
+            y = enc(y)  # (B * W, T, C_hidden)
 
-    def checkpointed_forward(self, layer, x):
-        """
-        Apply gradient checkpointing to a layer if the feature map is large
-        enough.
-        """
-        if self.checkpointing_level is None:
-            return layer(x)
-        if min(x.shape[-1], x.shape[-2]) > self.checkpoint_threshold:
-            return torch.utils.checkpoint.checkpoint(layer, x, use_reentrant=False)
-        return layer(x)
+        # Apply pooling to target length and output head
+        y = self.attn_pool(y)  # (B * W, L_out, C_hidden)
+        y = self.output_head(y)  # (B * W, L_out, C_out)
 
-    def forward(self, ux: torch.Tensor, uz: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass of the ResNetEncoder model.
-        """
-        x = torch.cat([ux, uz], dim=1)
+        # Reshape back to original shape
+        y = rearrange(y, "(b w) l c -> b c l w", b=B, w=W)  # (B, C_out, T, W)
 
-        for i, encoder in enumerate(self.encoder_blocks[:-1]):
-            if i == 0:
-                x = self.checkpointed_forward(encoder, x)
-            else:
-                x = self.checkpointed_forward(encoder, x)
-
-        x = _center_crop(x, self.embedding_dimension[0], self.embedding_dimension[1])
-
-        x = self.checkpointed_forward(self.encoder_blocks[-1], x)
-
-        return x
+        return y
 
 
 @dataclass
-class DiffusionFWIUNetMetaData(ModelMetaData):
+class DiffusionFWINetMetaData(ModelMetaData):
     """
     Metadata for the DiffusionFWIUNet model.
     """
 
-    name: str = "DiffusionFWIUNet"
+    name: str = "DiffusionFWINet"
     # Optimization
     jit: bool = False
     cuda_graphs: bool = False
@@ -294,279 +276,190 @@ class DiffusionFWIUNetMetaData(ModelMetaData):
 # TODO: enable conditioning concatenation at deeper level of the UNet, insteda
 # of input concatenation.
 class DiffusionFWIUNet(Module):
-    """
-    DiffusionUNet combines a ResNetEncoder for seismic data conditioning with a
-    SongUNetPosEmbd for diffusion modeling. This model processes seismic data
-    (ux and uz) into conditioning embeddings that are concatenated with the
-    state vector of the diffusion model, either at the input level or at a
-    specified resolution level. Also supports conditioning on the mean
-    prediction from a regression model.
+    r"""
+    DiffusionFWINet is a conditional diffusion model designed to denoise a
+    latent state vector :math:`x` that corresponds to a velocity model,
+    represented by a 2D image where the channel dimension is the individual
+    variables that we are seeking to estimate (e.g. wave velocities :math:`V_P`,
+    :math:`V_S`, density :math:`\rho`, etc.). The model is conditioned on
+    seismic observations :math:`\mathbf{Y}` (e.g. particle velocities :math:`u_x` and
+    :math:`u_z`).
+
+    The conditioning is performed by a time-signal encoder that encodes individual
+    signals from the seismic observations into fixed-length embeddings. This
+    time signal encoder is based on a temporal Global Filter network. The
+    embeddings are then channel-wise concatenated to the latent state vector of
+    the diffusion model, and finally passed to a UNet that denoises the latent
+    state vector.
 
     Parameters
     ----------
-    - nb_sources : int
-        Number of input channels/sources for each input image (ux and uz
-        seismic data) used to condition the diffusion model.
-    - nb_timesteps : int
-        Height of the input images used to condition the diffusion model
-        (number of timesteps in the seismic data).
-    - nb_receivers : int
-        Width of the input image used to condition the diffusion model
-        (number of receivers in the seismic data).
-    - img_resolution : Union[List[int], int]
-        Resolution of the diffusion model state vector. Can be a single int for
-        square images or a list [height, width] for rectangular images.
-    - x_mean_conditioning: bool
-        Whether to condition the diffusion model on the mean prediction from a
-        regression model. Default: True.
-    - conditioning_model_type: str
-        Type of conditioning model to use, either "ResNet" or "FNO". Default: "ResNet".
-    - conditioning_model_kwargs: dict
-        Additional keyword arguments for the conditioning model. Default: {}.
-    - unet_kwargs: dict
-        Additional keyword arguments to pass to SongUNetPosEmbd. Default: {}.
+    x_resolution: List[int]
+        Resolution of state vector :math:`x`. For a 2D velocity model, this
+        should be of the form :math:`(H, W)`, where :math:`H` and :math:`W` are
+        the depth and width of the velocity model, respectively.
+    x_channels: int
+        Number of channels :math:`C_{\mathbf{x}}` in the latent state vector
+        :math:`\mathbf{x}`.
+        This should be equal to the number of variables that we are seeking to
+        estimate (e.g. `x_channels=3` for :math:`V_P`, :math:`V_S`, and
+        :math:`\rho`).
+    y_resolution: List[int]
+        Resolution of the seismic observations :math:`\mathbf{Y}`. For a 2D velocity
+        model, this should be of the form :math:`(T, W)`, where :math:`T` is the
+        number of timesteps in each time signal and :math:`W` is the number of
+        receivers.
+
+        *Note:* the number of timesteps is the same for all time
+        signals and the number of receivers is the same as the width :math:`W` of
+        the velocity model.
+    y_channels: int
+        Number of channels in the seismic observations :math:`\mathbf{Y}`. This should be
+        equal to the number of sources.
+    encoder_hidden_channels: int, optional, default=128
+        Number of hidden channels in the time signal encoder.
+    N_grid_channels: int, optional, default=20
+        Number of learnable positional embeddings in the UNet.
+
 
     Forward
     -------
-    Should be called with `output = model(x, ux, uz, x_mean, noise)`.
+    x: torch.Tensor
+        Latent state vector :math:`\mathbf{x}` of shape :math:`(B,
+        C_{\mathbf{x}}, H, W)`.
+    y: torch.Tensor
+        Seismic observations :math:`\mathbf{Y}` of shape :math:`(B,
+        C_{\mathbf{Y}}, T, W)`.
+    time: torch.Tensor
+        Diffusion time step, of shape :math:`(B,)`.
 
-    Input:
-        - x: torch.Tensor, shape (B, 2, img_resolution[0], img_resolution[1])
-          Input tensor to the diffusion model that represents the state vector.
-        - ux: torch.Tensor, shape (B, nb_sources, nb_timesteps, nb_receivers)
-          Input tensor for u_x velocity component. Used as conditioning.
-        - uz: torch.Tensor, shape (B, nb_sources, nb_timesteps, nb_receivers)
-          Input tensor for u_z velocity component. Used as conditioning.
-        - x_mean: Union[torch.Tensor, None]. Deterministic prediction from a
-          regression model. Used as conditioning, only if x_mean_conditioning is
-          True. If not None, shape should be (B, 2, img_resolution[0], img_resolution[1]).
-        - noise: torch.Tensor, shape (B,)
-          Noise level. Used as conditioning.
+    Outputs
+    -------
+    x: torch.Tensor
+        Denoised latent state vector :math:`\mathbf{x}` of shape :math:`(B,
+        C_{\mathbf{x}}, H, W)`.
 
-    Output:
-        - torch.Tensor, shape (B, 2, img_resolution[0], img_resolution[1])
-          Output tensor from the diffusion model. Represents the updated state vector.
-
-    Note
-    ----
+    Notes
+    -----
     This model uses :class:`physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd` as its
-    diffusion backbone. For more details on the diffusion model parameters, refer to the
-    SongUNetPosEmbd documentation.
+    diffusion UNet. For more details on the diffusion model parameters, refer
+    to its documentation.
     """
 
     def __init__(
         self,
-        nb_sources: int,
-        nb_timesteps: int,
-        nb_receivers: int,
-        img_resolution: Union[List[int], int],
-        x_mean_conditioning: bool = True,
-        conditioning_model_type: str = "ResNet",
-        conditioning_model_kwargs: dict = {},
-        unet_kwargs: dict = {},
+        x_resolution: List[int],
+        x_channels: int,
+        y_resolution: List[int],
+        y_channels: int,
+        encoder_hidden_channels: int = 128,
+        num_encoder_blocks: int = 4,
+        N_grid_channels: int = 20,
+        unet_model_channels: int = 128,
+        unet_channel_mult: List[int] = [1, 2, 2, 2, 2],
+        unet_num_blocks: int = 4,
+        **unet_kwargs: Any,
     ):
         super().__init__()
-        self.meta = DiffusionFWIUNetMetaData()
-        self.conditioning_model_type = conditioning_model_type
-        self.nb_timesteps = nb_timesteps
-        self.nb_receivers = nb_receivers
+        self.meta = DiffusionFWINetMetaData()
+        self.x_resolution = x_resolution
+        self.x_channels = x_channels
+        self.y_resolution = y_resolution
+        self.y_channels = y_channels
+        self._grid_to_receivers_channels_ratio = 4
 
-        if isinstance(img_resolution, int):
-            img_resolution = (img_resolution, img_resolution)
-
-        # Set default UNet parameters
-        if unet_kwargs is None:
-            unet_kwargs = {}
-        if "gridtype" not in unet_kwargs:
-            unet_kwargs["gridtype"] = "learnable"
-        if "N_grid_channels" not in unet_kwargs:
-            unet_kwargs["N_grid_channels"] = 32
-        if "cond_concat_resolution" not in unet_kwargs:
-            unet_kwargs["cond_concat_resolution"] = img_resolution[0]
-
-        self.cond_concat_resolution = unet_kwargs["cond_concat_resolution"]
-        self.concat_at_input_level = (
-            self.cond_concat_resolution is None
-            or self.cond_concat_resolution == img_resolution[0]
+        # Seismic data encoder
+        self.time_signal_encoder = TimeSignalEncoder(
+            in_channels=(
+                y_channels
+                + self._grid_to_receivers_channels_ratio * N_grid_channels
+            ),
+            out_channels=encoder_hidden_channels // 2,
+            hidden_channels=encoder_hidden_channels,
+            out_length=self.img_resolution[0],
+            num_encoder_blocks=num_encoder_blocks,
         )
 
-        if isinstance(self.cond_concat_resolution, int):
-            cond_embedding_dimension = (
-                self.cond_concat_resolution,
-                self.cond_concat_resolution,
-            )
-        else:
-            cond_embedding_dimension = tuple(self.cond_concat_resolution)
-        self.cond_embedding_dimension = cond_embedding_dimension
+        # Default settings for attention in the UNet
+        self._attn_default_threshold = 16
+        _unet_resolutions = [self.x_resolution[0]]
+        for _ in unet_channel_mult[1:]:
+            _unet_resolutions.append(_unet_resolutions[-1] // 2)
+        attn_resolutions = unet_kwargs.get(
+            "attn_resolutions",
+            [r for r in _unet_resolutions if r <= self._attn_default_threshold]
+        )
 
-        self.x_mean_conditioning = x_mean_conditioning
+        # Denoising UNet
+        self.unet = SongUNetPosEmbd(
+            img_resolution=self.x_resolution,
+            in_channels=(
+                x_channels
+                + self.time_signal_encoder.out_channels
+                + N_grid_channels
+            ),
+            out_channels=encoder_hidden_channels,
+            label_dim=0,
+            augment_dim=0,
+            model_channels=unet_model_channels,
+            channel_mult=unet_channel_mult,
+            attn_resolutions=attn_resolutions,
+            N_grid_channels=N_grid_channels,
+            gridtype="learnable",
+            **unet_kwargs,
+        )
 
-        # Configure the conditioning model
-        if conditioning_model_type == "ResNet":
-            self.cond_encoder = ResNetEncoder(
-                nb_sources=nb_sources,
-                nb_timesteps=nb_timesteps,
-                nb_receivers=nb_receivers,
-                embedding_dimension=cond_embedding_dimension,
-                **conditioning_model_kwargs,
-            )
-            self.cond_channels = self.cond_encoder.out_channels
-        elif conditioning_model_type == "FNO":
-            out_channels = conditioning_model_kwargs.pop("out_channels", 32)
-            # Additional input channels in the conditioning model for
-            # positional embeddings
-            C_emb = unet_kwargs["N_grid_channels"]
-            self.pos_embd_channels = max(
-                conditioning_model_kwargs.pop("pos_embd_channels", 16), C_emb
-            )
-            self.pos_embd_proj = nn.Linear(
-                img_resolution[0], self.pos_embd_channels // C_emb
-            )
-            self.cond_encoder = FNO(
-                in_channels=nb_sources * 2 + C_emb * self.pos_embd_proj.out_features,
-                out_channels=out_channels,
-                dimension=1,
-                decoder_layers=conditioning_model_kwargs.pop("decoder_layers", 2),
-                decoder_layer_size=conditioning_model_kwargs.pop(
-                    "decoder_layer_size", 128
-                ),
-                latent_channels=conditioning_model_kwargs.pop("latent_channels", 128),
-                num_fno_modes=conditioning_model_kwargs.pop("num_fno_modes", 32),
-                **conditioning_model_kwargs,
-            )
-            self.cond_channels = out_channels
-        else:
-            raise ValueError(
-                f"Invalid conditioning_model_type: {conditioning_model_type}. "
-                f"Must be one of ['ResNet', 'FNO']"
-            )
-
-        # Configure the diffusion backbone
-        state_channels = 2  # vp and vs
-        if self.concat_at_input_level:
-            # Concatenate at input level: include both original input
-            # and conditioning channels
-            in_channels = (
-                state_channels + self.cond_channels + unet_kwargs["N_grid_channels"]
-            )
-            if self.x_mean_conditioning:
-                in_channels += state_channels
-
-            self.diffusion_backbone = SongUNetPosEmbd(
-                img_resolution=img_resolution,
-                in_channels=in_channels,
-                out_channels=2,
-                **unet_kwargs,
-            )
-        else:
-            # Concatenate at a deeper level in the network
-            in_channels = state_channels + unet_kwargs["N_grid_channels"]
-            if self.x_mean_conditioning:
-                in_channels += state_channels
-
-            self.diffusion_backbone = SongUNetPosEmbd(
-                img_resolution=img_resolution,
-                in_channels=in_channels,
-                out_channels=2,
-                cond_channels=self.cond_channels,
-                **unet_kwargs,
-            )
+        # Grid to receivers transform
+        self.grid_to_receivers = AttentionPool(
+            num_channels=N_grid_channels,
+            out_length=4,
+        )
 
     def forward(
         self,
         x: torch.Tensor,
-        ux: torch.Tensor,
-        uz: torch.Tensor,
-        x_mean: Union[torch.Tensor, None],
-        noise: torch.Tensor,
+        y: torch.Tensor,
+        time: torch.Tensor,
     ) -> torch.Tensor:
-        """
-        Forward pass of the DiffusionFWIUNet model.
-        """
-        # Note: (H, W) = img_resolution, T = nb_timesteps, R = nb_receivers,
-        # S = nb_sources, B = x.shape[0]
-        # Generate conditioning embeddings from seismic data
-        if self.conditioning_model_type == "ResNet":
-            cond_y = self.cond_encoder(ux, uz)
-        elif self.conditioning_model_type == "FNO":
-            B = ux.shape[0]
 
-            # Process the positional embeddings to add them to the conditioning
-            # input
-            pos_embd = (
-                self.diffusion_backbone.pos_embd.to(ux.device)
-                .to(ux.dtype)[None]
-                .expand((B, -1, -1, -1))
-            )  # (B, C_emb, H, W)
-            # Handle dimension mismatch between state width and nb_receivers
-            if pos_embd.shape[-1] != self.nb_receivers:
-                pos_embd = F.interpolate(
-                    pos_embd,
-                    size=(pos_embd.shape[-2], self.nb_receivers),
-                    mode="bilinear",
-                    align_corners=False,
-                )  # (B, C_emb, H, R)
-            # Reduce dimensionality of positional embeddings with a linear
-            # projection
-            pos_embd = rearrange(pos_embd, "b c h r -> (b r) c h")  # (B*R, C_emb, H)
-            pos_embd = self.pos_embd_proj(
-                pos_embd
-            )  # (B*R, C_emb, pos_embd_channels // C_emb)
-            pos_embd = rearrange(
-                pos_embd, "br c h -> br (c h) 1"
-            )  # (B*R, pos_embd_channels, 1)
-            pos_embd = pos_embd.expand(
-                -1, -1, self.nb_timesteps
-            )  # (B*R, pos_embd_channels, T)
+        B, C_x, H, W = x.shape
+        C_y, T = y.shape
 
-            # Create full conditioning input: ux, uz, and positional embeddings
-            cond_input = torch.cat([ux, uz], dim=1)  # (B, 2*S, T, R)
-            cond_input = rearrange(cond_input, "b c t r -> (b r) c t")  # (B*R, 2*S, T)
-            cond_input = torch.cat(
-                [cond_input, pos_embd], dim=1
-            )  # (B*R, 2*S+pos_embd_channels, T)
-
-            # Create the conditioning output
-            cond_y = self.cond_encoder(cond_input)  # (B*R, cond_channels, H)
-            cond_y = rearrange(
-                cond_y, "(b r) c t -> b c t r", b=B, r=self.nb_receivers
-            )  # (B, cond_channels, H, R)
-            # Handle dimension mismatch for embedding dimension
-            if (
-                cond_y.shape[2] != self.cond_embedding_dimension[0]
-                or cond_y.shape[3] != self.cond_embedding_dimension[1]
-            ):
-                cond_y = F.interpolate(
-                    cond_y,
-                    size=self.cond_embedding_dimension,
-                    mode="bilinear",
-                    align_corners=False,
-                )  # (B, cond_channels, H, W)
-
-        # Handle conditioning on x_mean
-        if self.x_mean_conditioning and x_mean is None:
-            raise ValueError("x_mean tensor required when x_mean_conditioning is True.")
-        if not self.x_mean_conditioning and x_mean is not None:
-            raise ValueError("x_mean conditioning ignored.")
-
-        if self.concat_at_input_level:
-            if self.x_mean_conditioning and x_mean is not None:
-                x = torch.cat([x, cond_y, x_mean], dim=1)
-            else:
-                x = torch.cat([x, cond_y], dim=1)
-            output = self.diffusion_backbone(
-                x,
-                noise,
-                class_labels=None,
+        # Validate inputs
+        if y.shape != (B, C_y, T, W):
+            raise ValueError(
+                f"y shape mismatch: expected {(B, C_y, T, W)}, but got {y.shape}"
             )
-        else:
-            if self.x_mean_conditioning and x_mean is not None:
-                x = torch.cat([x, x_mean], dim=1)
-            output = self.diffusion_backbone(
-                x,
-                noise,
-                class_labels=None,
-                y=cond_y,
+        if x.shape != (B, C_x, H, W):
+            raise ValueError(
+                f"x shape mismatch: expected {(B, C_x, H, W)}, but got {x.shape}"
+            )
+        if time.shape != (B,):
+            raise ValueError(
+                f"time shape mismatch: expected {(B,)}, but got {time.shape}"
             )
 
-        return output
+        # Embed grid coordinates and concatenate to seismic data
+        pos_embd = self.unet.pos_embd  # (N_grid, H, W)
+        if x.dtype != pos_embd.dtype:
+            pos_embd = pos_embd.to(x.dtype)[None]
+        pos_emb = pos_embd.permute(2, 1, 0)  # (W, H, N_grid)
+        grid_embed = self.grid_to_receivers(pos_emb)  # (W, Cg, N_grid)
+        grid_embed = rearrange(grid_embed, "w g n -> (g n) w")  # (Cg * N_grid, W)
+        grid_embed = grid_embed[None, :, None, :].expand(B, 1, T, 1)  # (B, Cg * N_grid, T, W)
+        y = torch.cat((y, grid_embed), dim=1)  # (B, C_y + Cg * N_grid, T, W)
+
+        # Encode seismic data
+        y = self.time_signal_encoder(y)  # (B, C_hidden//2, H, W)
+
+        # Concatenate latent state vector and seismic data
+        x = torch.cat((x, y), dim=1)  # (B, C_x + C_hidden//2, H, W)
+
+        # Denoise
+        x = self.unet(
+            x=x,
+            noise_labels=time,
+            class_labels=None
+        )  # (B, C_x, H, W)
+
+        return x
