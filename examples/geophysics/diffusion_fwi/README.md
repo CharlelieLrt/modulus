@@ -142,6 +142,10 @@ This will download the dataset as a collection of `.npz` files in the directory
 python download_data.py --help
 ```
 
+>**Note:** Depending on how many subsets of the E-FWI dataset you want to
+>download, the size of the dataset can be quite large (from 100GB to 1TB);
+>downloading the full dataset can take several hours.
+
 ### Step 2: Generate seismic observations
 
 The second step consists in re-generating seismic observations from the

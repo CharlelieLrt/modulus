@@ -23,7 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
 
-from timm.models.layers import Mlp
+from timm.layers import Mlp
 
 from physicsnemo.models.diffusion.song_unet import SongUNetPosEmbd
 from physicsnemo.models.meta import ModelMetaData
@@ -48,7 +48,7 @@ class AttentionPool(nn.Module):
 
     Outputs
     -------
-    y : torch.Tensor
+    torch.Tensor
         Output tensor of shape :math:`(B, L_{out}, C)`.
     """
     def __init__(self, num_channels: int, out_length: int):
@@ -75,7 +75,8 @@ class AttentionPool(nn.Module):
                 f"x last dim must match num_channels: {C} != {self.num_channels}")
 
         # Build batch of learned queries
-        q = self.query_tokens.unsqueeze(0).expand(B, 1, 1)  # (B, L_out, C)
+        q = self.query_tokens.unsqueeze(0).expand(
+            B, self.out_length, self.num_channels)  # (B, L_out, C)
 
         kv = self.kv_proj(x)  # (B, L_in, 2C)
         k, v = torch.chunk(kv, 2, dim=2)      # (B, L_in, C), (B, L_in, C)
@@ -107,13 +108,13 @@ class GlobalFilterBlock1D(nn.Module):
 
     Outputs
     -------
-    y : torch.Tensor
+    torch.Tensor
         Output tensor of shape :math:`(B, L, C)`.
     """
     def __init__(self, num_channels: int, length: int):
         super().__init__()
         self.complex_weight = nn.Parameter(
-            torch.randn(length, num_channels, 2, dtype=torch.float32) / num_channels)
+            torch.randn(length // 2 + 1, num_channels, 2, dtype=torch.float32) / num_channels)
         self.length = length
         self.num_channels = num_channels
         self.layer_norm = nn.LayerNorm(num_channels)
@@ -126,7 +127,10 @@ class GlobalFilterBlock1D(nn.Module):
         B, L, C = x.shape
 
         if L != self.length or C != self.num_channels:
-            raise ValueError(f"x shape mismatch: expected {(B, L, C)}, but got {x.shape}")
+            raise ValueError(
+                f"x shape mismatch: expected {(B, self.length, self.num_channels)}, "
+                f"but got {x.shape}"
+            )
 
         y = torch.fft.rfft(x, dim=1, norm='ortho')  # (B, L, C)
         weight = torch.view_as_complex(self.complex_weight)  # (L, C)
@@ -155,6 +159,8 @@ class TimeSignalEncoder(nn.Module):
         Number of channels :math:`C_{out}` in the output image.
     hidden_channels : int
         Number of hidden channels :math:`C_{h}` in the encoder.
+    in_length : int
+        Length :math:`L_{in}` of the input image.
     out_length : int
         Length :math:`L_{out}` of the output embedding.
     num_encoder_blocks : int, optional, default=4
@@ -163,15 +169,15 @@ class TimeSignalEncoder(nn.Module):
     Forward
     -------
     y : torch.Tensor
-        Two-dimensional image of shape :math:`(B, C_{in}, H, W)`. Each column
-        along `dim=2` is assumed to correspond to a an individuel time signal
-        of length :math:`H` (and with :math:`C_{in}` channels).
+        Two-dimensional image of shape :math:`(B, C_{in}, L_{in}, W)`. Each column
+        along ``dim=2`` is assumed to correspond to a an individuel time signal
+        of length :math:`L_{in}` (and with :math:`C_{in}` channels).
         The input tensor consists of :math:`W` such signals combined into a
         single two-dimensional image.
 
     Outputs
     -------
-    y : torch.Tensor
+    torch.Tensor
         Two-dimensional image of shape :math:`(B, C_{out}, L_{out}, W)`. Each
         time-signal is embedded into a fixed-length embedding of length
         :math:`L_{out}`. The embedded signals are then recombined into a
@@ -182,6 +188,7 @@ class TimeSignalEncoder(nn.Module):
         in_channels: int,
         out_channels: int,
         hidden_channels: int,
+        in_length: int,
         out_length: int,
         num_encoder_blocks: int = 4,
     ):
@@ -189,6 +196,7 @@ class TimeSignalEncoder(nn.Module):
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.hidden_channels = hidden_channels
+        self.in_length = in_length
         self.out_length = out_length
         self.num_encoder_blocks = num_encoder_blocks
 
@@ -202,12 +210,12 @@ class TimeSignalEncoder(nn.Module):
 
         # Encoder blocks
         self.encoder = nn.ModuleList([
-            GlobalFilterBlock1D(hidden_channels, out_length)
+            GlobalFilterBlock1D(hidden_channels, in_length)
             for _ in range(self.num_encoder_blocks)
         ])
 
         # Output/decoder blocks
-        self.attn_pool = AttentionPool(in_channels, out_length)
+        self.attn_pool = AttentionPool(self.hidden_channels, self.out_length)
         self.output_head = nn.Sequential(
             nn.LayerNorm(hidden_channels),
             Mlp(hidden_channels, 4 * hidden_channels, out_channels),
@@ -221,10 +229,10 @@ class TimeSignalEncoder(nn.Module):
         B, C_in, T, W = y.shape
 
         # Validate inputs
-        if C_in != self.in_channels:
+        if y.shape != (B, self.in_channels, self.in_length, W):
             raise ValueError(
-                f"x last dim must match in_channels: expected {self.in_channels}, "
-                f"but got {C_in}"
+                f"y shape mismatch: expected "
+                f"{(B, self.in_channels, self.in_length, W)}, but got {y.shape}"
             )
         # Consider all time signals as batched elements
         y = rearrange(y, "b c t w -> (b w) t c")  # (B * W, T, C_in)
@@ -255,7 +263,7 @@ class TimeSignalEncoder(nn.Module):
 @dataclass
 class DiffusionFWINetMetaData(ModelMetaData):
     """
-    Metadata for the DiffusionFWIUNet model.
+    Metadata for the DiffusionFWINet model.
     """
 
     name: str = "DiffusionFWINet"
@@ -275,7 +283,7 @@ class DiffusionFWINetMetaData(ModelMetaData):
 
 # TODO: enable conditioning concatenation at deeper level of the UNet, insteda
 # of input concatenation.
-class DiffusionFWIUNet(Module):
+class DiffusionFWINet(Module):
     r"""
     DiffusionFWINet is a conditional diffusion model designed to denoise a
     latent state vector :math:`x` that corresponds to a velocity model,
@@ -295,7 +303,7 @@ class DiffusionFWIUNet(Module):
     Parameters
     ----------
     x_resolution: List[int]
-        Resolution of state vector :math:`x`. For a 2D velocity model, this
+        Resolution of thge latent state vector :math:`x`. For a 2D velocity model, this
         should be of the form :math:`(H, W)`, where :math:`H` and :math:`W` are
         the depth and width of the velocity model, respectively.
     x_channels: int
@@ -315,12 +323,19 @@ class DiffusionFWIUNet(Module):
         the velocity model.
     y_channels: int
         Number of channels in the seismic observations :math:`\mathbf{Y}`. This should be
-        equal to the number of sources.
+        equal to :math:`S \times V`, where :math:`S` is the number of sources and
+        :math:`V` is the number of variables observed (e.g. :math:`V=2` for particle
+        velocities :math:`u_x` and :math:`u_z`).
     encoder_hidden_channels: int, optional, default=128
         Number of hidden channels in the time signal encoder.
     N_grid_channels: int, optional, default=20
-        Number of learnable positional embeddings in the UNet.
-
+        Number of learnable positional embedding channels in the UNet.
+    model_channels: int, optional, default=128
+        Base multiplier for the number of channels in the UNet.
+    channel_mult: List[int], optional, default=[1, 2, 2, 2, 2]
+        Multipliers for the number of channels at each level in the UNet.
+    num_blocks: int, optional, default=4
+        Number of blocks at each level in the UNet.
 
     Forward
     -------
@@ -330,12 +345,12 @@ class DiffusionFWIUNet(Module):
     y: torch.Tensor
         Seismic observations :math:`\mathbf{Y}` of shape :math:`(B,
         C_{\mathbf{Y}}, T, W)`.
-    time: torch.Tensor
+    t: torch.Tensor
         Diffusion time step, of shape :math:`(B,)`.
 
     Outputs
     -------
-    x: torch.Tensor
+    torch.Tensor
         Denoised latent state vector :math:`\mathbf{x}` of shape :math:`(B,
         C_{\mathbf{x}}, H, W)`.
 
@@ -355,16 +370,16 @@ class DiffusionFWIUNet(Module):
         encoder_hidden_channels: int = 128,
         num_encoder_blocks: int = 4,
         N_grid_channels: int = 20,
-        unet_model_channels: int = 128,
-        unet_channel_mult: List[int] = [1, 2, 2, 2, 2],
-        unet_num_blocks: int = 4,
+        model_channels: int = 128,
+        channel_mult: List[int] = [1, 2, 2, 2, 2],
+        num_blocks: int = 4,
         **unet_kwargs: Any,
     ):
         super().__init__()
         self.meta = DiffusionFWINetMetaData()
-        self.x_resolution = x_resolution
+        self.x_resolution = tuple(x_resolution)
         self.x_channels = x_channels
-        self.y_resolution = y_resolution
+        self.y_resolution = tuple(y_resolution)
         self.y_channels = y_channels
         self._grid_to_receivers_channels_ratio = 4
 
@@ -376,14 +391,15 @@ class DiffusionFWIUNet(Module):
             ),
             out_channels=encoder_hidden_channels // 2,
             hidden_channels=encoder_hidden_channels,
-            out_length=self.img_resolution[0],
+            in_length=self.y_resolution[0],
+            out_length=self.x_resolution[0],
             num_encoder_blocks=num_encoder_blocks,
         )
 
         # Default settings for attention in the UNet
         self._attn_default_threshold = 16
         _unet_resolutions = [self.x_resolution[0]]
-        for _ in unet_channel_mult[1:]:
+        for _ in channel_mult[1:]:
             _unet_resolutions.append(_unet_resolutions[-1] // 2)
         attn_resolutions = unet_kwargs.get(
             "attn_resolutions",
@@ -398,11 +414,11 @@ class DiffusionFWIUNet(Module):
                 + self.time_signal_encoder.out_channels
                 + N_grid_channels
             ),
-            out_channels=encoder_hidden_channels,
+            out_channels=x_channels,
             label_dim=0,
             augment_dim=0,
-            model_channels=unet_model_channels,
-            channel_mult=unet_channel_mult,
+            model_channels=model_channels,
+            channel_mult=channel_mult,
             attn_resolutions=attn_resolutions,
             N_grid_channels=N_grid_channels,
             gridtype="learnable",
@@ -419,34 +435,37 @@ class DiffusionFWIUNet(Module):
         self,
         x: torch.Tensor,
         y: torch.Tensor,
-        time: torch.Tensor,
+        t: torch.Tensor,
     ) -> torch.Tensor:
 
         B, C_x, H, W = x.shape
-        C_y, T = y.shape
+        _, C_y, T, _ = y.shape
 
         # Validate inputs
-        if y.shape != (B, C_y, T, W):
+        if y.shape != (B, self.y_channels) + self.y_resolution:
             raise ValueError(
-                f"y shape mismatch: expected {(B, C_y, T, W)}, but got {y.shape}"
+                f"y shape mismatch: expected "
+                f"{(B, self.y_channels) + self.y_resolution}, but got {y.shape}"
             )
-        if x.shape != (B, C_x, H, W):
+        if x.shape != (B, self.x_channels) + self.x_resolution:
             raise ValueError(
-                f"x shape mismatch: expected {(B, C_x, H, W)}, but got {x.shape}"
+                f"x shape mismatch: expected "
+                f"{(B, self.x_channels) + self.x_resolution}, but got {x.shape}"
             )
-        if time.shape != (B,):
+        if t.shape != (B,):
             raise ValueError(
-                f"time shape mismatch: expected {(B,)}, but got {time.shape}"
+                f"t shape mismatch: expected {(B,)}, but got {t.shape}"
             )
 
         # Embed grid coordinates and concatenate to seismic data
         pos_embd = self.unet.pos_embd  # (N_grid, H, W)
         if x.dtype != pos_embd.dtype:
-            pos_embd = pos_embd.to(x.dtype)[None]
+            pos_embd = pos_embd.to(x.dtype)
         pos_emb = pos_embd.permute(2, 1, 0)  # (W, H, N_grid)
         grid_embed = self.grid_to_receivers(pos_emb)  # (W, Cg, N_grid)
         grid_embed = rearrange(grid_embed, "w g n -> (g n) w")  # (Cg * N_grid, W)
-        grid_embed = grid_embed[None, :, None, :].expand(B, 1, T, 1)  # (B, Cg * N_grid, T, W)
+        grid_embed = grid_embed[None, :, None, :].expand(
+            B, -1, T, -1)  # (B, Cg * N_grid, T, W)
         y = torch.cat((y, grid_embed), dim=1)  # (B, C_y + Cg * N_grid, T, W)
 
         # Encode seismic data
@@ -458,7 +477,7 @@ class DiffusionFWIUNet(Module):
         # Denoise
         x = self.unet(
             x=x,
-            noise_labels=time,
+            noise_labels=t,
             class_labels=None
         )  # (B, C_x, H, W)
 

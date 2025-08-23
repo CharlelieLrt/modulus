@@ -16,54 +16,86 @@
 
 # Model configuration
 model:
-  regression_checkpoint_path: regression_checkpoint/ElasticNet.0.85.mdlus  # Path to regression model checkpoint
-  conditioning_model_type: "FNO"  # Type of conditioning model. Must be "FNO or "ResNet".
-  conditioning_model_kwargs:
-    pos_embd_channels: 16  # Number of channels for the positional embedding
-  model_args:
-    model_channels: 64  # Base multiplier for the number of channels across the network
-    channel_mult: [1, 2, 2]  # Per-resolution multipliers for the number of channels
-    attn_resolutions: [17]  # Resolutions at which self-attention layers are applied
-    cond_concat_resolution: 70  # Resolution at which to concatenate the
-    gridtype: "linear"  # Type of positional embedding grid
-    N_grid_channels: 2  # Number of channels for the positional embedding grid
-    
-  
-# Dataset configuration
+  # Spatial resolution [depth, width] of the velocity model. Should be a
+  # multiple of 2**N where N is the number of levels in the UNet, defined by
+  # 'channel_mult'. Note: if velocity models from the dataset are at a
+  # different resolution, interpolation is performed to match 'x_resolution'.
+  x_resolution: [80, 80]
+  # Number of channels in the velocity model, should be equal to the number
+  # of variables (e.g. 3 for Vp, Vs, rho).
+  x_channels: 3
+  # Spatial resolution [time steps, # receivers along width] of the seismic
+  # data. The second dimension should be equal to the width of the velocity
+  # model.
+  y_resolution: [1000, 80]
+  # Number of channels in the seismic data. Should be equal to number of
+  # sources * number of variables observed (e.g. 2 for ux, uz)
+  y_channels: 10
+  # Number of channels in the encoder hidden layer.
+  encoder_hidden_channels: 128
+  # Number of encoder blocks.
+  num_encoder_blocks: 4
+  # Number of channels in the positional embedding grid.
+  N_grid_channels: 20
+  # Base multiplier for the number of channels in the UNet.
+  model_channels: 128
+  # Multipliers for the number of channels at each level in the UNet.
+  channel_mult: [1, 2, 2, 2, 2]
+  # Number of blocks in the UNet.
+  num_blocks: 4
+  # Additional keyword arguments for the UNet. Should be a dictionary. Set to
+  # null to use default parameters.
+  unet_kwargs: null
+
 dataset:
-  name: "CFB"  # Dataset name
-  directory: "../data/raw_dataset"  # Training data directory
-  nb_sources: 5  # Number of input channels for each input (ux, uz)
-  nb_timesteps: 1000  # Number of timesteps (height of the input image)
-  nb_receivers: 70  # Number of receivers (width of the input image)
-  subsurface_resolution: [70, 70]  # Resolution of subsurface image (shape of output image)
-  transform: "ZscoreNormalize"  # Data transform: "ZscoreNormalize" or "MinMaxNormalize"
+  # Training data directory that should contain a subdirectory "samples/"" and
+  # a file stats.json
+  directory: <path_to_dataset>
+  # Variables in the velocity model.
+  x_vars: ["vp", "vs", "rho"]
+  # Variables in the seismic data.
+  y_vars: ["ux", "uz"]
 
 # Training configuration
 training:
-  batch_size_per_device: 4  # Batch size per device for training
-  max_epochs: 100  # Maximum number of epochs
-  lr: 1.0e-3  # Initial learning rate
-  weight_decay: 1.0e-4  # Weight decay for optimizer
-  num_workers: 1  # Number of workers for data loading
+  # Batch size per device for training
+  batch_size_per_device: 64
+  # Maximum number of epochs
+  max_epochs: 400 
+  # Base learning rate
+  lr: 5.0e-4
+  # Weight decay for optimizer
+  weight_decay: 1.0e-4
+  # Number of workers for data loading
+  num_workers: 4
+  # Learning rate scheduler
   scheduler:
-    patience: 5  # Epochs without improvement before reducing learning rate
-    factor: 0.2  # Factor by which learning rate will be reduced
+    # Minimum learning rate
+    eta_min: 5.0e-6
 
 # Validation configuration
 val:
-  batch_size_per_device: 4  # Batch size per device for validation
-  num_workers: 1  # Number of workers for validation data loading
+  # Batch size per device for validation
+  batch_size_per_device: 64
+  # Number of workers for validation data loading
+  num_workers: 4
 
 # I/O configuration
 io:
-  load_checkpoint: false  # Whether to load a checkpoint
-  checkpoint_dir: "./checkpoints/"  # Directory to save checkpoints
-  checkpoint_freq: 10  # Save checkpoint every N epochs
-  log_freq: 10  # Log frequency (in batches)
+  # Whether to load a checkpoint
+  load_checkpoint: false
+  # Directory to save/load checkpoints
+  checkpoint_dir: "./checkpoints/"
+  # Save checkpoint every N epochs
+  checkpoint_freq: 10
+  # Log frequency (in batches)
+  log_freq: 10
 
 # Wandb configuration
 wandb:
-  mode: "offline"  # "online", "offline", or "disabled"
-  results_dir: "./wandb/"  # Directory to save wandb logs
-  entity: "modulus"  # Entity (username or team name) for Weights & Biases
+  # "online", "offline", or "disabled"
+  mode: "offline"
+  # Directory to save wandb logs
+  results_dir: "./wandb/"
+  # Entity (username or team name) for Weights & Biases
+  entity: "modulus"

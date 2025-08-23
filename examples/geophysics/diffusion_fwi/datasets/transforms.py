@@ -25,9 +25,11 @@ from typing import (
     Sequence,
     Tuple,
     Union,
+    cast,
 )
 
 import torch
+import torch.nn.functional as F
 
 
 class DataLoaderUfuncTransform(ABC):
@@ -52,7 +54,7 @@ class DataLoaderUfuncTransform(ABC):
 
     Returns
     -------
-    - Iterator[Any]
+    Iterator[Any]
         Iterator yielding batches of tensors transformed by the provided
         ufuncs.
 
@@ -230,15 +232,15 @@ class ToDevice(DataLoaderUfuncTransform):
 
     Parameters
     ----------
-    - iterator : Iterator[Any]
+    iterator : Iterator[Any]
         Original data iterator yielding batches of tensors.
-    - device : (torch.device | str) | Dict[str, Optional[device]] | Sequence[Optional[device]]
+    device : (torch.device | str) | Dict[str, Optional[device]] | Sequence[Optional[device]]
         • *Scalar* : same target device for every tensor.
         • *Dict*   : key-specific target devices for *dict* batches; ``None``
           leaves the tensor on its current device.
         • *Sequence* : position-specific target devices for tuple/list batches;
           ``None`` leaves the tensor untouched.
-    - non_blocking : bool, optional
+    non_blocking : bool, optional
         Forwarded to ``Tensor.to``.
     """
 
@@ -296,16 +298,16 @@ class ZscoreNormalize(DataLoaderUfuncTransform):
 
     Parameters
     ----------
-    - iterator : Iterator[Any]
+    iterator : Iterator[Any]
         Data iterator yielding batches.
-    - mean, std : scalar | dict | sequence
-        `mean` and `std` follow the same rules:
+    mean, std : scalar | dict | sequence
+        ``mean`` and ``std`` follow the same rules:
             • *Scalar*: same value for every tensor.
             • *Dict*: key-specific values for *dict* batches. Missing or ``None``
             disables normalisation for that key.
             • *Tuple/List*: position-specific values for tuple/list batches; ``None``
             disables normalisation for that position.
-    - eps : float, optional
+    eps : float, optional
         Small term to avoid division by zero.
     """
 
@@ -357,16 +359,16 @@ class MinMaxNormalize(DataLoaderUfuncTransform):
 
     Parameters
     ----------
-    - iterator : Iterator[Any]
+    iterator : Iterator[Any]
         Data iterator yielding batches.
-    - min_val, max_val : scalar | dict | sequence
-        `min_val` and `max_val` follow the same rules:
+    min_val, max_val : scalar | dict | sequence
+        ``min_val`` and ``max_val`` follow the same rules:
             • *Scalar*: same value for every tensor.
             • *Dict*: key-specific values for *dict* batches. Missing or ``None``
             disables normalisation for that key.
             • *Tuple/List*: position-specific values for tuple/list batches; ``None``
             disables normalisation for that position.
-    - eps : float, optional
+    eps : float, optional
         Small term to avoid division by zero.
     """
 
@@ -420,5 +422,98 @@ class MinMaxNormalize(DataLoaderUfuncTransform):
 
         else:
             raise TypeError("Unsupported type for min_val/max_val parameters.")
+
+        super().__init__(iterator, ufuncs)
+
+
+class Interpolate(DataLoaderUfuncTransform):
+    """Selective 2D interpolation on 4D tensors (N, C, H, W).
+
+    Assumptions
+    -----------
+    • ``dim`` is one of: tuple-of-tuples, dict[str, tuple], sequence-of-tuples.
+    • ``size`` follows the same container structure as ``dim``.
+      Each inner size tuple length must match its inner dim tuple length.
+    • ``mode`` follows the same container structure as ``dim`` and ``size``.
+    """
+
+    def __init__(
+        self,
+        iterator: Iterator[Any],
+        size: Dict[str, Optional[Tuple[int, ...]]] | Sequence[Optional[Tuple[int, ...]]],
+        dim: Dict[str, Optional[Tuple[int, ...]]] | Sequence[Optional[Tuple[int, ...]]],
+        *,
+        mode: Dict[str, Optional[str]] | Sequence[Optional[str]] =
+        "bilinear",
+    ) -> None:
+
+        # Validate container alignment (all three share structure)
+        self._validate_args(dim, size, args_names=("dim", "size"))
+
+        # Factory to build interp ufunc
+        def _make_interp(
+            dims: Tuple[int, ...],
+            sizes: Tuple[int, ...],
+            mode_str: str,
+        ) -> Callable[[torch.Tensor], torch.Tensor]:
+            def _fn(t: torch.Tensor) -> torch.Tensor:
+                if t.dim() != 4:
+                    raise ValueError(
+                        "InterpolateTransform expects 4D tensors (B, C, H, W)."
+                    )
+                if len(dims) != len(sizes):
+                    raise ValueError("Each dim entry must have a matching size.")
+
+                # Get output height and width
+                _, _, h, w = t.shape
+                oh, ow = h, w
+                for d, s in zip(dims, sizes):
+                    if d == 2 or d == -2:
+                        oh = int(s)
+                    elif d == 3 or d == -1:
+                        ow = int(s)
+                    else:
+                        raise ValueError(f"Unsupported dim: {d}")
+
+                return F.interpolate(t, size=(oh, ow), mode=mode_str)
+
+            return _fn
+
+        # Dict container
+        if isinstance(dim, dict):
+            ufuncs_dict: Dict[str, Optional[Callable]] = {}
+            for k, dims_k in dim.items():
+                sizes_k = size[k]
+                mode_k = mode[k]
+                if dims_k is None or sizes_k is None or mode_k is None:
+                    ufuncs_dict[k] = None
+                else:
+                    ufuncs_dict[k] = _make_interp(dims_k, sizes_k, mode_k)
+            ufuncs = ufuncs_dict
+
+        # TODO: probably some way to simplify this
+        # Sequence container
+        elif isinstance(dim, (list, tuple)):
+            if len(dim) != len(size) or len(dim) != len(mode):
+                raise ValueError("dim, size and mode must be same-length sequences.")
+            # Single spec: apply to every element via callable
+            if len(dim) == 1:
+                dims0 = dim[0]
+                sizes0 = size[0]
+                mode0 = mode
+                if dims0 is None or sizes0 is None or mode0 is None:
+                    ufuncs = (lambda t: t)
+                else:
+                    ufuncs = _make_interp(dims0, sizes0, mode0)
+            else:
+                ufuncs_list: List[Optional[Callable]] = []
+                for dims_i, sizes_i, mode_i in zip(dim, size, mode):
+                    if dims_i is None or sizes_i is None or mode_i is None:
+                        ufuncs_list.append(None)
+                    else:
+                        ufuncs_list.append(_make_interp(dims_i, sizes_i, mode_i))
+                ufuncs = ufuncs_list
+        else:
+            raise TypeError("Unsupported structure for dim/size/mode parameters.")
 
         super().__init__(iterator, ufuncs)

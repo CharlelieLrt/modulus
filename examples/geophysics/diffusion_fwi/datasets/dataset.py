@@ -108,6 +108,9 @@ class EFWIDataset(Dataset):
             key=lambda x: int(x.stem.split("_")[-1]),
         )
 
+        if len(self.sample_files) == 0:
+            raise AssertionError(f"No samples found in {self.data_dir}")
+
         # Get first element to get the keys
         self.variables: list[str] = list(self[0].keys())
 
@@ -154,9 +157,9 @@ class EFWIDataset(Dataset):
         return data
 
 
-class EFWIDatapipe(Datapipe, DataLoader):
+class EFWIDatapipe(DataLoader):
     """
-    Datapipe for E-FWI
+    Datapipe for E-FWI dataset.
 
     Parameters
     ----------
@@ -208,7 +211,6 @@ class EFWIDatapipe(Datapipe, DataLoader):
             device: torch.device = torch.device("cuda:0")
         self.device = device
 
-        super().__init__(meta=MetaData())
         dataset: EFWIDataset = EFWIDataset(data_dir=data_dir, phase=phase)
         self.phase = phase
 
@@ -228,8 +230,7 @@ class EFWIDatapipe(Datapipe, DataLoader):
         else:
             sampler: DistributedSampler | None = None
 
-        DataLoader.__init__(
-            self,
+        super().__init__(
             dataset=dataset,
             batch_size=batch_size_per_device,
             sampler=sampler,

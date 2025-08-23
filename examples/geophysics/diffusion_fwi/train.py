@@ -20,33 +20,31 @@ import wandb
 import importlib.util
 import time
 import datetime
+from typing import Any, Dict
 from omegaconf import DictConfig, OmegaConf
 from hydra.utils import to_absolute_path
 from torch.nn.parallel import DistributedDataParallel
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import CosineAnnealingLR
 from functools import partial
-import mlflow
 
-from physicsnemo.datapipes.cae.efwi_datapipe import EFWIDatapipe
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.launch.logging import PythonLogger, RankZeroLoggingWrapper
-from physicsnemo.launch.logging import LaunchLogger
 from physicsnemo.launch.logging.wandb import initialize_wandb
-from physicsnemo.launch.logging.mlflow import initialize_mlflow
 from physicsnemo.launch.utils import (
     load_checkpoint,
     save_checkpoint,
     get_checkpoint_dir,
 )
-from physicsnemo.models.geophysics.diffusion import DiffusionFWIUNet
-from physicsnemo.models.diffusion import edm_precond
-from physicsnemo.metrics.diffusion import BaseResidualLoss
-from physicsnemo.models.diffusion.conditional import ConditionalDiffusionAdapter
-from physicsnemo.utils.transforms import ZscoreNormalize, MinMaxNormalize
-from physicsnemo import Module
+
+from datasets.dataset import EFWIDatapipe
+from utils.preconditioning import edm_precond
+from utils.nn import DiffusionFWINet
+from utils.metrics import EDMLoss
+from utils.diffusion import DiffusionAdapter
+from datasets.transforms import ZscoreNormalize, Interpolate
 
 
-@hydra.main(version_base="1.3", config_path="conf", config_name="config")
+@hydra.main(version_base="1.3", config_path="conf", config_name="config_train")
 def main(cfg: DictConfig) -> None:
 
     # Initialize distributed manager
@@ -57,14 +55,15 @@ def main(cfg: DictConfig) -> None:
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     logger = PythonLogger("main")
     rank_zero_logger = RankZeroLoggingWrapper(logger, dist)
-    rank_zero_logger.file_logging(f"launch-{timestamp}.log")
+    rank_zero_logger.file_logging(f"launch-train-{timestamp}.log")
 
     # Initialize Weights & Biases
     checkpoint_dir = get_checkpoint_dir(str(cfg.io.checkpoint_dir), "diffusion_fwi")
     if cfg.io.load_checkpoint:
-        metadata = {"wandb_id": None}
-        load_checkpoint(checkpoint_dir, metadata=metadata)
-        wandb_id, resume = metadata["wandb_id"], "must"
+        metadata: Dict[str, Any] = {"wandb_id": None}
+        load_checkpoint(checkpoint_dir, metadata_dict=metadata)
+        wandb_id: str = metadata["wandb_id"]
+        resume: str = "must"
         rank_zero_logger.info(f"Resuming wandb run with ID: {wandb_id}")
     else:
         wandb_id, resume = None, None
@@ -77,64 +76,40 @@ def main(cfg: DictConfig) -> None:
         wandb_id=wandb_id,
         resume=resume,
         save_code=True,
+        name=f"train-{timestamp}",
     )
-
-    # Initialize MLflow
-    initialize_mlflow(
-        experiment_name="Modulus-Launch",
-        experiment_desc="Diffusion FWI Training",
-        run_desc="Diffusion FWI Training run",
-        user_name="PhysicsNeMo User",
-        mode="offline" if cfg.wandb.mode == "offline" else "online",
-    )
-    LaunchLogger.initialize(use_mlflow=True)
-
-    # Log parameters to MLflow
-    if dist.rank == 0:
-        mlflow.log_params(
-            OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True)
-        )
 
     logger.info(f"Rank: {dist.rank}, Device: {dist.device}")
 
-    # Load pre-trained regression model
-    regression_checkpoint_path = to_absolute_path(cfg.model.regression_checkpoint_path)
-    regression_net = Module.from_checkpoint(regression_checkpoint_path)
-    regression_net.eval().requires_grad_(False).to(dist.device)
-    rank_zero_logger.success("Loaded the pre-trained regression model")
-
     # Initialize diffusion model
-    model_args = {}
-    if hasattr(cfg.model, "model_args") and cfg.model.model_args is not None:
-        model_args = OmegaConf.to_container(cfg.model.model_args)
+    model_args = getattr(cfg.model, "model_args", None)
+    if model_args is not None:
+        model_args = OmegaConf.to_container(model_args)
         rank_zero_logger.info(f"Using model configuration: {model_args}")
-    conditioning_model_kwargs = {}
-    if (
-        hasattr(cfg.model, "conditioning_model_kwargs")
-        and cfg.model.conditioning_model_kwargs is not None
-    ):
-        conditioning_model_kwargs = OmegaConf.to_container(
-            cfg.model.conditioning_model_kwargs
-        )
-        rank_zero_logger.info(
-            f"Using conditioning model configuration: {conditioning_model_kwargs}"
-        )
-
-    model_backbone = DiffusionFWIUNet(
-        nb_sources=cfg.dataset.nb_sources,
-        nb_timesteps=cfg.dataset.nb_timesteps,
-        nb_receivers=cfg.dataset.nb_receivers,
-        img_resolution=list(cfg.dataset.subsurface_resolution),
-        x_mean_conditioning=True,
-        conditioning_model_type=cfg.model.conditioning_model_type,
-        unet_kwargs=model_args,
-        conditioning_model_kwargs=conditioning_model_kwargs,
+    else:
+        model_args = {}
+    model_arch = DiffusionFWINet(
+        x_resolution=list(cfg.model.x_resolution),
+        x_channels=cfg.model.x_channels,
+        y_resolution=list(cfg.model.y_resolution),
+        y_channels=cfg.model.y_channels,
+        encoder_hidden_channels=cfg.model.encoder_hidden_channels,
+        num_encoder_blocks=cfg.model.num_encoder_blocks,
+        N_grid_channels=cfg.model.N_grid_channels,
+        model_channels=cfg.model.model_channels,
+        channel_mult=list(cfg.model.channel_mult),
+        num_blocks=cfg.model.num_blocks,
+        **model_args,
     ).to(dist.device)
     # Thin wrapper around the model_backbone to convert it into a conditional
     # diffusion model compatible with EDM preconditioning and ResidualLoss
-    model = ConditionalDiffusionAdapter(
-        model=model_backbone,
-        args_map=("x", {"x_mean": "x_mean", "noise": "noise", "ux": "ux", "uz": "uz"}),
+    model = DiffusionAdapter(
+        model=model_arch,
+        args_map=("x", "t", {"y": "y"}),
+    )
+
+    rank_zero_logger.info(
+        f"Using model DiffusionFWINet with {model.num_parameters()} parameters."
     )
 
     # Distributed learning (Data parallel)
@@ -149,11 +124,10 @@ def main(cfg: DictConfig) -> None:
         )
 
     # EDM preconditioning wrapper
-    model_fn = partial(edm_precond, model=model, sigma_data=0.5)
+    model_fn = partial(edm_precond, model, sigma_data=0.5)
 
     # Initialize the training dataset
     train_dataset = EFWIDatapipe(
-        name=cfg.dataset.name,
         data_dir=to_absolute_path(cfg.dataset.directory),
         phase="train",
         batch_size_per_device=cfg.training.batch_size_per_device,
@@ -164,25 +138,34 @@ def main(cfg: DictConfig) -> None:
         world_size=dist.world_size,
     )
 
-    # Define transforms (default to Normalize)
-    transform_name = (
-        cfg.dataset.transform
-        if hasattr(cfg.dataset, "transform")
-        else "ZscoreNormalize"
+    # Define dataset transform
+    # Zscore nornalization
+    stats_mean = train_dataset.get_stats("mean")
+    stats_std = train_dataset.get_stats("std")
+    train_dataset = ZscoreNormalize(train_dataset, stats_mean, stats_std)
+    img_H, img_W = list(cfg.model.x_resolution)
+    # Interpolation to the UNet model accepted resolution
+    interp_size = {var: (img_H, img_W) for var in cfg.dataset.x_vars}
+    interp_size.update({
+        var: (img_W,) for var in cfg.dataset.y_vars
+    })
+    interp_dim = {var: (-2, -1) for var in cfg.dataset.x_vars}
+    interp_dim.update({
+        var: (-1,) for var in cfg.dataset.y_vars
+    })
+    interp_mode = {var: "bilinear" for var in cfg.dataset.x_vars}
+    interp_mode.update({
+        var: "bilinear" for var in cfg.dataset.y_vars
+    })
+    train_dataset = Interpolate(
+        train_dataset,
+        size=interp_size,
+        dim=interp_dim,
+        mode=interp_mode,
     )
-    rank_zero_logger.info(f"Using transform: {transform_name}")
-    if transform_name == "MinMaxNormalize":
-        stats_min = train_dataset.get_stats("min")
-        stats_max = train_dataset.get_stats("max")
-        train_dataset = MinMaxNormalize(train_dataset, stats_min, stats_max)
-    else:
-        stats_mean = train_dataset.get_stats("mean")
-        stats_std = train_dataset.get_stats("std")
-        train_dataset = ZscoreNormalize(train_dataset, stats_mean, stats_std)
 
     # Initialize the validation dataset
     val_dataset = EFWIDatapipe(
-        name=cfg.dataset.name,
         data_dir=to_absolute_path(cfg.dataset.directory),
         phase="test",
         batch_size_per_device=cfg.val.batch_size_per_device,
@@ -192,14 +175,16 @@ def main(cfg: DictConfig) -> None:
         process_rank=dist.rank,
         world_size=dist.world_size,
     )
-    if transform_name == "MinMaxNormalize":
-        val_dataset = MinMaxNormalize(val_dataset, stats_min, stats_max)
-    else:
-        val_dataset = ZscoreNormalize(val_dataset, stats_mean, stats_std)
+    val_dataset = ZscoreNormalize(val_dataset, stats_mean, stats_std)
+    val_dataset = Interpolate(
+        val_dataset,
+        size=interp_size,
+        dim=interp_dim,
+        mode=interp_mode,
+    )
 
-    # Initialize residual loss with pre-trained regression model
-    # Always use hr_mean_conditioning=True
-    loss_fn = BaseResidualLoss(regression_model=regression_net)
+    # Loss
+    loss_fn = EDMLoss(P_mean=0.0, P_std=1.0, sigma_data=0.5)
 
     # Create optimizer
     optimizer_class = None
@@ -224,10 +209,10 @@ def main(cfg: DictConfig) -> None:
     )
 
     # Learning rate scheduler
-    scheduler = ReduceLROnPlateau(
+    scheduler = CosineAnnealingLR(
         optimizer,
-        factor=cfg.training.scheduler.factor,
-        patience=cfg.training.scheduler.patience,
+        T_max=cfg.training.max_epochs,
+        eta_min=cfg.training.scheduler.eta_min
     )
 
     # Load checkpoint if explicitly requested
@@ -242,7 +227,7 @@ def main(cfg: DictConfig) -> None:
             optimizer=optimizer,
             scheduler=scheduler,
             device=dist.device,
-            metadata=metadata,
+            metadata_dict=metadata,
         )
         total_samples_trained = metadata["total_samples_trained"]
 
@@ -258,97 +243,95 @@ def main(cfg: DictConfig) -> None:
         model.train()
         epoch_loss, epoch_samples = 0.0, 0
         time_start = time.time()
-
-        # Setup dataset for current epoch
         train_dataset.set_epoch(epoch)
 
-        # Use LaunchLogger for training
-        with LaunchLogger(
-            "train", epoch=epoch, num_mini_batch=len(train_dataset), epoch_alert_freq=1
-        ) as launchlog:
-            for i, data in enumerate(train_dataset):
-                ux, uz = data["ux"], data["uz"]
-                vp_target, vs_target = data["vp"], data["vs"]
-                batch_size = ux.shape[0]
-                epoch_samples += batch_size
-
-                optimizer.zero_grad(**({} if use_FusedAdam else {"set_to_none": True}))
-
-                loss = loss_fn(
-                    diffusion_model=model_fn,  # Use model_fn instead of model
-                    x=torch.cat([vp_target, vs_target], dim=1),
-                    condition={"ux": ux, "uz": uz},
-                    regression_args=(ux, uz),
-                )
-                loss = torch.mean(loss)
-
-                epoch_loss += loss.item() * batch_size
-
-                # Optimize
-                loss.backward()
-                optimizer.step()
-
-                # Log mini-batch metrics
-                current_lr = optimizer.param_groups[0]["lr"]
-                batch_metrics = {"batch_loss": loss.item(), "lr": current_lr}
-                launchlog.log_minibatch(batch_metrics)
-                if dist.rank == 0:
-                    wandb.log(batch_metrics)
-                if i % cfg.io.log_freq == 0:
-                    rank_zero_logger.info(
-                        f"lr: {current_lr}, batch: {i}, batch loss: {loss.item()}"
-                    )
-
-            # Compute mean loss for the epoch
-            mean_loss, epoch_samples_all_ranks = average_loss(
-                dist, epoch_loss, epoch_samples
+        for i, data in enumerate(train_dataset):
+            # DEBUG
+            if i > 4:
+                break
+            x = torch.cat(
+                [data.get(var, None) for var in list(cfg.dataset.x_vars) if data.get(var) is not None],
+                dim=1,
             )
-            time_end = time.time()
-            total_samples_trained += epoch_samples_all_ranks
+            y = torch.cat(
+                [data.get(var, None) for var in list(cfg.dataset.y_vars) if data.get(var) is not None],
+                dim=1,
+            )
+            batch_size = x.shape[0]
+            epoch_samples += batch_size
 
-            # Log epoch metrics
-            metrics = {
-                "epoch": epoch,
-                "mean_loss": mean_loss,
-                "time_per_epoch": time_end - time_start,
-                "lr": current_lr,
-                "total_samples_trained": total_samples_trained,
-                "epoch_samples": epoch_samples_all_ranks,
-            }
-            launchlog.log_epoch(metrics)
+            optimizer.zero_grad(**({} if use_FusedAdam else {"set_to_none": True}))
+
+            loss = loss_fn(
+                diffusion_model=model_fn,  # Use model_fn instead of model
+                x=x,
+                cond={"y": y},
+            )
+            loss = torch.mean(loss)
+
+            epoch_loss += loss.item() * batch_size
+
+            # Optimize
+            loss.backward()
+            optimizer.step()
+
+            # Log mini-batch metrics
+            current_lr = optimizer.param_groups[0]["lr"]
+            batch_metrics = {"batch_loss": loss.item(), "lr": current_lr}
             if dist.rank == 0:
-                wandb.log(metrics)
-            msg = f"epoch: {epoch}, mean loss: {mean_loss:10.3e}"
-            msg += f", time per epoch: {(time_end - time_start):10.3e}"
-            msg += f", total samples: {total_samples_trained}"
-            rank_zero_logger.info(msg)
+                wandb.log(batch_metrics)
+            if i % cfg.io.log_freq == 0:
+                rank_zero_logger.info(
+                    f"lr: {current_lr}, batch: {i}, batch loss: {loss.item()}"
+                )
+
+        # Compute mean loss for the epoch
+        mean_loss, epoch_samples_all_ranks = average_loss(
+            dist, epoch_loss, epoch_samples
+        )
+        time_end = time.time()
+        total_samples_trained += epoch_samples_all_ranks
+
+        # Log epoch metrics
+        metrics = {
+            "epoch": epoch,
+            "mean_loss": mean_loss,
+            "time_per_epoch": time_end - time_start,
+            "lr": current_lr,
+            "total_samples_trained": total_samples_trained,
+            "epoch_samples": epoch_samples_all_ranks,
+        }
+        if dist.rank == 0:
+            wandb.log(metrics)
+        msg = f"epoch: {epoch}, mean loss: {mean_loss:10.3e}"
+        msg += f", time per epoch: {(time_end - time_start):10.3e}"
+        msg += f", total samples: {total_samples_trained}"
+        rank_zero_logger.info(msg)
 
         # Synchronize processes before validation
         if dist.world_size > 1:
             torch.distributed.barrier()
 
-        # Run validation with LaunchLogger
-        with LaunchLogger("valid", epoch=epoch) as launchlog:
-            model.eval()
-            mean_val_loss = validation_step(
-                model_fn,
-                val_dataset,
-                loss_fn,
-                dist,
-            )
-            # Log validation metrics
-            val_metrics = {
-                "val_loss": mean_val_loss,
-                "epoch": epoch,
-                "total_samples_trained": total_samples_trained,
-            }
-            launchlog.log_epoch(val_metrics)
-            if dist.rank == 0:
-                wandb.log(val_metrics)
-            rank_zero_logger.info(f"epoch: {epoch}, val loss: {mean_val_loss}")
+        # Run validation
+        model.eval()
+        mean_val_loss = validation_step(
+            model_fn,
+            val_dataset,
+            loss_fn,
+            dist,
+        )
+        # Log validation metrics
+        val_metrics = {
+            "val_loss": mean_val_loss,
+            "epoch": epoch,
+            "total_samples_trained": total_samples_trained,
+        }
+        if dist.rank == 0:
+            wandb.log(val_metrics)
+        rank_zero_logger.info(f"epoch: {epoch}, val loss: {mean_val_loss}")
 
         # Adjust learning rate based on validation loss
-        scheduler.step(mean_val_loss)
+        scheduler.step()
 
         # Save checkpoint periodically
         if dist.world_size > 1:
@@ -369,8 +352,6 @@ def main(cfg: DictConfig) -> None:
 
     # Finish logging
     wandb.finish()
-    if dist.rank == 0:
-        mlflow.end_run()
     rank_zero_logger.info("Training completed!")
 
 
@@ -383,27 +364,39 @@ def validation_step(model, dataset, loss_fn, dist):
     num_samples = 0.0
 
     for i, data in enumerate(dataset):
-        ux, uz = data["ux"], data["uz"]
-        vp_target, vs_target = data["vp"], data["vs"]
+        # DEBUG
+        if i > 4:
+            break
+        x = torch.cat(
+            [data.get(var, None) for var in ["vp", "vs", "rho"] if data.get(var) is not None],
+            dim=1,
+        )
+        y = torch.cat(
+            [data.get(var, None) for var in ["ux", "uz"] if data.get(var) is not None],
+            dim=1,
+        )
 
         # Forward pass with validation data
         loss = loss_fn(
             diffusion_model=model,
-            x=torch.cat([vp_target, vs_target], dim=1),
-            condition={"ux": ux, "uz": uz},
-            regression_args=(ux, uz),
+            x=x,
+            cond={"y": y},
         )
         loss = torch.mean(loss)
-        loss_epoch += loss.item() * ux.shape[0]
-        num_samples += ux.shape[0]
+        loss_epoch += loss.item() * x.shape[0]
+        num_samples += x.shape[0]
 
     # Average validation loss across all ranks
-    mean_val_loss = average_loss(dist, loss_epoch, num_samples)
+    mean_val_loss, num_samples_all_ranks = average_loss(dist, loss_epoch, num_samples)
 
     return mean_val_loss
 
 
-def average_loss(dist, loss_value: float, sample_count: int) -> float:
+def average_loss(
+    dist: DistributedManager,
+    loss_value: float,
+    sample_count: int,
+) -> tuple[float, int]:
     """
     Average the loss value over all ranks.
     """
@@ -417,4 +410,3 @@ def average_loss(dist, loss_value: float, sample_count: int) -> float:
 
 if __name__ == "__main__":
     main()
-
