@@ -155,7 +155,7 @@ def download(name: str, resume: bool = True) -> None:
     if name not in DATASETS:
         raise ValueError(f"Unsupported dataset: {name}")
 
-    output_dir: Path = Path(f"./{name}")
+    output_dir: Path = Path("./")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Download all parts of the zip archive
@@ -190,7 +190,7 @@ def download(name: str, resume: bool = True) -> None:
         zip_part.unlink()
 
     # Extract the combined zip archive
-    logging.info(f"Extracting {name} dataset...")
+    logging.info(f"Extracting {name} dataset to {output_dir}...")
     try:
         subprocess.run(
             ["unzip", str(combined_zip), "-d", str(output_dir)],
@@ -251,7 +251,7 @@ def reorganize(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     for name in names:
-        logging.info(f"Reorganizing {name} dataset...")
+        logging.info(f"Reorganizing {name} dataset to {output_dir}...")
         dataset_dir: Path = Path(f"./{name}")
 
         # Get list of file indices by looking at vs files
