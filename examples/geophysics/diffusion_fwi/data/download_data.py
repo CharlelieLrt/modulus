@@ -339,7 +339,7 @@ def reorganize(
                         except FileNotFoundError:
                             pass
                 logging.info("All original files have been deleted.")
-        logging.info(f"Reorganizing of {name} dataset completed successfully!")
+        logging.info(f"Reorganizing of {name} dataset to {output_dir} completed successfully!")
 
 
 def parse_args():

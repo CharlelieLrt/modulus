@@ -19,12 +19,17 @@ import json
 import math
 from pathlib import Path
 from typing import Dict
+import sys
 
+from numpy import var
 import torch
 
-from examples.geophysics.diffusion_fwi.datasets.dataset import EFWIDatapipe
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.launch.logging import PythonLogger, RankZeroLoggingWrapper
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from datasets.dataset import EFWIDatapipe  # noqa: E402
 
 _VARIABLES: set[str] = set()
 
@@ -105,7 +110,7 @@ def main() -> None:
 
     # Accumulate statistics for train dataset
     logger0.info("Accumulating statistics for train dataset...")
-    for batch in enumerate(train_dp):
+    for batch in train_dp:
         B: int = next(iter(batch.values())).shape[0]
         ns_train_local += B
         for var_name, v in batch.items():
@@ -113,10 +118,16 @@ def main() -> None:
                 _init_stats(var_name, train_stats)
                 _VARIABLES.add(var_name)
             nb_points: int = math.prod(v.shape[-2:])
-            train_stats[f"sum_{v}"] += v.sum() / nb_points
-            train_stats[f"sum_{v}2"] += (v ** 2).sum() / nb_points
-            train_stats[f"min_{v}"] = torch.minimum(train_stats[f"min_{v}"], torch.amin(v))
-            train_stats[f"max_{v}"] = torch.maximum(train_stats[f"max_{v}"], torch.amax(v))
+            train_stats[f"sum_{var_name}"] += v.sum() / nb_points
+            train_stats[f"sum_{var_name}2"] += (v ** 2).sum() / nb_points
+            train_stats[f"min_{var_name}"] = torch.minimum(
+                train_stats[f"min_{var_name}"],
+                torch.amin(v),
+            )
+            train_stats[f"max_{var_name}"] = torch.maximum(
+                train_stats[f"max_{var_name}"],
+                torch.amax(v),
+            )
 
     logger0.info(f"Discovered variables: {', '.join(_VARIABLES)}")
 

@@ -352,11 +352,11 @@ def main():
     file_list: list[str] = (
         sorted(
             glob.glob(os.path.join(dataset_path, "train_sample_*.npz")),
-            key=lambda x: int(x.stem.split("_")[-1]),
+            key=lambda x: int(Path(x).stem.split("_")[-1]),
         )
         + sorted(
             glob.glob(os.path.join(dataset_path, "test_sample_*.npz")),
-            key=lambda x: int(x.stem.split("_")[-1]),
+            key=lambda x: int(Path(x).stem.split("_")[-1]),
         )
     )
 
