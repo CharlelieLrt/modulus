@@ -245,9 +245,6 @@ def main(cfg: DictConfig) -> None:
         train_dataset.set_epoch(epoch)
 
         for i, data in enumerate(train_dataset):
-            # DEBUG
-            if i > 4:
-                break
             x = torch.cat(
                 [data.get(var, None) for var in list(cfg.dataset.x_vars) if data.get(var) is not None],
                 dim=1,
@@ -363,15 +360,12 @@ def validation_step(model, dataset, loss_fn, dist):
     num_samples = 0.0
 
     for i, data in enumerate(dataset):
-        # DEBUG
-        if i > 4:
-            break
         x = torch.cat(
-            [data.get(var, None) for var in ["vp", "vs", "rho"] if data.get(var) is not None],
+            [data.get(var, None) for var in list(cfg.dataset.x_vars) if data.get(var) is not None],
             dim=1,
         )
         y = torch.cat(
-            [data.get(var, None) for var in ["ux", "uz"] if data.get(var) is not None],
+            [data.get(var, None) for var in list(cfg.dataset.y_vars) if data.get(var) is not None],
             dim=1,
         )
 
