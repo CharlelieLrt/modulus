@@ -54,7 +54,7 @@ dataset:
   # Variables in the velocity model.
   x_vars: ["vp", "vs", "rho"]
   # Variables in the seismic data.
-  y_vars: ["ux", "uz"]
+  y_vars: ["vx", "vz"]
 
 # Training configuration
 training:

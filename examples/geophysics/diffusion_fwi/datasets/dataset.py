@@ -111,9 +111,6 @@ class EFWIDataset(Dataset):
         if len(self.sample_files) == 0:
             raise AssertionError(f"No samples found in {self.data_dir}")
 
-        # Get first element to get the keys
-        self.variables: list[str] = list(self[0].keys())
-
         # Load dataset statistics
         stats_file: Path = self.data_dir.parent / "stats.yaml"
         if stats_file.exists():

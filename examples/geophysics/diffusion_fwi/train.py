@@ -55,7 +55,6 @@ def main(cfg: DictConfig) -> None:
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
     logger = PythonLogger("main")
     rank_zero_logger = RankZeroLoggingWrapper(logger, dist)
-    rank_zero_logger.file_logging(f"launch-train-{timestamp}.log")
 
     # Initialize Weights & Biases
     checkpoint_dir = get_checkpoint_dir(str(cfg.io.checkpoint_dir), "diffusion_fwi")

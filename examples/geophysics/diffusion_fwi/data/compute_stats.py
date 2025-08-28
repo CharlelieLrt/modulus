@@ -19,9 +19,9 @@ import json
 import math
 from pathlib import Path
 from typing import Dict
+import datetime
 import sys
 
-from numpy import var
 import torch
 
 from physicsnemo.distributed import DistributedManager
@@ -68,7 +68,10 @@ def main() -> None:
     # Initialize distributed manager
     DistributedManager.initialize()
     dist: DistributedManager = DistributedManager()
-    logger: PythonLogger = PythonLogger("compute_stats")
+
+    # General python logger
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+    logger: PythonLogger = PythonLogger("main")
     logger0: RankZeroLoggingWrapper = RankZeroLoggingWrapper(logger, dist)
 
     logger.info(f"Rank: {dist.rank}, Device: {dist.device}")
@@ -110,7 +113,7 @@ def main() -> None:
 
     # Accumulate statistics for train dataset
     logger0.info("Accumulating statistics for train dataset...")
-    for batch in train_dp:
+    for i, batch in enumerate(train_dp):
         B: int = next(iter(batch.values())).shape[0]
         ns_train_local += B
         for var_name, v in batch.items():
@@ -136,7 +139,7 @@ def main() -> None:
 
     # Accumulate statistics for test dataset
     logger0.info("Accumulating statistics for test dataset...")
-    for batch in test_dp:
+    for i, batch in enumerate(test_dp):
         B: int = next(iter(batch.values())).shape[0]
         ns_test_local += B
         for var_name, v in batch.items():
