@@ -41,7 +41,7 @@ from utils.preconditioning import edm_precond
 from utils.nn import DiffusionFWINet
 from utils.metrics import EDMLoss
 from utils.diffusion import DiffusionAdapter
-from datasets.transforms import ZscoreNormalize, Interpolate
+from datasets.transforms import ZscoreNormalize, Interpolate, DataLoaderUfuncTransform
 
 
 @hydra.main(version_base="1.3", config_path="conf", config_name="config_train")
@@ -138,11 +138,21 @@ def main(cfg: DictConfig) -> None:
     )
 
     # Define dataset transform
-    # Zscore nornalization
+    # Zscore normalization
     stats_mean = train_dataset.get_stats("mean")
     stats_std = train_dataset.get_stats("std")
     train_dataset = ZscoreNormalize(train_dataset, stats_mean, stats_std)
     img_H, img_W = list(cfg.model.x_resolution)
+
+    # Add channel dimension
+    def add_channel_dim(t: torch.Tensor) -> torch.Tensor:
+        if t.ndim == 3:
+            return t.unsqueeze(1)
+        return t
+    train_dataset = DataLoaderUfuncTransform(
+        train_dataset,
+        ufuncs={var: add_channel_dim for var in cfg.dataset.x_vars}
+    )
     # Interpolation to the UNet model accepted resolution
     interp_size = {var: (img_H, img_W) for var in cfg.dataset.x_vars}
     interp_size.update({
@@ -175,6 +185,10 @@ def main(cfg: DictConfig) -> None:
         world_size=dist.world_size,
     )
     val_dataset = ZscoreNormalize(val_dataset, stats_mean, stats_std)
+    val_dataset = DataLoaderUfuncTransform(
+        val_dataset,
+        ufuncs={var: add_channel_dim for var in cfg.dataset.x_vars}
+    )
     val_dataset = Interpolate(
         val_dataset,
         size=interp_size,
