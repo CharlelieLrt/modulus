@@ -22,7 +22,7 @@ import warnings
 
 import numpy as np
 import torch
-import yaml
+import json
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.data.distributed import DistributedSampler
 
@@ -46,17 +46,6 @@ def _read_npz_sample(filename: Union[str, Path]) -> Dict[str, np.ndarray]:
     with np.load(filename) as data:
         # Create a copy of the data to avoid issues with the file being closed
         return {key: data[key] for key in data.keys()}
-
-
-def _read_stats_file(
-    filename: Union[str, Path]
-) -> Dict[str, Dict[str, Dict[str, float]]]:
-    """
-    Read a stats YAML file containing statistics for the dataset.
-    """
-    with open(filename, "r") as f:
-        stats: Dict[str, Dict[str, Dict[str, float]]] = yaml.safe_load(f)
-    return stats
 
 
 @dataclass
@@ -112,9 +101,10 @@ class EFWIDataset(Dataset):
             raise AssertionError(f"No samples found in {self.data_dir}")
 
         # Load dataset statistics
-        stats_file: Path = self.data_dir.parent / "stats.yaml"
+        stats_file: Path = self.data_dir.parent / "stats.json"
         if stats_file.exists():
-            self.stats = _read_stats_file(stats_file)
+            with open(stats_file, "r") as f:
+                self.stats = json.load(f)
         else:
             self.stats = None
             warnings.warn(
