@@ -173,15 +173,39 @@ def main() -> None:
         opMIN = torch.distributed.ReduceOp.MIN
         opMAX = torch.distributed.ReduceOp.MAX
 
-        for v in _VARIABLES:
-            torch.distributed.all_reduce(train_stats[f"sum_{v}"], op=opSUM)
-            torch.distributed.all_reduce(train_stats[f"sum_{v}2"], op=opSUM)
-            torch.distributed.all_reduce(test_stats[f"sum_{v}"], op=opSUM)
-            torch.distributed.all_reduce(test_stats[f"sum_{v}2"], op=opSUM)
-            torch.distributed.all_reduce(train_stats[f"min_{v}"], op=opMIN)
-            torch.distributed.all_reduce(train_stats[f"max_{v}"], op=opMAX)
-            torch.distributed.all_reduce(test_stats[f"min_{v}"], op=opMIN)
-            torch.distributed.all_reduce(test_stats[f"max_{v}"], op=opMAX)
+        # Define buffers for reduction
+        vars_sorted = sorted(_VARIABLES)
+        buffer_sum = torch.cat(
+            [train_stats[f"sum_{v}"].unsqueeze(0) for v in vars_sorted] +
+            [train_stats[f"sum_{v}2"].unsqueeze(0) for v in vars_sorted] +
+            [test_stats[f"sum_{v}"].unsqueeze(0) for v in vars_sorted] +
+            [test_stats[f"sum_{v}2"].unsqueeze(0) for v in vars_sorted],
+            dim=0,
+        )
+        buffer_min = torch.cat(
+            [train_stats[f"min_{v}"].unsqueeze(0) for v in vars_sorted] +
+            [test_stats[f"min_{v}"].unsqueeze(0) for v in vars_sorted],
+            dim=0,
+        )
+        buffer_max = torch.cat(
+            [train_stats[f"max_{v}"].unsqueeze(0) for v in vars_sorted] +
+            [test_stats[f"max_{v}"].unsqueeze(0) for v in vars_sorted],
+            dim=0,
+        )
+
+        torch.distributed.all_reduce(buffer_sum, op=opSUM)
+        torch.distributed.all_reduce(buffer_min, op=opMIN)
+        torch.distributed.all_reduce(buffer_max, op=opMAX)
+
+        for i, v in enumerate(vars_sorted):
+            train_stats[f"sum_{v}"] = buffer_sum[i]
+            train_stats[f"sum_{v}2"] = buffer_sum[i + len(vars_sorted)]
+            test_stats[f"sum_{v}"] = buffer_sum[i + 2 * len(vars_sorted)]
+            test_stats[f"sum_{v}2"] = buffer_sum[i + 3 * len(vars_sorted)]
+            train_stats[f"min_{v}"] = buffer_min[i]
+            train_stats[f"max_{v}"] = buffer_max[i]
+            test_stats[f"min_{v}"] = buffer_min[i + len(vars_sorted)]
+            test_stats[f"max_{v}"] = buffer_max[i + len(vars_sorted)]
     else:
         ns_train: int = ns_train_local
         ns_test: int = ns_test_local
