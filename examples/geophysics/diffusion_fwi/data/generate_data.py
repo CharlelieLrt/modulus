@@ -290,12 +290,21 @@ def process_file(
             pml_width=[20, 20, 20, 20],
         )[-2:]
 
+        # Add back channel dimension
+        vp_np = vp_np[None, ...]
+        vs_np = vs_np[None, ...]
+        rho_np = rho_np[None, ...]
+
+        # Move time dimension to height
+        vx_np = receiver_amplitudes_x.cpu().numpy().transpose(0, 2, 1)
+        vz_np = receiver_amplitudes_z.cpu().numpy().transpose(0, 2, 1)
+
         output_data: Dict[str, np.ndarray | torch.Tensor] = {
             "vp": vp_np,
             "vs": vs_np,
             "rho": rho_np,
-            "vx": receiver_amplitudes_x.cpu().numpy(),
-            "vz": receiver_amplitudes_z.cpu().numpy(),
+            "vx": vx_np,
+            "vz": vz_np,
         }
 
         os.makedirs(output_path, exist_ok=True)
