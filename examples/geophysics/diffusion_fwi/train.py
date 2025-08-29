@@ -316,6 +316,7 @@ def main(cfg: DictConfig) -> None:
             val_dataset,
             loss_fn,
             dist,
+            cfg,
         )
         # Log validation metrics
         val_metrics = {
@@ -353,7 +354,7 @@ def main(cfg: DictConfig) -> None:
 
 
 @torch.no_grad()
-def validation_step(model, dataset, loss_fn, dist):
+def validation_step(model, dataset, loss_fn, dist, cfg):
     """
     Perform validation on a dataset and return the average loss.
     """
