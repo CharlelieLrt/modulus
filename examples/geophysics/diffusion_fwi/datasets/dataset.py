@@ -191,7 +191,6 @@ class EFWIDatapipe(DataLoader):
         prefetch_factor: Optional[int] = 2,
         use_sharding: Optional[bool] = None,
     ) -> None:
-
         if isinstance(device, str):
             device: torch.device = torch.device(device)
         if device.type == "cuda" and device.index is None:
@@ -214,8 +213,10 @@ class EFWIDatapipe(DataLoader):
                 drop_last=False,
             )
             shuffle: bool | None = None
+            generator = None
         else:
             sampler: DistributedSampler | None = None
+            generator = torch.Generator(self.device).manual_seed(seed)
 
         super().__init__(
             dataset=dataset,
@@ -229,6 +230,7 @@ class EFWIDatapipe(DataLoader):
             multiprocessing_context=None,
             prefetch_factor=prefetch_factor,
             pin_memory_device=(str(self.device) if pin_memory else ""),
+            generator=generator,
         )
 
     def set_epoch(self, epoch: int) -> None:

@@ -46,7 +46,6 @@ from datasets.transforms import ZscoreNormalize, Interpolate
 
 @hydra.main(version_base="1.3", config_path="conf", config_name="config_train")
 def main(cfg: DictConfig) -> None:
-
     # Initialize distributed manager
     DistributedManager.initialize()
     dist = DistributedManager()
@@ -146,17 +145,11 @@ def main(cfg: DictConfig) -> None:
 
     # Interpolation to the UNet model accepted resolution
     interp_size = {var: (img_H, img_W) for var in cfg.dataset.x_vars}
-    interp_size.update({
-        var: (img_W,) for var in cfg.dataset.y_vars
-    })
+    interp_size.update({var: (img_W,) for var in cfg.dataset.y_vars})
     interp_dim = {var: (-2, -1) for var in cfg.dataset.x_vars}
-    interp_dim.update({
-        var: (-1,) for var in cfg.dataset.y_vars
-    })
+    interp_dim.update({var: (-1,) for var in cfg.dataset.y_vars})
     interp_mode = {var: "bilinear" for var in cfg.dataset.x_vars}
-    interp_mode.update({
-        var: "bilinear" for var in cfg.dataset.y_vars
-    })
+    interp_mode.update({var: "bilinear" for var in cfg.dataset.y_vars})
     train_dataset = Interpolate(
         train_dataset,
         size=interp_size,
@@ -210,9 +203,7 @@ def main(cfg: DictConfig) -> None:
 
     # Learning rate scheduler
     scheduler = CosineAnnealingLR(
-        optimizer,
-        T_max=cfg.training.max_epochs,
-        eta_min=cfg.training.scheduler.eta_min
+        optimizer, T_max=cfg.training.max_epochs, eta_min=cfg.training.scheduler.eta_min
     )
 
     # Load checkpoint if explicitly requested
@@ -247,11 +238,19 @@ def main(cfg: DictConfig) -> None:
 
         for i, data in enumerate(train_dataset):
             x = torch.cat(
-                [data.get(var, None) for var in list(cfg.dataset.x_vars) if data.get(var) is not None],
+                [
+                    data.get(var, None)
+                    for var in list(cfg.dataset.x_vars)
+                    if data.get(var) is not None
+                ],
                 dim=1,
             )
             y = torch.cat(
-                [data.get(var, None) for var in list(cfg.dataset.y_vars) if data.get(var) is not None],
+                [
+                    data.get(var, None)
+                    for var in list(cfg.dataset.y_vars)
+                    if data.get(var) is not None
+                ],
                 dim=1,
             )
             batch_size = x.shape[0]
@@ -260,7 +259,7 @@ def main(cfg: DictConfig) -> None:
             optimizer.zero_grad(**({} if use_FusedAdam else {"set_to_none": True}))
 
             loss = loss_fn(
-                diffusion_model=model_fn,  # Use model_fn instead of model
+                model=model_fn,  # Use model_fn instead of model
                 x=x,
                 cond={"y": y},
             )
@@ -363,17 +362,25 @@ def validation_step(model, dataset, loss_fn, dist, cfg):
 
     for i, data in enumerate(dataset):
         x = torch.cat(
-            [data.get(var, None) for var in list(cfg.dataset.x_vars) if data.get(var) is not None],
+            [
+                data.get(var, None)
+                for var in list(cfg.dataset.x_vars)
+                if data.get(var) is not None
+            ],
             dim=1,
         )
         y = torch.cat(
-            [data.get(var, None) for var in list(cfg.dataset.y_vars) if data.get(var) is not None],
+            [
+                data.get(var, None)
+                for var in list(cfg.dataset.y_vars)
+                if data.get(var) is not None
+            ],
             dim=1,
         )
 
         # Forward pass with validation data
         loss = loss_fn(
-            diffusion_model=model,
+            model=model,
             x=x,
             cond={"y": y},
         )

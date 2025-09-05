@@ -21,54 +21,48 @@ from typing import Any, Callable, Dict, Tuple, Union
 class EDMLoss:
     """
     Loss function proposed in the EDM paper for denoising score matching. It
-    samples a noise level ``sigma``, generated an associated noisy sample ``x + n``
-    and then calls the diffusion model to predict the denoised sample ``x_pred``.
-    The loss is then computed as a noise-dependent weighted mean squared error
+    samples a noise level ``sigma``, generates an associated noisy sample ``x + n``
+    and then calls the diffusion model ``model`` to predict the denoised
+    sample. The loss is then computed as a noise-dependent weighted squared error
     between the predicted and the ground truth.
+
+    The diffusion model is expected to be called with:
+    ``model(x, t cond, *model_args, **model_kwargs)`` (see below for details on
+    the expected arguments). It is expected to return a tensor of same shape as
+    ``x``.
 
     Parameters
     ----------
-    P_mean: float, optional
-        Mean value for noise level computation, by default -1.2.
-    P_std: float, optional:
-        Standard deviation for noise level computation, by default 1.2.
-    sigma_data: float, optional
-        Standard deviation for data, by default 0.5.
+    P_mean: float, optional, default=-1.2
+        Mean value for noise level computation.
+    P_std: float, optional, default=1.2
+        Standard deviation for noise level computation.
+    sigma_data: float, optional, default=0.5
+        Standard deviation for data.
 
     Forward
     -------
-    diffusion_model : torch.nn.Module
-        The diffusion model that predicts the residual.
-        Is called with:
-        ``diffusion_model(x, t cond, *model_args, **model_kwargs)
-        -> torch.Tensor``. The shape of the output should be the same as ``x``.
+    model : torch.nn.Module
+        The diffusion model that predicts denoised latent state.
     x : torch.Tensor
-        State vector of shape (B, *), passed as first positional argument
-        to ``diffusion_model``.
+        Noisy latent state of shape :math:`(B, *)`, passed as first positional
+        argument to ``model``.
     cond : Dict[str, torch.Tensor], optional, default={}
         Dictionary of conditioning information for the diffusion model.
-        The keys should be the name of the conditioning variables to the
+        The keys should be the names of the conditioning variables to the
         diffusion model, and the values should be the tensors passed as
         conditioning data.
-    model_args : tuple, optional
-        Additional positional arguments to pass to the diffusion model,
-        by default ().
-    model_kwargs : dict, optional
-        Additional keyword arguments to pass to the diffusion model,
-        by default {}.
+    model_args : tuple, optional, default=()
+        Additional positional arguments to pass to the diffusion model.
+    model_kwargs : dict, optional, default={}
+        Additional keyword arguments to pass to the diffusion model.
 
     Outputs
     -------
-    loss : torch.Tensor
-        A tensor of shape (B, *), with the same shape as the state vector,
-        representing the pixel-wise per-sample loss (not reduced).
+    torch.Tensor
+        A tensor with the same shape :math:`(B, *)` as the latent state,
+        representing the pixel-wise loss (not reduced).
 
-
-    Notes
-    -----
-    Reference: Karras, T., Aittala, M., Aila, T. and Laine, S., 2022. Elucidating the
-    design space of diffusion-based generative models. Advances in Neural Information
-    Processing Systems, 35, pp.26565-26577.
     """
 
     def __init__(
@@ -83,13 +77,12 @@ class EDMLoss:
 
     def __call__(
         self,
-        diffusion_model: Union[torch.nn.Module, Callable],
+        model: Union[torch.nn.Module, Callable],
         x: torch.Tensor,
         cond: Dict[str, torch.Tensor] = {},
         model_args: Tuple = (),
         model_kwargs: Dict[str, Any] = {},
     ) -> torch.Tensor:
-
         # Sample noise level
         rnd_normal = torch.randn([x.shape[0]] + [1] * (x.ndim - 1), device=x.device)
         sigma = (rnd_normal * self.P_std + self.P_mean).exp()
@@ -99,7 +92,7 @@ class EDMLoss:
         n: torch.Tensor = torch.randn_like(x) * sigma
 
         # Denoising step
-        x_pred = diffusion_model(
+        x_pred = model(
             x + n,
             sigma,
             cond,

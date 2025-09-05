@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Callable, Dict, Any, Union
+from typing import Callable, Dict, Any, Union, Tuple
 
 import torch
 
@@ -25,36 +25,38 @@ def edm_precond(
     t: torch.Tensor,
     cond: Dict[str, torch.Tensor],
     sigma_data: float = 0.5,
-    *model_args: Any,
-    **model_kwargs: Any,
+    model_args: Tuple = (),
+    model_kwargs: Dict[str, Any] = {},
 ) -> torch.Tensor:
-    """
-    Functional interface for EDM preconditioning.
-
-    See :class:`physicsnemo.models.diffusion.BaseEDMPrecond` for details.
+    r"""
+    Computes parameters :math:`(c_{skip}, c_{out}, c_{in}, c_{noise})`, and
+    uses them to apply EDM preconditioning to a diffusion model.
 
     Parameters
     ----------
     model : Union[torch.nn.Module, Callable[..., torch.Tensor]]
         Diffusion model to be wrapped with EDM preconditioning.
     x : torch.Tensor
-        Latent state vector of shape (B, *).
+        Latent state vector of shape :math:`(B, *)`.
     t : torch.Tensor
         Diffusion time, used to compute the noise level sigma. Should be of
-        shape (B,).
+        shape :math:`(B,)`.
     cond : Dict[str, torch.Tensor]
-        Dictionary of conditioning information for the model.
-    sigma_data : float, optional
-        Expected standard deviation of the training data, by default 0.5.
-    *model_args : Tuple, optional
+        Dictionary of conditioning information for the model. The keys should
+        be the names of the conditioning variables to the model, and the values
+        should be the tensors passed as conditioning data.
+    sigma_data : float, optional, default=0.5
+        Expected standard deviation of the training data.
+    model_args : Tuple, optional, default=()
         Additional positional arguments to pass to the wrapped model.
-    **model_kwargs : Dict[str, Any], optional
+    model_kwargs : Dict[str, Any], optional, default={}
         Additional keyword arguments to pass to the wrapped model.
 
     Returns
     -------
     torch.Tensor
-        The output tensor, with the same shape (B, *) as the input tensor x.
+        The output tensor from the diffusion model, with the same shape
+        :math:`(B, *)` as the latent state ``x``.
     """
     sigma = t
 
