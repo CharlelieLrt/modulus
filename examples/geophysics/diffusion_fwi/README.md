@@ -1,7 +1,7 @@
 <!-- markdownlint-disable -->
-# Diffusion model for full-waveform inversion (FWI)
+# Diffusion Model for Full-Waveform Inversion (FWI)
 
-## Problem overview 
+## Problem Overview 
 
 Full Waveform Inversion (FWI) is a seismic imaging technique that reconstructs
 subsurface properties, also called velocity model, by fitting the recorded
@@ -20,8 +20,9 @@ The present example is tailored to the elastic wave equation in the context of
 hydro-carbon exploration, but the same framework can be applied to other wave
 equations and applications.
 
-Let us first introduce a few key concepts essential to FWI in the context of
+The following introduces a few key concepts that are essential to FWI in the context of
 hydro-carbon exploration:
+
 - *Velocity model* $\mathbf{x}(r)=\bigl[
   V_\mathrm{P},\,V_\mathrm{S},\,\rho \bigr]$ – a 3-D image over
   coordinates $r = (z,x,y)$, where $z$ is the depth, and $x$ and $y$ are the
@@ -73,7 +74,7 @@ $$
 We denote $\mathcal{R} (\mathbf{x}, s)$ the solution operator associated to the
 wave equation $(1)$. This operator maps a velocity model $\mathbf{x}$ and a
 source $\dot{S}(t)\,\delta(r-r_s)$ to the solution of the PDE at the receiver
-locations: it therefore provide a simulated seismic observation $\hat{y}_s$.
+locations: it therefore provides a simulated seismic observation $\hat{y}_s$.
 
 FWI seeks to solve an inverse problem of finding the velocity model $\mathbf{x}$
 that best fits the observed seismic data $Y$. Given observed data, standard FWI
@@ -86,14 +87,14 @@ $$
 $$
 
 In realistic conditions (limited number of observations, limited resolution,
-noise, etc.), the inverse problem defined by this equation is ill-posed
+noise), the inverse problem defined by this equation is ill-posed
 (that is, it has multiple solutions). This one-to-many mapping is the main
 difficulty of FWI and makes it particularly suitable to be solved with
 generative models. This example uses a diffusion model to solve the FWI inverse
 problem.
 
 
-## Getting started
+## Getting Started
 
 This example requires basic knowledge of [denoising diffusion
 models](../../generative/README.md); it is also recommended to be familiar with
@@ -109,27 +110,29 @@ This example comprises a succession of three steps:
 2. [Training](#training)
 3. [Sampling and model evaluation](#sampling-and-model-evaluation)
 
-## Dataset preprocessing
+## Dataset Preprocessing
 
 This examples builds on the [E-FWI
 dataset](https://smileunc.github.io/projects/efwi/datasets), initially
 published as [E-FWI: Multi-parameter Benchmark Datasets for Elastic Full
 Waveform Inversion of Geophysical
 Properties](https://arxiv.org/abs/2306.12386). We complement the original
-dataset by providing a data generation pipeline to: (1) expand the dataset to
-the case of variable density $\rho(r)$, and (2) generate particle-velocity
-observations from veloicty models in a consistent manner.
+dataset by providing a data generation pipeline to: 
+
+(1) expand the dataset to the case of variable density $\rho(r)$
+(2) generate particle-velocity observations from veloicty models in a consistent manner
 
 > **⚠️  Warning:** The E-FWI dataset is distributed under a non-commercial license [CC
 > BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
 
-### Step 1: Download and reorganize the E-FWI dataset
+### Step 1: Download and Reorganize the E-FWI Dataset
 
-The first step is to download the E-FWI dataset. In addition, since the E-FWI
-dataset is composed of multiple sub-datasets (CFB, CFA, FVB, etc.), we provide
+Download the E-FWI dataset. Because the E-FWI
+dataset is composed of multiple sub-datasets (CFB, CFA, FVB), we provide
 utility functions to merge them into a single dataset and reorganize the data
-into a more convenient format. To pre-process the entire dataset, navigate to
-the `./data` directory and run:
+into a more convenient format. 
+
+To pre-process the entire dataset, navigate to the `./data` directory and run:
 
 ```bash
 python download_data.py --download --reorganize --clean --shuffle --name all
@@ -146,15 +149,15 @@ python download_data.py --help
 >download, the size of the dataset can be quite large (from 100GB to 1TB);
 >downloading the full dataset can take several hours.
 
-### Step 2: Generate seismic observations
+### Step 2: Generate Seismic Observations
 
-The second step consists in re-generating seismic observations from the
+Regenerate seismic observations from the
 velocity models with variable density. The original wave speeds $V_\mathrm{P}$ and
 $V_\mathrm{S}$ from the E-FWI datasets are retained and the density is generated
-by the `generate_data.py` script. This scripts then solve an elastic wave
-equationb using [Deepwave](https://zenodo.org/records/8381177) to generate the
-seismic observations. Since this step can be time-consuming, it is advised to
-do it on a machine with GPUs. To do so, still in the `./data` directory run:
+by the `generate_data.py` script. This script then solve an elastic wave
+equation using [Deepwave](https://zenodo.org/records/8381177) to generate the
+seismic observations. Because this step can be time-consuming, it is advised to
+do it on a machine with multiple GPUs. To do so, still in the `./data` directory run:
 
 ```bash
 python generate_data.py --in_dir ./all --out_dir <path_to_output_directory>
@@ -163,16 +166,16 @@ python generate_data.py --in_dir ./all --out_dir <path_to_output_directory>
 This script will generate a new set of `.npz` files in the directory
 `<path_to_output_directory>/samples`.
 
-### Step 3: Compute dataset statistics
+### Step 3: Compute Dataset Statistics
 
-Finally, the last step of the dataset preprocessing is to compute statistics of
-the train and test sets. To do so, run:
+For the dataset preprocessing, compute statistics of
+the train and test sets by running:
 
 ```bash
 python compute_stats.py --dir <path_to_output_directory> --batch_size 512 --num_workers 4
 ```
 
-This script will compute dataset statistics and save them in the file
+This script will compute the dataset statistics and save them in the file
 `<path_to_output_directory>/stats.json`. It supports distributed processing
 based on `torch.distributed`, so it is advised to run it on a machine with
 multiple GPUs. If doing so, replace the `python` command with:
@@ -181,20 +184,20 @@ multiple GPUs. If doing so, replace the `python` command with:
 torchrun --standalone --nnodes=<NUM_NODES> --nproc_per_node=<NUM_GPUS_PER_NODE> compute_stats.py --dir <path_to_output_directory> --batch_size 512 --num_workers 4
 ```
 
-Once these steps are completed, you should have a dataset ready to be used for
+After these steps are completed, verify that you have a dataset ready to be used for
 training.
 
 ## Training
 
->**Configuration basics**
+>**Configuration Basics**
 >
 >Training is handled by `train.py`, configured using
->[hydra](https://hydra.cc/docs/intro/) based on the contents of the `config`
+>[Hydra](https://hydra.cc/docs/intro/) based on the contents of the `config`
 >directory. Hydra allows for YAML-based modular and hierarchical configuration
->management and supports command-line overrides for quick testing and
+>management and supports command-line overrides for rapid testing and
 >experimentation. The `conf/config_train.yaml` file includes the default
 >parameters for training a diffusion model for FWI. It contains some fields
->that must be provided by the user at runtime. This can be done by directly
+>that must be provided by you at runtime. This can be done by directly
 >editing the `conf/config_train.yaml` file (or a copy of it), or by using hydra
 >overrides. For example, to specify a dataset and use a different batch size, one
 >can run:
@@ -205,9 +208,9 @@ training.
 >
 
 
-At runtime, hydra will parse the config subdirectory and command line
-over-rides into a runtime configuration object `cfg`, which will have all
-settings accessible via both attribute or dictionary-like interfaces. For
+At runtime, Hydra will parse the config subdirectory and command line
+overrides into a runtime configuration object `cfg`, which will have all
+settings accessible through both attribute or dictionary-like interfaces. For
 example, the batch size per device can be accessed either as
 `cfg.training.batch_size_per_device` or `cfg['training']['batch_size_per_device']`.
 
@@ -224,11 +227,11 @@ torchrun --standalone --nnodes=<NUM_NODES> --nproc_per_node=<NUM_GPUS_PER_NODE> 
 <!-- TODO: add comments on the output + logging -->
 <!-- TODO: add details about model + EDM + denoising score matching -->
 
-## Sampling and model evaluation
+## Sampling and Model Evaluation
 
-### Zero-shot sampling
+### Zero-Shot Sampling
 
-### Physics-informed sampling
+### Physics-Informed Sampling
 
 ## References
 
