@@ -40,7 +40,9 @@ class ModelBasedGuidance:
     estimate of the clean latent state :math:`\mathbf{x}_0`, usually obtained
     by Tweedie's formula.
 
-    The likelihood score follows a modified version of the implementation introduced in `Score-based data assimilation
+    The likelihood score follows a `modified version
+    <https://arxiv.org/abs/2506.22780>`_ of the implementation introduced in
+    `Score-based data assimilation
     <https://proceedings.neurips.cc/paper_files/paper/2023/hash/7f7fa581cc8a1970a4332920cdf87395-Abstract-Conference.html>`_.
     It is computed as:
 

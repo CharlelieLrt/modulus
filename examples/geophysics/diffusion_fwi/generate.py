@@ -262,6 +262,7 @@ def main(cfg: DictConfig) -> None:
         scale=cfg.generation.sampler.physics_informed_guidance.scale,
         power=cfg.generation.sampler.physics_informed_guidance.power,
         norm_ord=cfg.generation.sampler.physics_informed_guidance.norm_ord,
+        magnitude_scaling=cfg.generation.sampler.physics_informed_guidance.magnitude_scaling,
     )
 
     output_dir = Path(to_absolute_path(cfg.io.output_dir))

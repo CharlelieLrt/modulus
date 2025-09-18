@@ -47,11 +47,11 @@ dataset:
 generation:
   # Global random seed for reproducibility
   global_seed: 0
-  # Number of input samples (seismic observations) to process
+  # Number of input samples from the dataset (seismic observations) to process
   num_samples: 3
   # Number of ensembles to generate per input. The total number of samples
   # generated will be num_samples * num_ensembles.
-  num_ensembles: 4
+  num_ensembles: 16
   # Number of seeds to process per batch. Defines the effective batch size per
   # device.
   seed_batch_size: 2
@@ -70,7 +70,8 @@ generation:
     physics_informed_guidance:
       # Standard deviation of measurement noise
       std: 0.01
-      # Gamma scaling parameter for the guidance
+      # Gamma scaling parameter for the guidance, depends on the covariance of
+      # the prior P(x)
       gamma: 0.01
       # Strength of the guidance (multiplier for the guidance term)
       scale: 0.1
@@ -78,6 +79,8 @@ generation:
       power: 2.0
       # Order of the norm used to compute the error in the guidance term
       norm_ord: 1
+      # Whether to normalize the guidance term by its magnitude
+      magnitude_scaling: true
 
 # I/O configuration
 io:

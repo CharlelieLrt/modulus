@@ -216,7 +216,7 @@ class EFWIDatapipe(DataLoader):
             generator = None
         else:
             sampler: DistributedSampler | None = None
-            generator = torch.Generator(self.device).manual_seed(seed)
+            generator = torch.Generator("cpu").manual_seed(seed)
 
         super().__init__(
             dataset=dataset,
