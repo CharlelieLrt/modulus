@@ -3,7 +3,6 @@
 
 ## Problem Overview
 
-AAA
 In the context of geophysics, Full Waveform Inversion (FWI) is a seismic
 imaging technique that reconstructs subsurface properties, also called velocity
 model, by fitting the recorded seismic waveform. It underpins a range of applications, including:
