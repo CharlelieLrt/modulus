@@ -1,8 +1,9 @@
 <!-- markdownlint-disable -->
 # Diffusion Model for Full-Waveform Inversion (FWI)
 
-## Problem Overview 
+## Problem Overview
 
+AAA
 In the context of geophysics, Full Waveform Inversion (FWI) is a seismic
 imaging technique that reconstructs subsurface properties, also called velocity
 model, by fitting the recorded seismic waveform. It underpins a range of applications, including:
@@ -42,18 +43,16 @@ hydro-carbon exploration:
   spacing and record data with a time-resolution of a few tenth of seconds.
 
 - *Seismic observations* - the particle-velocity components recorded at all
-  receivers for a given shot $s$ can be combined into a 3D image $y_s = [v_z, v_x, v_y]$ over
-  coordinates $(t, x_i, y_i)$ that contains reflections, refractions and
-  surface waves. The $S$ independent sources can be further combined to form a
-  large set $\mathbf{y}$ of 3D observations.
+  receivers for a given shot $s$ can be combined into a 3D image $y_s = [v_z,
+  v_x, v_y]$ over coordinates $(t, x_i, y_i)$ that contains reflections,
+  refractions and surface waves. The $S$ independent sources can be further
+  combined to form a large set $\mathbf{y}$ of 3D observations.
 
 The goal of FWI is to reconstruct the velocity model $\mathbf{x}(r)$ from the
 entire set of seismic observations $\mathbf{y}$. To do so, standard FWI uses classical
 optimization techniques combined with the elastic wave equation, defined below.
 
-<p align="center">
-<img src="../../../docs/img/diffusion_fwi_intro.png" width="800"/>
-</p>
+![Introduction to FWI](../../../docs/img/diffusion_fwi_elastic_wave_equation.png)
 
 $$
 \mathcal{A}_{\mathbf{x}} \{\mathbf{u}\} (r, t) = \dot{S}(t)\,\delta(r-r_s)  \tag{1}
@@ -66,7 +65,7 @@ $$
 \mathcal{A}_{\mathbf{x}} \{\mathbf{u}\} = \rho\ \frac{\partial^{2}
 \mathbf{u}}{\partial t^{2}} - \nabla \bigl[  \rho \bigl( V^2_P - 2
 V^2_S (\nabla \cdot \mathbf{u})  \bigr) \bigr] - \nabla \cdot \bigl[ \rho
-V^2_S \bigl( \nabla \mathbf{u} + \nabla \mathbf{u}^T \bigr) \bigr] 
+V^2_S \bigl( \nabla \mathbf{u} + \nabla \mathbf{u}^T \bigr) \bigr]
 $$
 
 We denote $\mathcal{R} (\mathbf{x}, s)$ the solution operator associated to the
@@ -91,7 +90,6 @@ difficulty of FWI and makes it particularly suitable to be solved with
 generative models. This example uses a diffusion model to solve the FWI inverse
 problem.
 
-
 ## Getting Started
 
 This example requires basic knowledge of [denoising diffusion
@@ -115,7 +113,7 @@ dataset](https://smileunc.github.io/projects/efwi/datasets), initially
 published as [E-FWI: Multi-parameter Benchmark Datasets for Elastic Full
 Waveform Inversion of Geophysical
 Properties](https://arxiv.org/abs/2306.12386). We complement the original
-dataset by providing a data generation pipeline to: 
+dataset by providing a data generation pipeline to:
 
 (1) expand the dataset to the case of variable density $\rho(r)$
 
@@ -129,7 +127,7 @@ dataset by providing a data generation pipeline to:
 Download the E-FWI dataset. Because the E-FWI
 dataset is composed of multiple sub-datasets (CFB, CFA, FVB), we provide
 utility functions to merge them into a single dataset and reorganize the data
-into a more convenient format. 
+into a more convenient format.
 
 To pre-process the entire dataset, navigate to the `./data` directory and run:
 
@@ -239,8 +237,6 @@ The training script should produce multiple outputs:
 - If required, Weights & Biases logs saved in the directory specified by
   `++wandb.results_dir=<path_to_wandb_directory>`.
 
-<!-- TODO: add details about model + EDM + denoising score matching -->
-
 ## Sampling and Model Evaluation
 
 After training the model, it can be used to generate samples from the learned
@@ -258,22 +254,24 @@ two types of sampling:
   that enforces consistency between the PDE residuals (Eq. 1) and the observed
   data.
 
-
 ### Zero-Shot Sampling
 
 To generate samples from the learned distribution $p(\mathbf{x} | \mathbf{y})$, one
 needs to solve the reverse diffusion process defined the following SDE:
 
 $$
-d \mathbf{x}_t = \left[ \mathbf{f} (\mathbf{x}_t, t) - g^2 (\mathbf{x}_t, t) \nabla_{\mathbf{x}_t} \log p_t(\mathbf{x}_t | \mathbf{y}) \right] dt + 
-g (\mathbf{x}_t, t) d \mathbf{w}_t
+d \mathbf{x}_t = \left[ \mathbf{f} (\mathbf{x}_t, t) - g^2 (\mathbf{x}_t, t)
+\nabla_{\mathbf{x}_t} \log p_t(\mathbf{x}_t | \mathbf{y}) \right] dt + g
+(\mathbf{x}_t, t) d \mathbf{w}_t
 $$
 
-In this equation, $t$ is the diffusion time, and $\mathbf{f} (\mathbf{x}_t, t)$ and $g (\mathbf{x}_t, t)$ are the drift and diffusion terms, respectively.
+In this equation, $t$ is the diffusion time, and $\mathbf{f} (\mathbf{x}_t, t)$
+and $g (\mathbf{x}_t, t)$ are the drift and diffusion terms, respectively.
 $\nabla_{\mathbf{x}_t} \log p_t(\mathbf{x}_t | \mathbf{y})$ is the conditional
 score function previously learned during training, and $\mathbf{w}_t$ is a
-standard Wiener process. In this example, we adopt the [EDM framework](https://arxiv.org/abs/2206.00364) to solve this
-SDE and generate clean samples $\mathbf{x}_0$ from noisy latent state
+standard Wiener process. In this example, we adopt the [EDM
+framework](https://arxiv.org/abs/2206.00364) to solve this SDE and generate
+clean samples $\mathbf{x}_0$ from noisy latent state
 $\mathbf{x}_T$.
 
 The `generate.py` script implements this sampling procedure and supports
@@ -302,26 +300,20 @@ Each subdirectory contains the following:
   the ensemble, as well as the mean prediction and the ground truth velocity
   model.
 
-<p align="center">
-<img src="../../../docs/img/diffusion_fwi_predictions.png" width="800"/>
-</p>
+![Zero-shot sampling predictions](../../../docs/img/diffusion_fwi_predictions.png)
 
 - A figure `ensemble_variance.png` containing the variance of the ensemble
   predictions. This indiactes the uncertainty on the predicted subsurface
   properties, which is useful for example to guide the placement of potential well logs.
 
-<p align="center">
-<img src="../../../docs/img/diffusion_fwi_variance.png" width="800"/>
-</p>
-
+![Zero-shot sampling variance](../../../docs/img/diffusion_fwi_variance.png)
 
 - A subdirectory `numpy` containing the raw numpy arrays of the predictions,
   which can be used for further analysis or post-processing.
 
-If Weights & Biases is enabled, the `generate.py` script also creates a subdirectory specified by
-`++wandb.results_dir=<path_to_wandb_directory>` containing the predictions as
-Wandb images.
-
+If Weights & Biases is enabled, the `generate.py` script also creates a
+subdirectory specified by `++wandb.results_dir=<path_to_wandb_directory>`
+containing the predictions as Wandb images.
 
 ### Physics-informed sampling
 
@@ -335,7 +327,7 @@ term:
 $$
 d \mathbf{x}_t = \left[ \mathbf{f} (\mathbf{x}_t, t) - g^2
 (\mathbf{x}_t, t) \left( \nabla_{\mathbf{x}_t} \log p_t(\mathbf{x}_t | \mathbf{y})
-+ S_c \phi(\mathbf{x}_t, t) \right)\right] dt + 
++ S_c \phi(\mathbf{x}_t, t) \right)\right] dt +
 g (\mathbf{x}_t, t) d \mathbf{w}_t
 $$
 
@@ -346,13 +338,15 @@ The guidance term $\phi(\mathbf{x}_t, t)$ is defined as the likelihood score:
 $$
 \phi(\mathbf{x}_t, t) = - \nabla_{\mathbf{x}_t} \log p_t(\mathbf{y} |
 \mathbf{x}_t) , \textrm{with } \mathbf{y} |
-\mathbf{x}_t \sim \mathcal{N} \left( \mathcal{R}( \hat{\mathbf{x}}_0 (\mathbf{x}_t)), \Sigma \right)
+\mathbf{x}_t \sim \mathcal{N} \left( \mathcal{R}( \hat{\mathbf{x}}_0
+(\mathbf{x}_t)), \Sigma \right)
 $$
 
 where $\mathcal{R}$ is the solution operator associated to the wave equation
 (detailed in the [Problem Overview](#problem-overview) section), and $\Sigma$
 is a parameter related to the measurement noise. These parameters are defined
-following an [adapted version](https://arxiv.org/abs/2506.22780) of the method introduced in [Score-based data assimilation (SDA)](https://proceedings.neurips.cc/paper_files/paper/2023/hash/7f7fa581cc8a1970a4332920cdf87395-Abstract-Conference.html).
+following an [adapted version](https://arxiv.org/abs/2506.22780) of the method
+introduced in [Score-based data assimilation (SDA)](https://proceedings.neurips.cc/paper_files/paper/2023/hash/7f7fa581cc8a1970a4332920cdf87395-Abstract-Conference.html).
 
 >**Note:** The present approach is not true DPS, as the latter is usually based
 >on an unconditional prior score $\nabla_{\mathbf{x}_t} \log p(\mathbf{x}_t)$,
@@ -383,18 +377,13 @@ Biases logging, and it still produces outputs in the directory specified by
 shows a few predictions from the ensemble, as well as the mean prediction and
 the ground truth velocity model.
 
-
 ![Physics-informed sampling predictions](../../../docs/img/diffusion_fwi_pi_predictions.png)
-
-<p align="center">
-<img src="../../../docs/img/diffusion_fwi_pi_predictions.png" width="800"/>
-</p>
-
 
 ## References
 
 > **⚠️  Warning:** The E-FWI dataset is distributed under a non-commercial license [CC
 > BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+
 - [E-FWI: Multi-parameter Benchmark Datasets for Elastic Full Waveform Inversion of Geophysical Properties](https://arxiv.org/abs/2306.12386)
 - [E-FWI datasets](https://smileunc.github.io/projects/efwi/datasets)
 - [Deepwave (Richardson A.)](https://zenodo.org/records/8381177)
@@ -404,4 +393,3 @@ the ground truth velocity model.
 - [Multimodal Atmospheric Super-Resolution With Deep Generative Models
 ](https://arxiv.org/abs/2506.22780)
 - [Score-based data assimilation](https://proceedings.neurips.cc/paper_files/paper/2023/hash/7f7fa581cc8a1970a4332920cdf87395-Abstract-Conference.html)
-
