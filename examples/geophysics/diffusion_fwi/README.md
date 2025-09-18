@@ -384,6 +384,8 @@ shows a few predictions from the ensemble, as well as the mean prediction and
 the ground truth velocity model.
 
 
+![Physics-informed sampling predictions](../../../docs/img/diffusion_fwi_pi_predictions.png)
+
 <p align="center">
 <img src="../../../docs/img/diffusion_fwi_pi_predictions.png" width="800"/>
 </p>
