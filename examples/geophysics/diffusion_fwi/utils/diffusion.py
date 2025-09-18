@@ -15,7 +15,7 @@
 # limitations under the License.
 
 import inspect
-from typing import Any, Dict, List, Tuple, TypeAlias, Protocol
+from typing import Any, Dict, List, Tuple, TypeAlias, Literal
 from collections.abc import Callable, Sequence
 
 import torch
@@ -23,14 +23,102 @@ import nvtx
 
 from physicsnemo.utils.diffusion import StackedRandomGenerator
 
-import deepwave
-
 
 class ModelBasedGuidance:
-    r""" """
+    r"""
+    Guidance function for `Diffusion Posterior Sampling (DPS)
+    <https://arxiv.org/abs/2209.14687>`_ based on a generic user-defined model
+    (possibly non-linear).
+    An instance of ``ModelBasedGuidance`` is a callable object that returns
+    the likelihood score :math:`\nabla_{\mathbf{x}_t} \log
+    p(\mathbf{y}|\mathbf{x}_t)`, where :math:`\mathbf{y}` is some conditioniong
+    variable (observation) that can be predicted by a forward model
+    :math:`\mathcal{M}` (called ``guide_model``). This guidance enforces
+    consistency between the predicted observation
+    :math:`\mathcal{M}(\hat{\mathbf{x}}_0 (\mathbf{x}_t))` and the
+    observed data :math:`\mathbf{y}`, where :math:`\hat{\mathbf{x}}_0` is an
+    estimate of the clean latent state :math:`\mathbf{x}_0`, usually obtained
+    by Tweedie's formula.
 
-    # TODO: for each one of the scaling parameters, need explanations
-    # + reference + make sure default values are sensible
+    The likelihood score follows a modified version of the implementation introduced in `Score-based data assimilation
+    <https://proceedings.neurips.cc/paper_files/paper/2023/hash/7f7fa581cc8a1970a4332920cdf87395-Abstract-Conference.html>`_.
+    It is computed as:
+
+    :math:`\dfrac{S}{1 + M} s_l( \mathbf{y} | \mathbf{x}_t)`, where :math:`S`
+    and :math:`M` are scaling parameters and :math:`s_l( \mathbf{y} | \mathbf{x}_t)`
+    is the likelihood score. Those are computed fined as:
+
+    - :math:`M = |s_l( \mathbf{y} | \mathbf{x}_t)|` is the magnitude of the
+      likelihood score.
+
+    - :math:`S = \text{scale} t^{\text{power}}` if :math:`t < 1` else
+      :math:`\text{scale}` is the scaled guidance strength.
+
+    - :math:`s_l( \mathbf{y} | \mathbf{x}_t) = \nabla_{\mathbf{x}_t} \dfrac{1}{2} \log
+      p(\mathbf{y}|\mathbf{x}_t) = \nabla_{\mathbf{x}_t} \dfrac{- || \mathbf{y}
+      - \mathcal{M}(\hat{\mathbf{x}}_0) ||^{\text{ord}}}{2 (\Sigma_y + \Gamma (\sigma_t /
+      \mu)^2)} \log p(\mathbf{y}|\hat{\mathbf{x}}_0 (\mathbf{x}_t))` is the
+      likelihood score.
+
+    A ``ModelBasedGuidance`` instance is expected to be the most useful when
+    passed to a sampler such as the ``EDMStochasticSampler`` class.
+
+    Parameters
+    ----------
+    guide_model: Callable[[torch.Tensor], torch.Tensor]
+        The forward model :math:`\mathcal{M}` that predicts the observation :math:`\mathbf{y}` from
+        the clean latent state :math:`\hat{\mathbf{x}}_0`. Should be a callable
+        object that takes as input a single tensor ``x_0_hat`` and returns a
+        single tensor ``y_x0`` that is the predicted observation.
+    std: float, optional, default=0.075
+        The standard deviation :math:`\Sigma_y` of the observation noise.
+    gamma: float, optional, default=0.05
+        The parameter :math:`\Gamma` of the sclaing, that depends on the
+        covariance :math:`\Sigma_x` of the prior.
+    mu: float, optional, default=1
+        The parameter :math:`\mu` that scales the noise level :math:`\sigma_t`.
+    scale: float, optional, default=1
+        The :math:`\text{scale}` parameter used to compute the guidance
+        strength :math:`S`.
+    power: float, optional, default=1
+        The :math:`\text{power}` parameter used to compute the guidance
+        strength :math:`S`.
+    norm_ord: float, optional, default=2
+        The order of the norm used to compute the error in the likelihood
+        score.
+    magnitude_scaling: bool, optional, default=True
+        Whether to divide the likelihood score by :math:`1 + M`, where
+        :math:`M` is its magnitude.
+    model_exec_mode: Literal["batched"], optional, default="batched"
+        The execution mode of the ``guide_model``. For ``model_exec_mode="batched"``,
+        the ``guide_model`` is expected to be a batched function that takes as input
+        a tensor ``x_0_hat`` of shape :math:`(B, *_x)` and returns a tensor ``y_x0``
+        of shape :math:`(B, *_y)`. The ``guide_model`` is also expected to be
+        differentiable with ``torch.autograd.grad``.
+
+    Forward
+    -------
+    x: torch.Tensor
+        The latent state vector of the diffusion model. Should be of shape
+        :math:`(B, *_x)`.
+    x_0_hat: torch.Tensor
+        The estimate of the clean latent state :math:`\hat{\mathbf{x}}_0`.
+        Should be of shape :math:`(B, *_x)`.
+    sigma: torch.Tensor
+        The noise level :math:`\sigma_t`. Should be of shape :math:`(B,)`.
+    y: torch.Tensor
+        The observed data :math:`\mathbf{y}`. Should be of shape :math:`(B,
+        *_y)`. When used with a sampler such as in instance of the
+        ``EDMStochasticSampler`` class, this should be passed as a
+        ``guidance_args`` argument.
+
+    Outputs
+    -------
+    torch.Tensor
+        The scaled likelihood score of shape :math:`(B, *_x)`.
+
+    """
+
     def __init__(
         self,
         guide_model: Callable[[torch.Tensor], torch.Tensor],
@@ -39,50 +127,94 @@ class ModelBasedGuidance:
         mu: float = 1,
         scale: float = 1,
         power: float = 1,
-        norm_ord: float = 1,
+        norm_ord: float = 2,
+        magnitude_scaling: bool = True,
+        # NOTE: for now only support model that processes batched inputs. Need
+        # more execution modes (e.g. vmap-able, single sample, non-pytorch impl,
+        # etc.)
+        model_exec_mode: Literal["batched"] = "batched",
     ):
-        self.guide_model = torch.func.vmap(guide_model)
+        self.guide_model = guide_model
         self.std = std
         self.gamma = gamma
         self.mu = mu
         self.scale = scale
         self.power = power
         self.norm_ord = norm_ord
+        self.magnitude_scaling = magnitude_scaling
+        _valid_model_exec_mode = ["batched"]
+        if model_exec_mode in _valid_model_exec_mode:
+            self.model_exec_mode = model_exec_mode
+        else:
+            raise ValueError(
+                f"'model_exec_mode' should be one of {', '.join(_valid_model_exec_mode)}, "
+                f"but got {model_exec_mode}"
+            )
 
     def _log_likelihood(
         self,
+        x: torch.Tensor,
         x_0_hat: torch.Tensor,
+        sigma: torch.Tensor,
         y: torch.Tensor,
-        t: torch.Tensor,
     ) -> torch.Tensor:
+        """
+        Helper function to compute the log-likelihood.
+        """
         # Compute L1 error between model prediction and observation
         # NOTE: for now only Tweedie's formula to estimate clean state x_0
-        y_x0: torch.Tensor = self.guide_model(x_0_hat)  # (*_y,)
+        if self.model_exec_mode == "batched":
+            B = y.shape[0]
+            y_x0: torch.Tensor = self.guide_model(x_0_hat)  # (B, *_y)
         if y_x0.shape != y.shape:
             raise ValueError(
                 f"Expected 'guide_model' output and y to have same shape, "
                 f"but got {y_x0.shape} and {y.shape}"
             )
-        err1 = torch.abs((y - y_x0)) ** self.norm_ord  # (*_y,)
+        err1 = torch.abs((y - y_x0)) ** self.norm_ord  # (B, *_y)
 
         # Compute log-likelihood p(y|x_0_hat)
-        var = self.std**2 + self.gamma * (t / self.mu) ** 2  # (,)
-        log_p = -0.5 * (err1 / var).sum()  # (,)
+        var = self.std**2 + self.gamma * (sigma / self.mu) ** 2  # (B,)
+        log_p = -0.5 * (err1 / var.view(B, *([1] * (y.ndim - 1)))).sum(
+            dim=tuple(range(1, y.ndim))
+        )  # (B,)
         return log_p
+
+    def _get_score(
+        self,
+        x: torch.Tensor,
+        x_0_hat: torch.Tensor,
+        sigma: torch.Tensor,
+        y: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Helper function to compute the likelihood score.
+        """
+        # NOTE: the sum + grad trick only woks with independent samples (i.e.
+        # no cross-sample coupling)
+        if self.model_exec_mode == "batched":
+            log_p = self._log_likelihood(x, x_0_hat, sigma, y)
+            dlog_p_dx = torch.autograd.grad(
+                outputs=log_p.sum(),  # (,)
+                inputs=x,  # (B, *_x)
+            )[0]  # (B, *_x)
+        return dlog_p_dx
 
     def __call__(
         self,
         x: torch.Tensor,
         x_0_hat: torch.Tensor,
-        t: torch.Tensor,
+        sigma: torch.Tensor,
         y: torch.Tensor,
     ) -> torch.Tensor:
         B = x.shape[0]
         ndim = x.ndim
 
         # Parameters validation
-        if t.shape != (B,):
-            raise ValueError(f"Expected t to have shape {(B,)}, but got {t.shape}")
+        if sigma.shape != (B,):
+            raise ValueError(
+                f"Expected sigma to have shape {(B,)}, but got {sigma.shape}"
+            )
         if y.shape[0] != B:
             raise ValueError(f"Expected y to have batch size {B}, but got {y.shape[0]}")
         if x_0_hat.shape != x.shape:
@@ -91,62 +223,159 @@ class ModelBasedGuidance:
                 f"but got {x_0_hat.shape} and {x.shape}"
             )
 
-        # NOTE: tensor is detached without requires_grad to save memory
-        # (not required with torch.func anyways)
-        x_0_hat = x_0_hat.clone().detach().requires_grad_(False)  # (*_x,)
-
         # Compute likelihood score
-        score = torch.func.vmap(
-            torch.func.grad(
-                self._log_likelihood,
-                argnums=0,
-            )
-        )(x_0_hat, y, t)  # (B, *_x,)
+        score = self._get_score(x, x_0_hat, sigma, y)  # (B, *_x)
 
         # Scale the likelihood score
-        scale = torch.where(t < 1, self.scale * t.pow(self.power), self.scale).view(
-            B, *([1] * (ndim - 1))
-        )  # (B, 1, ..., 1)
-        score_mag = torch.abs(score).mean(
-            dim=tuple(range(1, ndim)), keepdim=True
-        )  # (B, 1, ..., 1)
+        scale = torch.where(
+            sigma < 1, self.scale * sigma.pow(self.power), self.scale
+        ).view(B, *([1] * (ndim - 1)))  # (B, 1, ..., 1)
+        if self.magnitude_scaling:
+            score_mag = torch.abs(score).mean(
+                dim=tuple(range(1, ndim)), keepdim=True
+            )  # (B, 1, ..., 1)
+        else:
+            score_mag = 0
         score_scaled = (
-            score * scale * t.view(B, *([1] * (ndim - 1))) / (1 + score_mag)
+            score * scale * sigma.view(B, *([1] * (ndim - 1))) / (1 + score_mag)
         )  # (B, *_x)
 
         return score_scaled
+
+
+class DataConsistencyGuidance(ModelBasedGuidance):
+    r"""
+    ``DataConsistencyGuidance`` is a specific type of ``ModelBasedGuidance``
+    where the model :math:`\mathcal{M}` used in the guidance is a (linear)
+    measurement operator, defined by a relation of the form :math:`\mathcal{M}
+    (\hat{\mathbf{x}}_0) = \text{Mask} (\mathbf{x}_0)`, where :math:`\text{Mask}`
+    is a mask operator that selects a subset of clean latent state
+    :math:`\hat{\mathbf{x}}_0`.
+
+    This guidance is useful for applications such as image inpainting, channel
+    infilling, etc.
+
+    It returns the scaled likelihood score :math:`\nabla_{\mathbf{x}_t} \log
+    p(\mathbf{y}|\mathbf{x}_t)`, in a similar way as ``ModelBasedGuidance``.
+    Most of the parameters are the same as ``ModelBasedGuidance``.
+
+    Parameters
+    ----------
+    std: float, optional, default=0.075
+        The standard deviation :math:`\Sigma_y` of the observation noise.
+    gamma: float, optional, default=0.05
+        The parameter :math:`\Gamma` of the sclaing, that depends on the
+        covariance :math:`\Sigma_x` of the prior.
+    mu: float, optional, default=1
+        The parameter :math:`\mu` that scales the noise level :math:`\sigma_t`.
+    scale: float, optional, default=1
+        The :math:`\text{scale}` parameter used to compute the guidance
+        strength :math:`S`.
+    power: float, optional, default=1
+        The :math:`\text{power}` parameter used to compute the guidance
+        strength :math:`S`.
+    norm_ord: float, optional, default=2
+        The order of the norm used to compute the error in the likelihood
+        score.
+    magnitude_scaling: bool, optional, default=True
+        Whether to divide the likelihood score by :math:`1 + M`, where
+        :math:`M` is its magnitude.
+
+    Forward
+    -------
+    x: torch.Tensor
+        The latent state vector of the diffusion model. Should be of shape
+        :math:`(B, *_x)`.
+    x_0_hat: torch.Tensor
+        The estimate of the clean latent state :math:`\hat{\mathbf{x}}_0`.
+        Should be of shape :math:`(B, *_x)`.
+    sigma: torch.Tensor
+        The noise level :math:`\sigma_t`. Should be of shape :math:`(B,)`.
+    y: torch.Tensor
+        The observed data :math:`\mathbf{y}`. Should have the same shape as
+        ``x``, that is :math:`(B, *_x)`. When used with a sampler such as in
+        instance of the ``EDMStochasticSampler`` class, this should be passed
+        as a ``guidance_args`` argument.
+    mask: torch.Tensor
+        The measurement operator :math:`\text{Mask}`. Should be a tensor of
+        boolean values of shape :math:`(B, *_x)`. Values that are ``True``
+        correspond to the observed data, and values that are ``False`` correspond
+        to the unobserved data (ignored in the guidance). When used with a
+        sampler, this should be passed as a ``guidance_args`` argument.
+
+    Outputs
+    -------
+    torch.Tensor
+        The scaled likelihood score of shape :math:`(B, *_x)`.
+    """
+
+    def __init__(
+        self,
+        std: float = 0.075,
+        gamma: float = 0.05,
+        mu: float = 1,
+        scale: float = 1,
+        power: float = 1,
+        norm_ord: float = 2,
+        magnitude_scaling: bool = True,
+    ):
+        super().__init__(
+            guide_model=lambda x: x,
+            std=std,
+            gamma=gamma,
+            mu=mu,
+            scale=scale,
+            power=power,
+            norm_ord=norm_ord,
+            magnitude_scaling=magnitude_scaling,
+            model_exec_mode="batched",
+        )
+
+    def __call__(
+        self,
+        x: torch.Tensor,
+        x_0_hat: torch.Tensor,
+        sigma: torch.Tensor,
+        y: torch.Tensor,
+        mask: torch.Tensor,
+    ) -> torch.Tensor:
+        if mask.shape != x.shape:
+            raise ValueError(
+                f"Expected mask and x to have same shape, "
+                f"but got {mask.shape} and {x.shape}"
+            )
+        if y.shape != x.shape:
+            raise ValueError(
+                f"Expected y and x to have same shape, but got {y.shape} and {x.shape}"
+            )
+        y_masked = torch.where(mask, y, 0.0)  # (B, *_x)
+        return super().__call__(self, x, x_0_hat, sigma, y_masked)
 
 
 # Some type annotations
 _Guidance: TypeAlias = (
     ModelBasedGuidance | DataConsistencyGuidance | Callable[..., torch.Tensor]
 )
-_SamplerFn: TypeAlias = Callable[[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]
-
-
-class _DiffusionModel(Protocol):
-    def __call__(
-        self,
-        x: torch.Tensor,
-        t: torch.Tensor,
-        cond: Dict[str, torch.Tensor],
-        *model_args: Any,
-        **model_kwargs: Any,
-    ) -> torch.Tensor: ...
+_SamplerFn: TypeAlias = Callable[
+    [torch.Tensor, Dict[str, torch.Tensor], Any, Any], torch.Tensor
+]
+_DiffusionModel = Callable[
+    [torch.Tensor, torch.Tensor, Dict[str, torch.Tensor], Any, Any], torch.Tensor
+]
 
 
 def DiffusionAdapter(
     model: torch.nn.Module, args_map: Tuple[str, str, Dict[str, str]]
 ) -> _DiffusionModel:
-    """
+    r"""
     Creates a thin wrapper around a module to convert it into a
     diffusion model compatible with other diffusion utilities.
 
     This wrapper modifies the signature of a model's forward method to match the
-    expected interface for conditional diffusion models. It converts a model with
+    expected interface for diffusion models. It converts a model with
     an original signature ``model(arg1, ..., argN, kwarg1=val1, ..., kwargM=valM,
     **model_kwargs)`` into a model with signature
-    ``wrapper(x, t, condition, wrapper_disabled=False, **wrapper_kwargs)``.
+    ``wrapper(x, sigma, condition, wrapper_disabled=False, **wrapper_kwargs)``.
 
     Parameters
     ----------
@@ -157,27 +386,28 @@ def DiffusionAdapter(
         - First element: the name of the parameter in the original model's forward
           method that the latent state `x` should be mapped to.
         - Second element: the name of the parameter in the original model's forward
-          method that the diffusion time `t` should be mapped to.
+          method that the noise level ``sigma`` should be mapped to.
         - Third element: a dictionary mapping keys in the `cond` dictionary
           to parameter names in the original model's forward method.
 
     Forward
     -------
     x : torch.Tensor
-        The latent state vector of the diffusion model, typically of shape (B, *).
-    t : torch.Tensor
-        The diffusion time. Should be of shape (B,).
+        The latent state of the diffusion model, typically of shape
+        :math:`(B, *)`.
+    sigma : torch.Tensor
+        The noise level :math:`\sigma_t`. Should be of shape :math:`(B,)`.
     cond : Dict[str, torch.Tensor]
         A dictionary of conditioning variables. Keys are strings identifying
         the conditioning variables names, and values are tensors used for
-        conditioning. The keys are typically "x_0", "x_T", "sigma", "noise", etc.
-    wrapper_disabled : bool, optional
-        Flag to disable the wrapper functionality. When True, the forward method
-        reverts to the original model's signature. Default is False.
+        conditioning.
+    wrapper_disabled : bool, optional, default=False
+        Flag to disable the wrapper functionality. When ``True``, the forward
+        method reverts to the original model's signature.
     **wrapper_kwargs : Any, optional
         Additional arguments to pass to the original model's forward method.
         Should include all arguments from the original signature that are not
-        referenced in `args_map`. This includes both positional and keyword
+        referenced in ``args_map``. This includes both positional and keyword
         arguments from the original signature, all converted to keyword
         arguments.
 
@@ -189,7 +419,7 @@ def DiffusionAdapter(
 
     Notes
     -----
-    The wrapper is thin and only holds references to the original model's
+    This is a thin wrapper that only holds references to the original model's
     attributes. Any modification of attributes in the wrapper is reflected in the
     original model, and vice versa.
 
@@ -244,11 +474,11 @@ def DiffusionAdapter(
 
     # Placeholders
     _NoArg, _condArg, _kwArg = object(), object(), object()
-    _xArg, _tArg = object(), object()
+    _xArg, _sigmaArg = object(), object()
 
     # Process each parameter in the original forward method signature
     # and do the mapping if the parameter is a target specified  in args_map
-    is_mapped: List[bool, bool, Dict[str, bool]] = [
+    is_mapped: List = [
         False,
         False,
         {k: False for k in args_map[2].keys()},
@@ -274,9 +504,9 @@ def DiffusionAdapter(
         elif p.name == args_map[0]:
             sig_map[p.name] = (i - 1, _xArg)
             is_mapped[0] = True
-        # Argument targetted for t (diffusion time)
+        # Argument targetted for sigma (noise level)
         elif p.name == args_map[1]:
-            sig_map[p.name] = (i - 1, _tArg)
+            sig_map[p.name] = (i - 1, _sigmaArg)
             is_mapped[1] = True
         # Arguments targetted for condition
         elif p.name in args_map[2].values():
@@ -298,15 +528,15 @@ def DiffusionAdapter(
         if wrapper_disabled:
             return _orig_forward(self, *args, **kwargs)
         # Extract x (state vector) and condition from args
-        x, t, cond = args[0], args[1], args[2]
+        x, sigma, cond = args[0], args[1], args[2]
 
         # Build a list of arguments to pass to the original forward method
         args_and_kwargs = [_NoArg for _ in range(len(sig_map))]
         for param_name, (idx, arg_type, *cond_key) in sig_map.items():
             if arg_type is _xArg:
                 args_and_kwargs[idx] = x
-            elif arg_type is _tArg:
-                args_and_kwargs[idx] = t
+            elif arg_type is _sigmaArg:
+                args_and_kwargs[idx] = sigma
             elif arg_type is _condArg:
                 args_and_kwargs[idx] = cond[cond_key[0]]
             elif arg_type is _kwArg:
@@ -341,18 +571,20 @@ def generate(
     rank_batches: List[List[int]] | List[torch.Tensor],
     cond: Dict[str, torch.Tensor],
     device: torch.device,
+    sampler_kwargs: Dict[str, Any] = {},
 ) -> torch.Tensor:
     r"""
-    Utility function to generate samples from the diffusion model. It starts by
+    Function to generate samples from a diffusion model. It starts by
     initializing a batch of noisy latent states :math:`\mathbf{x}_T` and then generates
-    a batch of samples :math:`\mathbf{x}_0` by applying the ``sampler_fn`` function.
+    a batch of clean samples :math:`\mathbf{x}_0` by applying the ``sampler_fn`` function.
     It supports in addition generation minibatch by minibatch by splitting the
     seeds in ``rank_batches``.
 
     The ``sampler_fn`` function is expected to have the following signature:
-    ``sampler_fn(x, cond)``, where ``x`` is the latent state and
+    ``sampler_fn(x, cond, **sampler_kwargs)``, where ``x`` is the latent state and
     ``cond`` is the conditioning variables, as specified below. It should return
-    a single tensor corresponding to a batch of generated samples.
+    a single tensor corresponding to a batch of generated samples. Typically,
+    the ``sampler_fn`` function is an instance of ``EDMStochasticSampler``.
 
     Parameters
     ----------
@@ -373,10 +605,12 @@ def generate(
     cond : Dict[str, torch.Tensor]
         Dictionary of conditioning variables. Keys are strings identifying the
         conditioning variables names, and values are tensors used for
-        conditional generation. Can be set to ``{}`` for unconditioned
+        conditional generation. Can be set to ``{}`` for unconditional
         generation.
     device : torch.device
         Device to perform computations.
+    sampler_kwargs : Dict[str, Any], optional, default={}
+        Additional keyword arguments to pass to the ``sampler_fn`` function.
 
     Returns
     -------
@@ -400,42 +634,28 @@ def generate(
                 device=device,
             ).to(memory_format=torch.channels_last)
 
-            with torch.inference_mode():
-                x_0: torch.Tensor = sampler_fn(x_T, cond)
+            # Call the sampler function
+            x_0: torch.Tensor = sampler_fn(x_T, cond, **sampler_kwargs)
+
             x_generated.append(x_0)
     return torch.cat(x_generated)
 
 
-def stochastic_sampler(
-    model: _DiffusionModel,
-    x: torch.Tensor,
-    cond: Dict[str, torch.Tensor],
-    model_args: Tuple = (),
-    model_kwargs: Dict[str, Any] = {},
-    num_steps: int = 18,
-    sigma_min: float = 0.002,
-    sigma_max: float = 800,
-    rho: float = 7,
-    S_churn: float = 0,
-    S_min: float = 0,
-    S_max: float = float("inf"),
-    S_noise: float = 1,
-    guidance: _Guidance | Sequence[_Guidance] | None = None,
-    guidance_args: Tuple | Sequence[Tuple] = (),
-    guidance_kwargs: Dict[str, Any] | Sequence[Dict[str, Any]] = {},
-) -> torch.Tensor:
+class EDMStochasticSampler:
     r"""
-    EDM sampler with minor changes to enable posterior sampling.
+    Stochastic sampler proposed in the `EDM paper
+    <https://arxiv.org/abs/2206.00364>`_, with optional guidance.
     The sampler starts from a batch of noisy latent states :math:`\mathbf{x}_T`
-    and generates a batch of samples :math:`\mathbf{x}_0` by iteratively denoising
+    and generates a batch of clean samples :math:`\mathbf{x}_0` by iteratively denoising
     the noisy latent states.
 
     The diffusion model is expected to be called with:
-    ``x_0_hat = model(x, t, cond, *model_args, **model_kwargs)``, where ``x`` is the
-    latent state, ``t`` is the diffusion time, ``cond`` is the conditioning
+    ``x_0_hat = model(x, sigma, cond, *model_args, **model_kwargs)``, where ``x`` is the
+    latent state, ``sigma`` is the noise level, ``cond`` is the conditioning
     variables, and ``*model_args`` and ``**model_kwargs`` are additional
     arguments to pass to the model (see below for details on the expected
-    arguments). It is expected to return a tensor :math:`\hat{\mathbf{x}}_0` of
+    arguments). The model should be an :math:`\mathbf{x}_0`-prediction model.
+    It should return a tensor :math:`\hat{\mathbf{x}}_0` of
     same shape as ``x``, that is an estimate of the clean latent state
     :math:`\mathbf{x}_0`.
 
@@ -445,32 +665,19 @@ def stochastic_sampler(
     to the score function as a correction or drift term.
     Each guidance function must be an instance of the available guidance types (e.g.
     ``ModelBasedGuidance`` for posterior sampling based on consistency with a nonlinear
-    model, ``DataConsistencyGuidance`` for guidance based on observed data, etc.)
+    model, ``DataConsistencyGuidance`` for guidance based data measured at
+    specific locations, etc.)
     For example, in the case of posterior sampling, the guidance function
     should be an instance of ``ModelBasedGuidance`` that returns the
     likelihood score :math:`\nabla_{\mathbf{x}} \log p(\mathbf{y}|\mathbf{x}_t)`,
-    :math:`\nabla_{\mathbf{x}} \log p(\mathbf{y}|\mathbf{x}_t)`, which is a
-    tensor of same shape as ``x``, and where :math:`\mathbf{y}` is some
+    which is a tensor of same shape as ``x``, and where :math:`\mathbf{y}` is some
     conditioniong variable.
 
     Parameters
     ----------
     model: _DiffusionModel
         The denoising diffusion model to use in the sampling process. Should be
-        an *:math:`\mathbf{x}_0`-prediction* model.
-    x: torch.Tensor
-        The noisy latent state used as the initial input for the sampler.
-        Typically pure noise :math:`\mathbf{x}_T`.
-        Should have shape :math:`(B, *)`, where :math:`B` is the batch size and
-        :math:`*` is any number of dimensions.
-    cond: Dict[str, torch.Tensor]
-        Dictionary of conditioning variables. Keys are strings identifying the
-        conditioning variables names, and values are tensors used for
-        conditioning.
-    model_args: Tuple, optional, default=()
-        Additional positional arguments to pass to the model.
-    model_kwargs: Dict[str, Any], optional, default={}
-        Additional keyword arguments to pass to the model.
+        an :math:`\mathbf{x}_0`-prediction model.
     num_steps: int, optional, default=18
         Number of time steps for the sampler.
     sigma_min: float, optional, default=0.002
@@ -489,6 +696,22 @@ def stochastic_sampler(
         Maximum time step for applying churn.
     S_noise: float, optional, default=1
         Noise scaling factor applied during the churn step.
+
+    Forward
+    -------
+    x: torch.Tensor
+        The noisy latent state used as the initial input for the sampler.
+        Typically pure noise :math:`\mathbf{x}_T`.
+        Should have shape :math:`(B, *)`, where :math:`B` is the batch size and
+        :math:`*` is any number of dimensions.
+    cond: Dict[str, torch.Tensor]
+        Dictionary of conditioning variables. Keys are strings identifying the
+        conditioning variables names, and values are tensors used for
+        conditioning.
+    model_args: Tuple, optional, default=()
+        Additional positional arguments to pass to the model.
+    model_kwargs: Dict[str, Any], optional, default={}
+        Additional keyword arguments to pass to the model.
     guidance: _Guidance | Sequence[_Guidance] | None, optional, default=None
         Guidance function that is added as a correction to the score function (computed by
         ``model``). Typically used for posterior sampling, classifier guidance,
@@ -501,217 +724,259 @@ def stochastic_sampler(
         Additional keyword arguments to pass to the guidance function.
         If multiple guidance functions are passed, this should be a list or tuple
         of the same length as the number of guidance functions.
+    guidance_second_order: bool | Sequence[bool], optional, default=False
+        Whether to compute the guidance function in the second order
+        correction. If ``True``, the guidance function is computed twice, while
+        if ``False``, it is computed only once, which can typically save some
+        computation for guidance functions that are expensive to compute.
+        If multiple guidance functions are passed, this should be
+        a list or tuple of the same length as the number of guidance functions.
 
-    Returns
+    Outputs
     -------
-    Tensor
-        The final denoised image produced by the sampler. Same shape
-        :math:`(B, *)` as ``x``. It is typically a denoised latent state
-        :math:`\mathbf{x}_0`.
+    torch.Tensor
+        The final clean latent state :math:`\mathbf{x}_0` produced by the
+        sampler. Same shape :math:`(B, *)` as ``x``.
     """
 
-    # Set container structures for guidance functions
-    if guidance is None:
-        guidances = []
-    elif not isinstance(guidance, (list, tuple)):
-        guidances = [guidance]
-        guidances_args = [guidance_args]
-        guidances_kwargs = [guidance_kwargs]
-    else:
-        if not (len(guidance) == len(guidance_args) == len(guidance_kwargs)):
+    def __init__(
+        self,
+        model: _DiffusionModel,
+        num_steps: int = 18,
+        sigma_min: float = 0.002,
+        sigma_max: float = 800,
+        rho: float = 7,
+        S_churn: float = 0,
+        S_min: float = 0,
+        S_max: float = float("inf"),
+        S_noise: float = 1,
+    ):
+        self.model = model
+        self.num_steps = num_steps
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+        self.rho = rho
+        self.S_churn = S_churn
+        self.S_min = S_min
+        self.S_max = S_max
+        self.S_noise = S_noise
+
+    def __call__(
+        self,
+        x: torch.Tensor,
+        cond: Dict[str, torch.Tensor],
+        model_args: Tuple = (),
+        model_kwargs: Dict[str, Any] = {},
+        guidance: _Guidance | Sequence[_Guidance] | None = None,
+        guidance_args: Tuple | Sequence[Tuple] = (),
+        guidance_kwargs: Dict[str, Any] | Sequence[Dict[str, Any]] = {},
+        guidance_second_order: bool | Sequence[bool] = False,
+    ) -> torch.Tensor:
+        # Set container structures for guidance functions
+        if guidance is None:
+            guidances = []
+            guidances_args = []
+            guidances_kwargs = []
+            guidances_second_order = []
+        elif not isinstance(guidance, (list, tuple)):
+            guidances = [guidance]
+            guidances_args = [guidance_args]
+            guidances_kwargs = [guidance_kwargs]
+            guidances_second_order = [guidance_second_order]
+        elif (
+            isinstance(guidance, (list, tuple))
+            and isinstance(guidance_args, (list, tuple))
+            and isinstance(guidance_kwargs, (list, tuple))
+            and isinstance(guidance_second_order, (list, tuple))
+        ):
+            guidances = guidance
+            guidances_args = guidance_args
+            guidances_kwargs = guidance_kwargs
+            guidances_second_order = guidance_second_order
+        else:
             raise ValueError(
-                f"Number of guidance functions, arguments, and keyword "
-                f"arguments must match, but got {len(guidance)}, "
-                f"{len(guidance_args)}, {len(guidance_kwargs)}"
+                "When multiple guidance functions are passed, 'guidance', "
+                "'guidance_args', 'guidance_kwargs', and 'guidance_second_order' "
+                "must be lists or tuples of the same length"
             )
-        guidances = guidance
-        guidances_args = guidance_args
-        guidances_kwargs = guidance_kwargs
+        if not (
+            len(guidances)
+            == len(guidances_args)
+            == len(guidances_kwargs)
+            == len(guidances_second_order)
+        ):
+            raise ValueError(
+                f"Number of guidance functions, arguments, keyword "
+                f"arguments, and second order correction must match, "
+                f"but got {len(guidances)}, {len(guidances_args)}, "
+                f"{len(guidances_kwargs)}, and {len(guidances_second_order)}"
+            )
 
-    B = x.shape[0]
+        # Determine if we need to differentiate through the model
+        req_grad: bool = False
+        req_grad_sec_ord: bool = False
+        for gd, gd_sec_ord in zip(guidances, guidances_second_order):
+            if isinstance(gd, (ModelBasedGuidance, DataConsistencyGuidance)):
+                req_grad: bool = True
+                if gd_sec_ord:
+                    req_grad_sec_ord: bool = True
 
-    # Adjust noise levels based on what's supported by the network.
-    # Proposed EDM sampler (Algorithm 2) with minor changes to enable
-    # posterior sampling
-    if hasattr(model, "sigma_min"):
-        sigma_min = max(sigma_min, model.sigma_min)
-    if hasattr(model, "sigma_max"):
-        sigma_max = min(sigma_max, model.sigma_max)
-    if hasattr(model, "round_sigma") and callable(model.round_sigma):
-        round_sigma = model.round_sigma
-    else:
-        round_sigma = torch.as_tensor
+        B = x.shape[0]
 
-    # Time step discretization.
-    step_indices = torch.arange(num_steps, device=x.device)
-    t_steps = (
-        sigma_max ** (1 / rho)
-        + step_indices
-        / (num_steps - 1)
-        * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))
-    ) ** rho
-    t_steps = torch.cat(
-        [round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
-    )  # t_N = 0
+        # Adjust noise levels based on what's supported by the network.
+        # Proposed EDM sampler (Algorithm 2) with minor changes to enable
+        # posterior sampling
+        if hasattr(self.model, "sigma_min"):
+            sigma_min = max(self.sigma_min, self.model.sigma_min)
+        else:
+            sigma_min = self.sigma_min
+        if hasattr(self.model, "sigma_max"):
+            sigma_max = min(self.sigma_max, self.model.sigma_max)
+        else:
+            sigma_max = self.sigma_max
+        if hasattr(self.model, "round_sigma") and callable(self.model.round_sigma):
+            round_sigma = self.model.round_sigma
+        else:
+            round_sigma = torch.as_tensor
 
-    # Main sampling loop.
-    x_next = x * t_steps[0]
-    for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):
-        # TODO: double check why there is a detach and requires_grad_
-        x_cur = x_next.detach().requires_grad_()
+        # Time step discretization.
+        step_indices = torch.arange(self.num_steps, device=x.device)
+        t_steps = (
+            sigma_max ** (1 / self.rho)
+            + step_indices
+            / (self.num_steps - 1)
+            * (sigma_min ** (1 / self.rho) - sigma_max ** (1 / self.rho))
+        ) ** self.rho
+        t_steps = torch.cat(
+            [round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
+        )  # t_N = 0
 
-        # Increase noise temporarily.
-        gamma = S_churn / num_steps if S_min <= t_cur <= S_max else 0
-        t_hat = round_sigma(t_cur + gamma * t_cur)
-        x_hat: torch.Tensor = (
-            x_cur + (t_hat**2 - t_cur**2).sqrt() * S_noise * torch.randn_like(x_cur)
-        ).to(x.device)
+        # Main sampling loop.
+        x_next = x * t_steps[0]
+        for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):
+            # NOTE: break the computational graph here to save memory when
+            # computing the guidance terms --> Cannot backpropagate through the
+            # sampler, even when guidance is disabled
+            x_cur = x_next.detach()
 
-        # Move conditioning to the device
-        for key, value in cond.items():
-            cond[key] = value.to(x.device)
+            # Increase noise temporarily.
+            gamma = (
+                self.S_churn / self.num_steps
+                if self.S_min <= t_cur <= self.S_max
+                else 0
+            )
+            t_hat = round_sigma(t_cur + gamma * t_cur)
+            x_hat: torch.Tensor = (
+                x_cur
+                + (t_hat**2 - t_cur**2).sqrt() * self.S_noise * torch.randn_like(x_cur)
+            ).to(x.device)
 
-        x_0_hat = model(
-            x_hat,
-            t_hat.expand(
-                B,
-            ),
-            cond,
-            *model_args,
-            **model_kwargs,
-        )
+            # Move conditioning to the device
+            for key, value in cond.items():
+                cond[key] = value.to(x.device)
 
-        # Guidance (e.g. posterior sampling, etc...)
-        guidance_sum = 0.0
-        if guidances:
-            for guidance, guidance_args, guidance_kwargs in zip(
-                guidances, guidances_args, guidances_kwargs
-            ):
-                if isinstance(guidance, ModelBasedGuidance):
-                    # TODO: why the guidance uses x_cur for the latent state
-                    # instead of x_hat? (but it does use t_hat and not t_cur)
-                    guidance_sum += guidance(
-                        x_cur,
-                        t_hat.expand(
+            # Activate gradient computation if needed for guidance
+            with torch.set_grad_enabled(req_grad):
+                if req_grad:
+                    x_hat_in = x_hat.clone().detach().requires_grad_(True)
+                else:
+                    x_hat_in = x_hat
+
+                x_0_hat = self.model(
+                    x_hat_in,
+                    t_hat.expand(
+                        B,
+                    ),
+                    cond,
+                    *model_args,
+                    **model_kwargs,
+                )
+
+                # Guidance terms (e.g. posterior sampling, etc...)
+                # Guidance terms required for 2nd order correction are computed
+                # twice, while other guidance terms are only computed once to
+                # save cost
+                gd_sum = 0
+                gd_sum_sec_ord = 0
+                if guidances:
+                    for gd, gd_args, gd_kwargs, gd_sec_ord in zip(
+                        guidances,
+                        guidances_args,
+                        guidances_kwargs,
+                        guidances_second_order,
+                    ):
+                        if isinstance(
+                            guidance, (ModelBasedGuidance, DataConsistencyGuidance)
+                        ):
+                            gd_val = gd(
+                                x_hat_in,
+                                x_0_hat,
+                                t_hat.expand(
+                                    B,
+                                ),
+                                *gd_args,
+                                **gd_kwargs,
+                            )
+                        else:
+                            raise ValueError(f"Unsupported guidance type: {type(gd)}")
+                        if gd_sec_ord:
+                            gd_sum += gd_val
+                        else:
+                            # Count twice since we only compute once
+                            gd_sum_sec_ord += 2 * gd_val
+
+            d_cur = (x_hat - x_0_hat) / t_hat - gd_sum
+            x_next = x_hat + (t_next - t_hat) * d_cur
+
+            # 2nd order correction
+            if i < self.num_steps - 1:
+                x_next = x_next.to(x.device)
+
+                # Activate gradient computation if needed for guidance
+                with torch.set_grad_enabled(req_grad_sec_ord):
+                    if req_grad_sec_ord:
+                        x_next_in = x_next.clone().detach().requires_grad_(True)
+                    else:
+                        x_next_in = x_next
+
+                    x_0_hat_next = self.model(
+                        x_next_in,
+                        t_next.expand(
                             B,
                         ),
-                        x_0_hat,
-                        *guidance_args,
-                        **guidance_kwargs,
+                        cond,
+                        *model_args,
+                        **model_kwargs,
                     )
-                elif isinstance(guidance, DataConsistencyGuidance):
-                    pass
-                else:
-                    raise ValueError(f"Unsupported guidance type: {type(guidance)}")
 
-        # TODO: why likelihood_score is not used to compute d_cur?
-        d_cur = (x_hat - x_0_hat) / t_hat
-        x_next = x_hat + (t_next - t_hat) * d_cur
+                    # Only recompute guidance terms specifically required in
+                    # the 2nd correction
+                    if guidances:
+                        for gd, gd_args, gd_kwargs, gd_sec_ord in zip(
+                            guidances,
+                            guidances_args,
+                            guidances_kwargs,
+                            guidances_second_order,
+                        ):
+                            if gd_sec_ord:
+                                if isinstance(
+                                    guidance,
+                                    (ModelBasedGuidance, DataConsistencyGuidance),
+                                ):
+                                    gd_sum_sec_ord += gd(
+                                        x_next_in,
+                                        x_0_hat_next,
+                                        t_next.expand(
+                                            B,
+                                        ),
+                                        *gd_args,
+                                        **gd_kwargs,
+                                    )
+                                else:
+                                    raise ValueError(
+                                        f"Unsupported guidance type: {type(gd)}"
+                                    )
 
-        # 2nd order correction
-        if i < num_steps - 1:
-            x_next = x_next.to(x.device)
-            x_0_hat_next = model(
-                x_next,
-                t_next.expand(
-                    B,
-                ),
-                cond,
-                *model_args,
-                **model_kwargs,
-            )
-            d_prime = (x_next - x_0_hat_next) / t_next
-            x_next = x_hat + (t_next - t_hat) * (
-                0.5 * d_cur + 0.5 * d_prime - guidance_sum
-            )
-    return x_next
-
-
-def pi_conditioning(
-    x_prev,
-    x_0_hat,
-    measurement,
-    sigma,
-    std=7.5e-2,
-    gamma=5e-2,
-    mu=1,
-    scale=1,
-    power=1,
-    **kwargs,
-):
-    # TODO: need explanatiosn for hard-coded parameters + adapt to new
-    # resolution (80x80) + avoid hard-coded values
-    def pi_operator(vp, vs, rho):
-        # ############### Denormalize #################
-        vp_mean = 3035.069357508522
-        vp_std = 890.3956
-        vs_mean = 1712.469452191763
-        vs_std = 551.9505919227604
-        vp = vp_mean + vp_std * vp
-        vs = vs_mean + vs_std * vs
-        # ############### Acquisition Geometry #################
-        ny, nx = 70, 70
-        dx = 5.0
-        nt = 1000
-        dt = 0.001
-        freq = 15
-        peak_time = 1.5 / freq
-        n_shots = 5
-        source_depth = 1
-        receiver_depth = 1
-        n_receivers_per_shot = 69
-
-        source_locations = torch.zeros(
-            n_shots, 1, 2, dtype=torch.long, device=x_0_hat.device
-        )
-        source_locations[..., 0] = source_depth
-        source_locations[:, 0, 1] = torch.arange(n_shots) * 17
-
-        receiver_locations = torch.zeros(
-            n_shots, n_receivers_per_shot, 2, dtype=torch.long, device=x_0_hat.device
-        )
-        receiver_locations[..., 0] = receiver_depth
-        receiver_locations[:, :, 1] = torch.arange(n_receivers_per_shot).repeat(
-            n_shots, 1
-        )
-
-        source_amplitudes = (
-            deepwave.wavelets.ricker(freq, nt, dt, peak_time)
-            .repeat(n_shots, 1, 1)
-            .to(x_0_hat.device)
-            * 100000.0
-        )
-
-        vz, vx = deepwave.elastic(
-            *deepwave.common.vpvsrho_to_lambmubuoyancy(vp, vs, rho),
-            grid_spacing=dx,
-            dt=dt,
-            source_amplitudes_y=source_amplitudes,
-            source_amplitudes_x=source_amplitudes,
-            source_locations_y=source_locations,
-            source_locations_x=source_locations,
-            receiver_locations_y=receiver_locations,
-            receiver_locations_x=receiver_locations,
-            pml_freq=freq,
-            pml_width=[20, 20, 20, 20],
-        )[-2:]
-        out = torch.cat([vx[None, :], vz[None, :]], dim=0)
-        return out
-
-    with torch.no_grad():
-        out_true = pi_operator(measurement[0], measurement[1], measurement[2])
-    # err1 = 0
-    # for i in range(x_0_hat.shape[0]):
-    #     out_x0 = pi_operator(x_0_hat[i,0],x_0_hat[i,1],x_0_hat[i,2])
-    #     err1 += torch.abs(out_x0 - out_true)
-    x_0_hat_mean = x_0_hat.mean(dim=0)
-    out_x0 = pi_operator(x_0_hat_mean[0], x_0_hat_mean[1], x_0_hat_mean[2])
-    err1 = torch.abs(out_x0 - out_true)
-
-    var = std**2 + gamma * (sigma / mu) ** 2
-    log_p = -(err1 / var).sum() / 2
-    grad = torch.autograd.grad(outputs=log_p, inputs=x_prev)[0]
-    if sigma < 1:
-        scale = scale * sigma**power
-    scaled_score = grad * scale * sigma / (1 + torch.abs(grad).mean())
-    return scaled_score, err1.mean().item()
+                d_prime = (x_next - x_0_hat_next) / t_next - gd_sum_sec_ord
+                x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
+        return x_next

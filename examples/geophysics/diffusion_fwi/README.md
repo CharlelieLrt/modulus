@@ -228,7 +228,15 @@ torchrun --standalone --nnodes=<NUM_NODES> --nproc_per_node=<NUM_GPUS_PER_NODE> 
 
 ### Zero-shot sampling
 
+<p align="center">
+<img src="../../../docs/img/FWI_schematic.png" width="800"/>
+</p>
+
 ### Physics-informed sampling
+
+<p align="center">
+<img src="../../../docs/img/FWI_schematic.png" width="800"/>
+</p>
 
 ## References
 

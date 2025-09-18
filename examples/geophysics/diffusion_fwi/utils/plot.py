@@ -105,14 +105,18 @@ def plot_prediction(
 
         for j, src_idx in enumerate(source_indices):
             ax = fig1.add_subplot(gs[0, j])
-            im = ax.imshow(vx[src_idx], cmap="viridis", extent=[0, W, 0, H])
+            im = ax.imshow(
+                vx[src_idx], cmap="viridis", extent=[0, W, 0, H], aspect="auto"
+            )
             plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             ax.set_title(f"vx source {src_idx}", fontsize=10)
             ax.set_xticks([])
             ax.set_yticks([])
 
             ax = fig1.add_subplot(gs[1, j])
-            im = ax.imshow(vz[src_idx], cmap="viridis", extent=[0, W, 0, H])
+            im = ax.imshow(
+                vz[src_idx], cmap="viridis", extent=[0, W, 0, H], aspect="auto"
+            )
             plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             ax.set_title(f"vz source {src_idx}", fontsize=10)
             ax.set_xticks([])

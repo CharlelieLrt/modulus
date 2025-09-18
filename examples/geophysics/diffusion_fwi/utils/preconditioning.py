@@ -22,7 +22,7 @@ import torch
 def edm_precond(
     model: Union[torch.nn.Module, Callable[..., torch.Tensor]],
     x: torch.Tensor,
-    t: torch.Tensor,
+    sigma: torch.Tensor,
     cond: Dict[str, torch.Tensor],
     sigma_data: float = 0.5,
     model_args: Tuple = (),
@@ -37,10 +37,9 @@ def edm_precond(
     model : Union[torch.nn.Module, Callable[..., torch.Tensor]]
         Diffusion model to be wrapped with EDM preconditioning.
     x : torch.Tensor
-        Latent state vector of shape :math:`(B, *)`.
-    t : torch.Tensor
-        Diffusion time, used to compute the noise level sigma. Should be of
-        shape :math:`(B,)`.
+        Latent state :math:`\mathbf{x}_t` of shape :math:`(B, *)`.
+    sigma : torch.Tensor
+        Noise level :math:`\sigma_t`. Should be of shape :math:`(B,)`.
     cond : Dict[str, torch.Tensor]
         Dictionary of conditioning information for the model. The keys should
         be the names of the conditioning variables to the model, and the values
@@ -58,7 +57,6 @@ def edm_precond(
         The output tensor from the diffusion model, with the same shape
         :math:`(B, *)` as the latent state ``x``.
     """
-    sigma = t
 
     # Compute conditioning parameters
     c_skip = sigma_data**2 / (sigma**2 + sigma_data**2)
@@ -67,7 +65,7 @@ def edm_precond(
     c_noise = sigma.log() / 4
 
     # Apply conditioning to input
-    x_precond = c_in * x
+    x_precond = c_in.view(-1, *[1] * (x.dim() - 1)) * x
 
     # Call model with conditioned input
     F_x = model(
@@ -79,6 +77,8 @@ def edm_precond(
     )
 
     # Apply output conditioning
-    D_x = c_skip * x + c_out * F_x.to(torch.float32)
+    D_x = c_skip.view(-1, *[1] * (x.dim() - 1)) * x + c_out.view(
+        -1, *[1] * (x.dim() - 1)
+    ) * F_x.to(torch.float32)
 
     return D_x

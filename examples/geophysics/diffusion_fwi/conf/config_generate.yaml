@@ -14,49 +14,85 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# TODO: add all missing comments
+
 # Model configuration
 model:
-  regression_checkpoint_path: regression_checkpoint/ElasticNet.0.85.mdlus  # Path to regression model checkpoint
-  diffusion_checkpoint_path: "./checkpoints/diffusion_fwi/latest.mdlus"  # Path to diffusion model checkpoint
-  checkpointing_level: 0  # Level of gradient checkpointing (0 for no checkpointing)
-
+  # Path to checkpoint file for the diffusion model
+  checkpoint_path: <path_to_checkpoint>
+  
 # Dataset configuration
 dataset:
-  name: "CFB"  # Dataset name
-  directory: "../data/raw_dataset"  # Training data directory
-  nb_sources: 5  # Number of input channels for each input (ux, uz)
-  nb_timesteps: 1000  # Number of timesteps (height of the input image)
-  nb_receivers: 70  # Number of receivers (width of the input image)
-  subsurface_resolution: [70, 70]  # Resolution of subsurface image (shape of output image)
-  transform: "ZscoreNormalize"  # Data transform: "ZscoreNormalize" or "MinMaxNormalize"
+  # Data directory that should contain a subdirectory "samples/"" and
+  # a file stats.json
+  directory: <path_to_dataset>
+  # Variables in the velocity model.
+  x_vars: ["vp", "vs", "rho"]
+  # Variables in the seismic data.
+  y_vars: ["vx", "vz"]
+  # Spatial resolution [depth, width] of the velocity model.
+  # Note: if velocity models from the dataset are at a
+  # different resolution, interpolation is performed to match 'x_resolution'.
+  x_resolution: [80, 80]
+  # Spatial resolution [time steps, # receivers along width] of the seismic
+  # data. The second dimension should be equal to the width of the velocity
+  # model.
+  y_resolution: [1000, 80]
+  # Number of shots/sources in each sample
+  nb_shots: 5
+  # Number of workers for data loading
+  num_workers: 4
 
 # Generation configuration
 generation:
-  batch_size: 16  # Batch size for generation
-  num_workers: 2  # Number of workers for data loading
-  sample_indices: [0, 1, 2, 3, 4]  # Indices of samples to generate
-  num_ensembles: 10  # Number of ensemble members to generate
-  inference_mode: "all"  # Options: "regression", "diffusion", or "all" (combines both)
-  seed: 42  # Random seed for reproducibility
-  force_fp16: false  # Whether to force half precision
-
-# Diffusion sampler configuration
-sampler:
-  type: "stochastic"  # Options: "deterministic" or "stochastic"
-  num_steps: 20  # Number of steps for the diffusion sampler
-  sigma_min: 0.002  # Minimum noise level
-  sigma_max: 80.0  # Maximum noise level
-  solver: "euler"  # ODE solver to use ("euler" or "heun")
+  # Global random seed for reproducibility
+  global_seed: 0
+  # Number of input samples (seismic observations) to process
+  num_samples: 3
+  # Number of ensembles to generate per input. The total number of samples
+  # generated will be num_samples * num_ensembles.
+  num_ensembles: 4
+  # Number of seeds to process per batch. Defines the effective batch size per
+  # device.
+  seed_batch_size: 2
+  # Sampler configuration
+  sampler:
+    # Number of inverse diffusion steps for the sampler
+    num_steps: 20
+    # Minimum noise level for the sampler
+    sigma_min: 0.002
+    # Maximum noise level for the sampler
+    sigma_max: 80.0
+    # Whether to use physics-informed guidance for the sampler
+    physics_informed: true
+    # Physics-informed guidance configuration (only used if physics_informed is
+    # true)
+    physics_informed_guidance:
+      # Standard deviation of measurement noise
+      std: 0.01
+      # Gamma scaling parameter for the guidance
+      gamma: 0.01
+      # Strength of the guidance (multiplier for the guidance term)
+      scale: 0.1
+      # Noise level exponent for the guidance scaling
+      power: 2.0
+      # Order of the norm used to compute the error in the guidance term
+      norm_ord: 1
 
 # I/O configuration
 io:
-  output_dir: "./outputs"  # Directory to save generated outputs
-  plot_results: true  # Whether to plot the generated results
-  save_numpy: true  # Whether to save the raw numpy arrays
+  # Output directory
+  output_dir: "./outputs_generate"
 
 # Wandb configuration
 wandb:
-  mode: "offline"  # "online", "offline", or "disabled"
-  results_dir: "./wandb/"  # Directory to save wandb logs
-  entity: "modulus"  # Entity (username or team name) for Weights & Biases
-  wandb_id: null  # Set to a valid wandb ID to connect to an existing run (REQUIRED) 
+  # "online", "offline", or "disabled"
+  mode: "offline"
+  # Directory to save wandb logs
+  results_dir: "./wandb/"
+  # Entity (username or team name) for Weights & Biases
+  entity: "modulus"
+  # Wandb ID to resume from an existing run. Specify the run of the training
+  # run to resume from. If null, a new run will be created.
+  wandb_id: null
+ 
