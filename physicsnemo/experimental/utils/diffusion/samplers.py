@@ -15,28 +15,27 @@
 # limitations under the License.
 
 
-from typing import Callable, Dict, Any, TypeAlias, Tuple, List, Protocol
+from typing import Any, Dict, List, Tuple, TypeAlias
+from collections.abc import Callable, Sequence
 
 import torch
 import nvtx
-from .guidance import ModelBasedGuidance, DataConsistencyGuidance
+
+from physicsnemo.utils.diffusion import StackedRandomGenerator
+from physicsnemo.experimental.utils.diffusion import (
+    ModelBasedGuidance, DataConsistencyGuidance,
+)
 
 # Some type annotations
 _Guidance: TypeAlias = (
     ModelBasedGuidance | DataConsistencyGuidance | Callable[..., torch.Tensor]
 )
-_SamplerFn: TypeAlias = Callable[[torch.Tensor, Dict[str, torch.Tensor]], torch.Tensor]
-
-
-class _DiffusionModel(Protocol):
-    def __call__(
-        self,
-        x: torch.Tensor,
-        t: torch.Tensor,
-        cond: Dict[str, torch.Tensor],
-        *model_args: Any,
-        **model_kwargs: Any,
-    ) -> torch.Tensor: ...
+_SamplerFn: TypeAlias = Callable[
+    [torch.Tensor, Dict[str, torch.Tensor], Any, Any], torch.Tensor
+]
+_DiffusionModel = Callable[
+    [torch.Tensor, torch.Tensor, Dict[str, torch.Tensor], Any, Any], torch.Tensor
+]
 
 
 def generate(
@@ -46,18 +45,20 @@ def generate(
     rank_batches: List[List[int]] | List[torch.Tensor],
     cond: Dict[str, torch.Tensor],
     device: torch.device,
+    sampler_kwargs: Dict[str, Any] = {},
 ) -> torch.Tensor:
     r"""
-    Utility function to generate samples from the diffusion model. It starts by
+    Function to generate samples from a diffusion model. It starts by
     initializing a batch of noisy latent states :math:`\mathbf{x}_T` and then generates
-    a batch of samples :math:`\mathbf{x}_0` by applying the ``sampler_fn`` function.
+    a batch of clean samples :math:`\mathbf{x}_0` by applying the ``sampler_fn`` function.
     It supports in addition generation minibatch by minibatch by splitting the
     seeds in ``rank_batches``.
 
     The ``sampler_fn`` function is expected to have the following signature:
-    ``sampler_fn(x, cond)``, where ``x`` is the latent state and
+    ``sampler_fn(x, cond, **sampler_kwargs)``, where ``x`` is the latent state and
     ``cond`` is the conditioning variables, as specified below. It should return
-    a single tensor corresponding to a batch of generated samples.
+    a single tensor corresponding to a batch of generated samples. Typically,
+    the ``sampler_fn`` function is an instance of ``EDMStochasticSampler``.
 
     Parameters
     ----------
@@ -78,10 +79,12 @@ def generate(
     cond : Dict[str, torch.Tensor]
         Dictionary of conditioning variables. Keys are strings identifying the
         conditioning variables names, and values are tensors used for
-        conditional generation. Can be set to ``{}`` for unconditioned
+        conditional generation. Can be set to ``{}`` for unconditional
         generation.
     device : torch.device
         Device to perform computations.
+    sampler_kwargs : Dict[str, Any], optional, default={}
+        Additional keyword arguments to pass to the ``sampler_fn`` function.
 
     Returns
     -------
@@ -105,42 +108,28 @@ def generate(
                 device=device,
             ).to(memory_format=torch.channels_last)
 
-            with torch.inference_mode():
-                x_0: torch.Tensor = sampler_fn(x_T, cond)
+            # Call the sampler function
+            x_0: torch.Tensor = sampler_fn(x_T, cond, **sampler_kwargs)
+
             x_generated.append(x_0)
     return torch.cat(x_generated)
 
 
-def stochastic_sampler(
-    model: _DiffusionModel,
-    x: torch.Tensor,
-    cond: Dict[str, torch.Tensor],
-    model_args: Tuple = (),
-    model_kwargs: Dict[str, Any] = {},
-    num_steps: int = 18,
-    sigma_min: float = 0.002,
-    sigma_max: float = 800,
-    rho: float = 7,
-    S_churn: float = 0,
-    S_min: float = 0,
-    S_max: float = float("inf"),
-    S_noise: float = 1,
-    guidance: _Guidance | Sequence[_Guidance] | None = None,
-    guidance_args: Tuple | Sequence[Tuple] = (),
-    guidance_kwargs: Dict[str, Any] | Sequence[Dict[str, Any]] = {},
-) -> torch.Tensor:
+class EDMStochasticSampler:
     r"""
-    EDM sampler with minor changes to enable posterior sampling.
+    Stochastic sampler proposed in the `EDM paper
+    <https://arxiv.org/abs/2206.00364>`_, with optional guidance.
     The sampler starts from a batch of noisy latent states :math:`\mathbf{x}_T`
-    and generates a batch of samples :math:`\mathbf{x}_0` by iteratively denoising
+    and generates a batch of clean samples :math:`\mathbf{x}_0` by iteratively denoising
     the noisy latent states.
 
     The diffusion model is expected to be called with:
-    ``x_0_hat = model(x, t, cond, *model_args, **model_kwargs)``, where ``x`` is the
-    latent state, ``t`` is the diffusion time, ``cond`` is the conditioning
+    ``x_0_hat = model(x, sigma, cond, *model_args, **model_kwargs)``, where ``x`` is the
+    latent state, ``sigma`` is the noise level, ``cond`` is the conditioning
     variables, and ``*model_args`` and ``**model_kwargs`` are additional
     arguments to pass to the model (see below for details on the expected
-    arguments). It is expected to return a tensor :math:`\hat{\mathbf{x}}_0` of
+    arguments). The model should be an :math:`\mathbf{x}_0`-prediction model.
+    It should return a tensor :math:`\hat{\mathbf{x}}_0` of
     same shape as ``x``, that is an estimate of the clean latent state
     :math:`\mathbf{x}_0`.
 
@@ -150,32 +139,19 @@ def stochastic_sampler(
     to the score function as a correction or drift term.
     Each guidance function must be an instance of the available guidance types (e.g.
     ``ModelBasedGuidance`` for posterior sampling based on consistency with a nonlinear
-    model, ``DataConsistencyGuidance`` for guidance based on observed data, etc.)
+    model, ``DataConsistencyGuidance`` for guidance based data measured at
+    specific locations, etc.)
     For example, in the case of posterior sampling, the guidance function
     should be an instance of ``ModelBasedGuidance`` that returns the
     likelihood score :math:`\nabla_{\mathbf{x}} \log p(\mathbf{y}|\mathbf{x}_t)`,
-    :math:`\nabla_{\mathbf{x}} \log p(\mathbf{y}|\mathbf{x}_t)`, which is a
-    tensor of same shape as ``x``, and where :math:`\mathbf{y}` is some
+    which is a tensor of same shape as ``x``, and where :math:`\mathbf{y}` is some
     conditioniong variable.
 
     Parameters
     ----------
     model: _DiffusionModel
         The denoising diffusion model to use in the sampling process. Should be
-        an *:math:`\mathbf{x}_0`-prediction* model.
-    x: torch.Tensor
-        The noisy latent state used as the initial input for the sampler.
-        Typically pure noise :math:`\mathbf{x}_T`.
-        Should have shape :math:`(B, *)`, where :math:`B` is the batch size and
-        :math:`*` is any number of dimensions.
-    cond: Dict[str, torch.Tensor]
-        Dictionary of conditioning variables. Keys are strings identifying the
-        conditioning variables names, and values are tensors used for
-        conditioning.
-    model_args: Tuple, optional, default=()
-        Additional positional arguments to pass to the model.
-    model_kwargs: Dict[str, Any], optional, default={}
-        Additional keyword arguments to pass to the model.
+        an :math:`\mathbf{x}_0`-prediction model.
     num_steps: int, optional, default=18
         Number of time steps for the sampler.
     sigma_min: float, optional, default=0.002
@@ -194,6 +170,22 @@ def stochastic_sampler(
         Maximum time step for applying churn.
     S_noise: float, optional, default=1
         Noise scaling factor applied during the churn step.
+
+    Forward
+    -------
+    x: torch.Tensor
+        The noisy latent state used as the initial input for the sampler.
+        Typically pure noise :math:`\mathbf{x}_T`.
+        Should have shape :math:`(B, *)`, where :math:`B` is the batch size and
+        :math:`*` is any number of dimensions.
+    cond: Dict[str, torch.Tensor]
+        Dictionary of conditioning variables. Keys are strings identifying the
+        conditioning variables names, and values are tensors used for
+        conditioning.
+    model_args: Tuple, optional, default=()
+        Additional positional arguments to pass to the model.
+    model_kwargs: Dict[str, Any], optional, default={}
+        Additional keyword arguments to pass to the model.
     guidance: _Guidance | Sequence[_Guidance] | None, optional, default=None
         Guidance function that is added as a correction to the score function (computed by
         ``model``). Typically used for posterior sampling, classifier guidance,
@@ -206,127 +198,259 @@ def stochastic_sampler(
         Additional keyword arguments to pass to the guidance function.
         If multiple guidance functions are passed, this should be a list or tuple
         of the same length as the number of guidance functions.
+    guidance_second_order: bool | Sequence[bool], optional, default=False
+        Whether to compute the guidance function in the second order
+        correction. If ``True``, the guidance function is computed twice, while
+        if ``False``, it is computed only once, which can typically save some
+        computation for guidance functions that are expensive to compute.
+        If multiple guidance functions are passed, this should be
+        a list or tuple of the same length as the number of guidance functions.
 
-    Returns
+    Outputs
     -------
-    Tensor
-        The final denoised image produced by the sampler. Same shape
-        :math:`(B, *)` as ``x``. It is typically a denoised latent state
-        :math:`\mathbf{x}_0`.
+    torch.Tensor
+        The final clean latent state :math:`\mathbf{x}_0` produced by the
+        sampler. Same shape :math:`(B, *)` as ``x``.
     """
 
-    # Set container structures for guidance functions
-    if guidance is None:
-        guidances = []
-    elif not isinstance(guidance, (list, tuple)):
-        guidances = [guidance]
-        guidances_args = [guidance_args]
-        guidances_kwargs = [guidance_kwargs]
-    else:
-        if not (len(guidance) == len(guidance_args) == len(guidance_kwargs)):
+    def __init__(
+        self,
+        model: _DiffusionModel,
+        num_steps: int = 18,
+        sigma_min: float = 0.002,
+        sigma_max: float = 800,
+        rho: float = 7,
+        S_churn: float = 0,
+        S_min: float = 0,
+        S_max: float = float("inf"),
+        S_noise: float = 1,
+    ):
+        self.model = model
+        self.num_steps = num_steps
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+        self.rho = rho
+        self.S_churn = S_churn
+        self.S_min = S_min
+        self.S_max = S_max
+        self.S_noise = S_noise
+
+    def __call__(
+        self,
+        x: torch.Tensor,
+        cond: Dict[str, torch.Tensor],
+        model_args: Tuple = (),
+        model_kwargs: Dict[str, Any] = {},
+        guidance: _Guidance | Sequence[_Guidance] | None = None,
+        guidance_args: Tuple | Sequence[Tuple] = (),
+        guidance_kwargs: Dict[str, Any] | Sequence[Dict[str, Any]] = {},
+        guidance_second_order: bool | Sequence[bool] = False,
+    ) -> torch.Tensor:
+        # Set container structures for guidance functions
+        if guidance is None:
+            guidances = []
+            guidances_args = []
+            guidances_kwargs = []
+            guidances_second_order = []
+        elif not isinstance(guidance, (list, tuple)):
+            guidances = [guidance]
+            guidances_args = [guidance_args]
+            guidances_kwargs = [guidance_kwargs]
+            guidances_second_order = [guidance_second_order]
+        elif (
+            isinstance(guidance, (list, tuple))
+            and isinstance(guidance_args, (list, tuple))
+            and isinstance(guidance_kwargs, (list, tuple))
+            and isinstance(guidance_second_order, (list, tuple))
+        ):
+            guidances = guidance
+            guidances_args = guidance_args
+            guidances_kwargs = guidance_kwargs
+            guidances_second_order = guidance_second_order
+        else:
             raise ValueError(
-                f"Number of guidance functions, arguments, and keyword "
-                f"arguments must match, but got {len(guidance)}, "
-                f"{len(guidance_args)}, {len(guidance_kwargs)}"
+                "When multiple guidance functions are passed, 'guidance', "
+                "'guidance_args', 'guidance_kwargs', and 'guidance_second_order' "
+                "must be lists or tuples of the same length"
             )
-        guidances = guidance
-        guidances_args = guidance_args
-        guidances_kwargs = guidance_kwargs
+        if not (
+            len(guidances)
+            == len(guidances_args)
+            == len(guidances_kwargs)
+            == len(guidances_second_order)
+        ):
+            raise ValueError(
+                f"Number of guidance functions, arguments, keyword "
+                f"arguments, and second order correction must match, "
+                f"but got {len(guidances)}, {len(guidances_args)}, "
+                f"{len(guidances_kwargs)}, and {len(guidances_second_order)}"
+            )
 
-    B = x.shape[0]
+        # Determine if we need to differentiate through the model
+        req_grad: bool = False
+        req_grad_sec_ord: bool = False
+        for gd, gd_sec_ord in zip(guidances, guidances_second_order):
+            if isinstance(gd, (ModelBasedGuidance, DataConsistencyGuidance)):
+                req_grad: bool = True
+                if gd_sec_ord:
+                    req_grad_sec_ord: bool = True
 
-    # Adjust noise levels based on what's supported by the network.
-    # Proposed EDM sampler (Algorithm 2) with minor changes to enable
-    # posterior sampling
-    if hasattr(model, "sigma_min"):
-        sigma_min = max(sigma_min, model.sigma_min)
-    if hasattr(model, "sigma_max"):
-        sigma_max = min(sigma_max, model.sigma_max)
-    if hasattr(model, "round_sigma") and callable(model.round_sigma):
-        round_sigma = model.round_sigma
-    else:
-        round_sigma = torch.as_tensor
+        B = x.shape[0]
 
-    # Time step discretization.
-    step_indices = torch.arange(num_steps, device=x.device)
-    t_steps = (
-        sigma_max ** (1 / rho)
-        + step_indices
-        / (num_steps - 1)
-        * (sigma_min ** (1 / rho) - sigma_max ** (1 / rho))
-    ) ** rho
-    t_steps = torch.cat(
-        [round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
-    )  # t_N = 0
+        # Adjust noise levels based on what's supported by the network.
+        # Proposed EDM sampler (Algorithm 2) with minor changes to enable
+        # posterior sampling
+        if hasattr(self.model, "sigma_min"):
+            sigma_min = max(self.sigma_min, self.model.sigma_min)
+        else:
+            sigma_min = self.sigma_min
+        if hasattr(self.model, "sigma_max"):
+            sigma_max = min(self.sigma_max, self.model.sigma_max)
+        else:
+            sigma_max = self.sigma_max
+        if hasattr(self.model, "round_sigma") and callable(self.model.round_sigma):
+            round_sigma = self.model.round_sigma
+        else:
+            round_sigma = torch.as_tensor
 
-    # Main sampling loop.
-    x_next = x * t_steps[0]
-    for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):
-        # TODO: double check why there is a detach and requires_grad_
-        x_cur = x_next.detach().requires_grad_()
+        # Time step discretization.
+        step_indices = torch.arange(self.num_steps, device=x.device)
+        t_steps = (
+            sigma_max ** (1 / self.rho)
+            + step_indices
+            / (self.num_steps - 1)
+            * (sigma_min ** (1 / self.rho) - sigma_max ** (1 / self.rho))
+        ) ** self.rho
+        t_steps = torch.cat(
+            [round_sigma(t_steps), torch.zeros_like(t_steps[:1])]
+        )  # t_N = 0
 
-        # Increase noise temporarily.
-        gamma = S_churn / num_steps if S_min <= t_cur <= S_max else 0
-        t_hat = round_sigma(t_cur + gamma * t_cur)
-        x_hat: torch.Tensor = (
-            x_cur + (t_hat**2 - t_cur**2).sqrt() * S_noise * torch.randn_like(x_cur)
-        ).to(x.device)
+        # Main sampling loop.
+        x_next = x * t_steps[0]
+        for i, (t_cur, t_next) in enumerate(zip(t_steps[:-1], t_steps[1:])):
+            # NOTE: break the computational graph here to save memory when
+            # computing the guidance terms --> Cannot backpropagate through the
+            # sampler, even when guidance is disabled
+            x_cur = x_next.detach()
 
-        # Move conditioning to the device
-        for key, value in cond.items():
-            cond[key] = value.to(x.device)
+            # Increase noise temporarily.
+            gamma = (
+                self.S_churn / self.num_steps
+                if self.S_min <= t_cur <= self.S_max
+                else 0
+            )
+            t_hat = round_sigma(t_cur + gamma * t_cur)
+            x_hat: torch.Tensor = (
+                x_cur
+                + (t_hat**2 - t_cur**2).sqrt() * self.S_noise * torch.randn_like(x_cur)
+            ).to(x.device)
 
-        x_0_hat = model(
-            x_hat,
-            t_hat.expand(
-                B,
-            ),
-            cond,
-            *model_args,
-            **model_kwargs,
-        )
+            # Move conditioning to the device
+            for key, value in cond.items():
+                cond[key] = value.to(x.device)
 
-        # Guidance (e.g. posterior sampling, etc...)
-        guidance_sum = 0.0
-        if guidances:
-            for guidance, guidance_args, guidance_kwargs in zip(
-                guidances, guidances_args, guidances_kwargs
-            ):
-                if isinstance(guidance, ModelBasedGuidance):
-                    # TODO: why the guidance uses x_cur for the latent state
-                    # instead of x_hat? (but it does use t_hat and not t_cur)
-                    guidance_sum += guidance(
-                        x_cur,
-                        t_hat.expand(
+            # Activate gradient computation if needed for guidance
+            with torch.set_grad_enabled(req_grad):
+                if req_grad:
+                    x_hat_in = x_hat.clone().detach().requires_grad_(True)
+                else:
+                    x_hat_in = x_hat
+
+                x_0_hat = self.model(
+                    x_hat_in,
+                    t_hat.expand(
+                        B,
+                    ),
+                    cond,
+                    *model_args,
+                    **model_kwargs,
+                )
+
+                # Guidance terms (e.g. posterior sampling, etc...)
+                # Guidance terms required for 2nd order correction are computed
+                # twice, while other guidance terms are only computed once to
+                # save cost
+                gd_sum = 0
+                gd_sum_sec_ord = 0
+                if guidances:
+                    for gd, gd_args, gd_kwargs, gd_sec_ord in zip(
+                        guidances,
+                        guidances_args,
+                        guidances_kwargs,
+                        guidances_second_order,
+                    ):
+                        if isinstance(
+                            guidance, (ModelBasedGuidance, DataConsistencyGuidance)
+                        ):
+                            gd_val = gd(
+                                x_hat_in,
+                                x_0_hat,
+                                t_hat.expand(
+                                    B,
+                                ),
+                                *gd_args,
+                                **gd_kwargs,
+                            )
+                        else:
+                            raise ValueError(f"Unsupported guidance type: {type(gd)}")
+                        if gd_sec_ord:
+                            gd_sum += gd_val
+                        else:
+                            # Count twice since we only compute once
+                            gd_sum_sec_ord += 2 * gd_val
+
+            d_cur = (x_hat - x_0_hat) / t_hat - gd_sum
+            x_next = x_hat + (t_next - t_hat) * d_cur
+
+            # 2nd order correction
+            if i < self.num_steps - 1:
+                x_next = x_next.to(x.device)
+
+                # Activate gradient computation if needed for guidance
+                with torch.set_grad_enabled(req_grad_sec_ord):
+                    if req_grad_sec_ord:
+                        x_next_in = x_next.clone().detach().requires_grad_(True)
+                    else:
+                        x_next_in = x_next
+
+                    x_0_hat_next = self.model(
+                        x_next_in,
+                        t_next.expand(
                             B,
                         ),
-                        x_0_hat,
-                        *guidance_args,
-                        **guidance_kwargs,
+                        cond,
+                        *model_args,
+                        **model_kwargs,
                     )
-                elif isinstance(guidance, DataConsistencyGuidance):
-                    pass
-                else:
-                    raise ValueError(f"Unsupported guidance type: {type(guidance)}")
 
-        # TODO: why likelihood_score is not used to compute d_cur?
-        d_cur = (x_hat - x_0_hat) / t_hat
-        x_next = x_hat + (t_next - t_hat) * d_cur
+                    # Only recompute guidance terms specifically required in
+                    # the 2nd correction
+                    if guidances:
+                        for gd, gd_args, gd_kwargs, gd_sec_ord in zip(
+                            guidances,
+                            guidances_args,
+                            guidances_kwargs,
+                            guidances_second_order,
+                        ):
+                            if gd_sec_ord:
+                                if isinstance(
+                                    guidance,
+                                    (ModelBasedGuidance, DataConsistencyGuidance),
+                                ):
+                                    gd_sum_sec_ord += gd(
+                                        x_next_in,
+                                        x_0_hat_next,
+                                        t_next.expand(
+                                            B,
+                                        ),
+                                        *gd_args,
+                                        **gd_kwargs,
+                                    )
+                                else:
+                                    raise ValueError(
+                                        f"Unsupported guidance type: {type(gd)}"
+                                    )
 
-        # 2nd order correction
-        if i < num_steps - 1:
-            x_next = x_next.to(x.device)
-            x_0_hat_next = model(
-                x_next,
-                t_next.expand(
-                    B,
-                ),
-                cond,
-                *model_args,
-                **model_kwargs,
-            )
-            d_prime = (x_next - x_0_hat_next) / t_next
-            x_next = x_hat + (t_next - t_hat) * (
-                0.5 * d_cur + 0.5 * d_prime - guidance_sum
-            )
-    return x_next
+                d_prime = (x_next - x_0_hat_next) / t_next - gd_sum_sec_ord
+                x_next = x_hat + (t_next - t_hat) * (0.5 * d_cur + 0.5 * d_prime)
+        return x_next
