@@ -148,11 +148,11 @@ class DataLoaderUfuncTransform(ABC):
             else:
                 if not isinstance(self._ufuncs, (list, tuple)):
                     raise TypeError(
-                        "List/tuple batch requires callable or list/tuple " "ufuncs."
+                        "List/tuple batch requires callable or list/tuple ufuncs."
                     )
                 if len(self._ufuncs) != len(batch):
                     raise ValueError(
-                        "Length mismatch between ufuncs and list/tuple " "batch."
+                        "Length mismatch between ufuncs and list/tuple batch."
                     )
                 transformed = [
                     (fn(v) if callable(fn) else v) for v, fn in zip(batch, self._ufuncs)
@@ -256,7 +256,6 @@ class ToDevice(DataLoaderUfuncTransform):
         *,
         non_blocking: bool = False,
     ) -> None:
-
         self._validate_args(device, args_names=("device",))
 
         if isinstance(device, (torch.device, str)):
@@ -319,7 +318,6 @@ class ZscoreNormalize(DataLoaderUfuncTransform):
         *,
         eps: float = 1e-8,
     ) -> None:
-
         self._validate_args(mean, std, args_names=("mean", "std"))
 
         # Build ufuncs
@@ -388,7 +386,6 @@ class MinMaxNormalize(DataLoaderUfuncTransform):
         *,
         eps: float = 1e-8,
     ) -> None:
-
         self._validate_args(min_val, max_val, args_names=("min_val", "max_val"))
 
         if isinstance(min_val, (int, float)):
@@ -440,13 +437,12 @@ class Interpolate(DataLoaderUfuncTransform):
     def __init__(
         self,
         iterator: Iterator[Any],
-        size: Dict[str, Optional[Tuple[int, ...]]] | Sequence[Optional[Tuple[int, ...]]],
+        size: Dict[str, Optional[Tuple[int, ...]]]
+        | Sequence[Optional[Tuple[int, ...]]],
         dim: Dict[str, Optional[Tuple[int, ...]]] | Sequence[Optional[Tuple[int, ...]]],
         *,
-        mode: Dict[str, Optional[str]] | Sequence[Optional[str]] =
-        "bilinear",
+        mode: Dict[str, Optional[str]] | Sequence[Optional[str]] = "bilinear",
     ) -> None:
-
         # Validate container alignment (all three share structure)
         self._validate_args(dim, size, args_names=("dim", "size"))
 
@@ -502,7 +498,7 @@ class Interpolate(DataLoaderUfuncTransform):
                 sizes0 = size[0]
                 mode0 = mode
                 if dims0 is None or sizes0 is None or mode0 is None:
-                    ufuncs = (lambda t: t)
+                    ufuncs = lambda t: t
                 else:
                     ufuncs = _make_interp(dims0, sizes0, mode0)
             else:

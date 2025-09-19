@@ -35,7 +35,6 @@ _VARIABLES: set[str] = set()
 
 
 def main() -> None:
-
     # Parse command line arguments
     parser: argparse.ArgumentParser = argparse.ArgumentParser(
         "Compute dataset statistics (mean/std/min/max)"
@@ -122,7 +121,7 @@ def main() -> None:
                 _VARIABLES.add(var_name)
             nb_points: int = math.prod(v.shape[-2:])
             train_stats[f"sum_{var_name}"] += v.sum() / nb_points
-            train_stats[f"sum_{var_name}2"] += (v ** 2).sum() / nb_points
+            train_stats[f"sum_{var_name}2"] += (v**2).sum() / nb_points
             train_stats[f"min_{var_name}"] = torch.minimum(
                 train_stats[f"min_{var_name}"],
                 torch.amin(v),
@@ -147,7 +146,7 @@ def main() -> None:
                 _init_stats(var_name, test_stats)
             nb_points: int = math.prod(v.shape[-2:])
             test_stats[f"sum_{var_name}"] += v.sum() / nb_points
-            test_stats[f"sum_{var_name}2"] += (v ** 2).sum() / nb_points
+            test_stats[f"sum_{var_name}2"] += (v**2).sum() / nb_points
             test_stats[f"min_{var_name}"] = torch.minimum(
                 test_stats[f"min_{var_name}"],
                 torch.amin(v),
@@ -163,7 +162,9 @@ def main() -> None:
     # Reduce across ranks (SUM for sums, MIN/MAX for extrema)
     logger0.info("Reducing across ranks...")
     if dist.world_size > 1:
-        ns: torch.Tensor = torch.tensor([ns_train_local, ns_test_local], device=dist.device)
+        ns: torch.Tensor = torch.tensor(
+            [ns_train_local, ns_test_local], device=dist.device
+        )
         torch.distributed.all_reduce(ns, op=torch.distributed.ReduceOp.SUM)
         ns_train: int = ns[0].item()
         ns_test: int = ns[1].item()
@@ -176,20 +177,20 @@ def main() -> None:
         # Define buffers for reduction
         vars_sorted = sorted(_VARIABLES)
         buffer_sum = torch.cat(
-            [train_stats[f"sum_{v}"].unsqueeze(0) for v in vars_sorted] +
-            [train_stats[f"sum_{v}2"].unsqueeze(0) for v in vars_sorted] +
-            [test_stats[f"sum_{v}"].unsqueeze(0) for v in vars_sorted] +
-            [test_stats[f"sum_{v}2"].unsqueeze(0) for v in vars_sorted],
+            [train_stats[f"sum_{v}"].unsqueeze(0) for v in vars_sorted]
+            + [train_stats[f"sum_{v}2"].unsqueeze(0) for v in vars_sorted]
+            + [test_stats[f"sum_{v}"].unsqueeze(0) for v in vars_sorted]
+            + [test_stats[f"sum_{v}2"].unsqueeze(0) for v in vars_sorted],
             dim=0,
         )
         buffer_min = torch.cat(
-            [train_stats[f"min_{v}"].unsqueeze(0) for v in vars_sorted] +
-            [test_stats[f"min_{v}"].unsqueeze(0) for v in vars_sorted],
+            [train_stats[f"min_{v}"].unsqueeze(0) for v in vars_sorted]
+            + [test_stats[f"min_{v}"].unsqueeze(0) for v in vars_sorted],
             dim=0,
         )
         buffer_max = torch.cat(
-            [train_stats[f"max_{v}"].unsqueeze(0) for v in vars_sorted] +
-            [test_stats[f"max_{v}"].unsqueeze(0) for v in vars_sorted],
+            [train_stats[f"max_{v}"].unsqueeze(0) for v in vars_sorted]
+            + [test_stats[f"max_{v}"].unsqueeze(0) for v in vars_sorted],
             dim=0,
         )
 
@@ -220,12 +221,20 @@ def main() -> None:
         final_stats: Dict[str, Dict] = {}
         for v in _VARIABLES:
             train_mean: float = train_stats[f"sum_{v}"].item() / ns_train
-            train_std: float = math.sqrt(train_stats[f"sum_{v}2"].item() / ns_train - train_mean ** 2)
+            train_std: float = math.sqrt(
+                train_stats[f"sum_{v}2"].item() / ns_train - train_mean**2
+            )
             test_mean: float = test_stats[f"sum_{v}"].item() / ns_test
-            test_std: float = math.sqrt(test_stats[f"sum_{v}2"].item() / ns_test - test_mean ** 2)
-            all_mean: float = (train_stats[f"sum_{v}"].item() + test_stats[f"sum_{v}"].item()) / all_samples
+            test_std: float = math.sqrt(
+                test_stats[f"sum_{v}2"].item() / ns_test - test_mean**2
+            )
+            all_mean: float = (
+                train_stats[f"sum_{v}"].item() + test_stats[f"sum_{v}"].item()
+            ) / all_samples
             all_std: float = math.sqrt(
-                (train_stats[f"sum_{v}2"].item() + test_stats[f"sum_{v}2"].item()) / all_samples - all_mean ** 2
+                (train_stats[f"sum_{v}2"].item() + test_stats[f"sum_{v}2"].item())
+                / all_samples
+                - all_mean**2
             )
 
             final_stats[v] = {
@@ -242,8 +251,12 @@ def main() -> None:
                     "std": test_std,
                 },
                 "all": {
-                    "min": min(train_stats[f"min_{v}"].item(), test_stats[f"min_{v}"].item()),
-                    "max": max(train_stats[f"max_{v}"].item(), test_stats[f"max_{v}"].item()),
+                    "min": min(
+                        train_stats[f"min_{v}"].item(), test_stats[f"min_{v}"].item()
+                    ),
+                    "max": max(
+                        train_stats[f"max_{v}"].item(), test_stats[f"max_{v}"].item()
+                    ),
                     "mean": all_mean,
                     "std": all_std,
                 },

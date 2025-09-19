@@ -257,7 +257,9 @@ def process_file(
         receiver_depth: int = 1
         n_receivers_per_shot: int = 69
 
-        source_locations: torch.Tensor = torch.zeros(n_shots, 1, 2, dtype=torch.long, device=device)
+        source_locations: torch.Tensor = torch.zeros(
+            n_shots, 1, 2, dtype=torch.long, device=device
+        )
         source_locations[..., 0] = source_depth
         source_locations[:, 0, 1] = torch.arange(n_shots) * 17
 
@@ -358,15 +360,12 @@ def main():
 
     dataset_path: Path = Path(args.in_dir) / "samples"
     output_path: Path = Path(args.out_dir) / "samples"
-    file_list: list[str] = (
-        sorted(
-            glob.glob(os.path.join(dataset_path, "train_sample_*.npz")),
-            key=lambda x: int(Path(x).stem.split("_")[-1]),
-        )
-        + sorted(
-            glob.glob(os.path.join(dataset_path, "test_sample_*.npz")),
-            key=lambda x: int(Path(x).stem.split("_")[-1]),
-        )
+    file_list: list[str] = sorted(
+        glob.glob(os.path.join(dataset_path, "train_sample_*.npz")),
+        key=lambda x: int(Path(x).stem.split("_")[-1]),
+    ) + sorted(
+        glob.glob(os.path.join(dataset_path, "test_sample_*.npz")),
+        key=lambda x: int(Path(x).stem.split("_")[-1]),
     )
 
     if not file_list:
@@ -382,7 +381,9 @@ def main():
 
     if num_gpus == 0:
         logging.warning("No GPUs found. Running on CPU. This will be very slow.")
-        args: list[tuple[str, str, str]] = [(filepath, output_path, "cpu") for filepath in file_list]
+        args: list[tuple[str, str, str]] = [
+            (filepath, output_path, "cpu") for filepath in file_list
+        ]
 
         for i, arg in enumerate(args):
             results.append(process_file(*arg))
@@ -390,7 +391,10 @@ def main():
                 logging.info(f"Processed {i + 1} / {total_files} files")
     else:
         logging.info(f"Found {num_gpus} GPUs. Starting parallel processing.")
-        args: list[tuple[str, str, int]] = [(filepath, output_path, i % num_gpus) for i, filepath in enumerate(file_list)]
+        args: list[tuple[str, str, int]] = [
+            (filepath, output_path, i % num_gpus)
+            for i, filepath in enumerate(file_list)
+        ]
 
         with mp.get_context("spawn").Pool(processes=num_gpus) as pool:
             iterator = pool.imap_unordered(process_file_wrapper, args)

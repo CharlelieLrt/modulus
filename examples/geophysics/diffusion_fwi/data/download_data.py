@@ -124,7 +124,9 @@ def download_file_from_url(url: str, local_filename: str, resume: bool = True) -
     )
 
     if resume and os.path.exists(local_filename):
-        logging.info(f"{os.path.basename(local_filename)} already exists, skipping download.")
+        logging.info(
+            f"{os.path.basename(local_filename)} already exists, skipping download."
+        )
         progress.close()
     else:
         with requests.get(url, stream=True) as r:
@@ -313,7 +315,8 @@ def reorganize(
                 # Save the combined sample data
                 is_train: bool = rnd_global_sample_idx < train_samples_all
                 output_file: Path = (
-                    output_dir / f"{'train' if is_train else 'test'}_sample_{rnd_global_sample_idx}.npz"
+                    output_dir
+                    / f"{'train' if is_train else 'test'}_sample_{rnd_global_sample_idx}.npz"
                 )
                 np.savez(output_file, **sample_data)
 
@@ -331,7 +334,9 @@ def reorganize(
 
                 # Find and delete other files with the same index pattern
                 # (like pm_* and pr_*)
-                other_pattern_files: list[Path] = list(dataset_dir.glob(f"*_{file_num}.npy"))
+                other_pattern_files: list[Path] = list(
+                    dataset_dir.glob(f"*_{file_num}.npy")
+                )
                 for file_path in other_pattern_files:
                     if file_path not in processed_files:
                         try:
@@ -339,7 +344,9 @@ def reorganize(
                         except FileNotFoundError:
                             pass
                 logging.info("All original files have been deleted.")
-        logging.info(f"Reorganizing of {name} dataset to {output_dir} completed successfully!")
+        logging.info(
+            f"Reorganizing of {name} dataset to {output_dir} completed successfully!"
+        )
 
 
 def parse_args():
