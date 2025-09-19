@@ -51,6 +51,7 @@ class AttentionPool(nn.Module):
     torch.Tensor
         Output tensor of shape :math:`(B, L_{out}, C)`.
     """
+
     def __init__(self, num_channels: int, out_length: int):
         super().__init__()
         self.num_channels = num_channels
@@ -58,7 +59,8 @@ class AttentionPool(nn.Module):
 
         # Learned queries (one per output slot)
         self.query_tokens = nn.Parameter(
-            torch.randn(out_length, num_channels) / math.sqrt(num_channels))
+            torch.randn(out_length, num_channels) / math.sqrt(num_channels)
+        )
 
         self.kv_proj = nn.Linear(num_channels, 2 * num_channels)
         nn.init.xavier_uniform_(self.kv_proj.weight)
@@ -72,14 +74,16 @@ class AttentionPool(nn.Module):
         # Validate inputs
         if C != self.num_channels:
             raise ValueError(
-                f"x last dim must match num_channels: {C} != {self.num_channels}")
+                f"x last dim must match num_channels: {C} != {self.num_channels}"
+            )
 
         # Build batch of learned queries
         q = self.query_tokens.unsqueeze(0).expand(
-            B, self.out_length, self.num_channels)  # (B, L_out, C)
+            B, self.out_length, self.num_channels
+        )  # (B, L_out, C)
 
         kv = self.kv_proj(x)  # (B, L_in, 2C)
-        k, v = torch.chunk(kv, 2, dim=2)      # (B, L_in, C), (B, L_in, C)
+        k, v = torch.chunk(kv, 2, dim=2)  # (B, L_in, C), (B, L_in, C)
         y = F.scaled_dot_product_attention(
             q.unsqueeze(1),  # (B, 1, L_out, C)
             k.unsqueeze(1),  # (B, 1, L_in, C)
@@ -111,10 +115,13 @@ class GlobalFilterBlock1D(nn.Module):
     torch.Tensor
         Output tensor of shape :math:`(B, L, C)`.
     """
+
     def __init__(self, num_channels: int, length: int):
         super().__init__()
         self.complex_weight = nn.Parameter(
-            torch.randn(length // 2 + 1, num_channels, 2, dtype=torch.float32) / num_channels)
+            torch.randn(length // 2 + 1, num_channels, 2, dtype=torch.float32)
+            / num_channels
+        )
         self.length = length
         self.num_channels = num_channels
         self.layer_norm = nn.LayerNorm(num_channels)
@@ -132,10 +139,10 @@ class GlobalFilterBlock1D(nn.Module):
                 f"but got {x.shape}"
             )
 
-        y = torch.fft.rfft(x, dim=1, norm='ortho')  # (B, L, C)
+        y = torch.fft.rfft(x, dim=1, norm="ortho")  # (B, L, C)
         weight = torch.view_as_complex(self.complex_weight)  # (L, C)
         y = y * weight
-        y = torch.fft.irfft(y, n=self.length, dim=1, norm='ortho')  # (B, L, C)
+        y = torch.fft.irfft(y, n=self.length, dim=1, norm="ortho")  # (B, L, C)
 
         y = self.layer_norm(y)
         y = self.mlp(y)
@@ -183,6 +190,7 @@ class TimeSignalEncoder(nn.Module):
         :math:`L_{out}`. The embedded signals are then recombined into a
         single two-dimensional image.
     """
+
     def __init__(
         self,
         in_channels: int,
@@ -209,10 +217,12 @@ class TimeSignalEncoder(nn.Module):
         )
 
         # Encoder blocks
-        self.encoder = nn.ModuleList([
-            GlobalFilterBlock1D(hidden_channels, in_length)
-            for _ in range(self.num_encoder_blocks)
-        ])
+        self.encoder = nn.ModuleList(
+            [
+                GlobalFilterBlock1D(hidden_channels, in_length)
+                for _ in range(self.num_encoder_blocks)
+            ]
+        )
 
         # Output/decoder blocks
         self.attn_pool = AttentionPool(self.hidden_channels, self.out_length)
@@ -225,7 +235,6 @@ class TimeSignalEncoder(nn.Module):
         self,
         y: torch.Tensor,  # (B, C_in, T, W)
     ) -> torch.Tensor:
-
         B, C_in, T, W = y.shape
 
         # Validate inputs
@@ -238,9 +247,9 @@ class TimeSignalEncoder(nn.Module):
         y = rearrange(y, "b c t w -> (b w) t c")  # (B * W, T, C_in)
 
         # Add time steps information
-        time_steps = torch.linspace(
-            0, 1, T, device=y.device, dtype=y.dtype
-        )[None, :, None].expand(B * W, T, 1)  # (B * W, T, 1)
+        time_steps = torch.linspace(0, 1, T, device=y.device, dtype=y.dtype)[
+            None, :, None
+        ].expand(B * W, T, 1)  # (B * W, T, 1)
         y = torch.cat((y, time_steps), dim=2)  # (B * W, T, C_in + 1)
 
         # Apply lifting network to lift hidden dim
@@ -345,8 +354,8 @@ class DiffusionFWINet(Module):
     y: torch.Tensor
         Seismic observations :math:`\mathbf{Y}` of shape :math:`(B,
         C_{\mathbf{Y}}, T, W)`.
-    t: torch.Tensor
-        Diffusion time step, of shape :math:`(B,)`.
+    sigma: torch.Tensor
+        Diffusion noise level, of shape :math:`(B,)`.
 
     Outputs
     -------
@@ -386,8 +395,7 @@ class DiffusionFWINet(Module):
         # Seismic data encoder
         self.time_signal_encoder = TimeSignalEncoder(
             in_channels=(
-                y_channels
-                + self._grid_to_receivers_channels_ratio * N_grid_channels
+                y_channels + self._grid_to_receivers_channels_ratio * N_grid_channels
             ),
             out_channels=encoder_hidden_channels // 2,
             hidden_channels=encoder_hidden_channels,
@@ -403,16 +411,14 @@ class DiffusionFWINet(Module):
             _unet_resolutions.append(_unet_resolutions[-1] // 2)
         attn_resolutions = unet_kwargs.get(
             "attn_resolutions",
-            [r for r in _unet_resolutions if r <= self._attn_default_threshold]
+            [r for r in _unet_resolutions if r <= self._attn_default_threshold],
         )
 
         # Denoising UNet
         self.unet = SongUNetPosEmbd(
             img_resolution=self.x_resolution,
             in_channels=(
-                x_channels
-                + self.time_signal_encoder.out_channels
-                + N_grid_channels
+                x_channels + self.time_signal_encoder.out_channels + N_grid_channels
             ),
             out_channels=x_channels,
             label_dim=0,
@@ -435,9 +441,8 @@ class DiffusionFWINet(Module):
         self,
         x: torch.Tensor,
         y: torch.Tensor,
-        t: torch.Tensor,
+        sigma: torch.Tensor,
     ) -> torch.Tensor:
-
         B, C_x, H, W = x.shape
         _, C_y, T, _ = y.shape
 
@@ -452,10 +457,8 @@ class DiffusionFWINet(Module):
                 f"x shape mismatch: expected "
                 f"{(B, self.x_channels) + self.x_resolution}, but got {x.shape}"
             )
-        if t.shape != (B,):
-            raise ValueError(
-                f"t shape mismatch: expected {(B,)}, but got {t.shape}"
-            )
+        if sigma.shape != (B,):
+            raise ValueError(f"t shape mismatch: expected {(B,)}, but got {t.shape}")
 
         # Embed grid coordinates and concatenate to seismic data
         pos_embd = self.unet.pos_embd  # (N_grid, H, W)
@@ -465,7 +468,8 @@ class DiffusionFWINet(Module):
         grid_embed = self.grid_to_receivers(pos_emb)  # (W, Cg, N_grid)
         grid_embed = rearrange(grid_embed, "w g n -> (g n) w")  # (Cg * N_grid, W)
         grid_embed = grid_embed[None, :, None, :].expand(
-            B, -1, T, -1)  # (B, Cg * N_grid, T, W)
+            B, -1, T, -1
+        )  # (B, Cg * N_grid, T, W)
         y = torch.cat((y, grid_embed), dim=1)  # (B, C_y + Cg * N_grid, T, W)
 
         # Encode seismic data
@@ -475,10 +479,6 @@ class DiffusionFWINet(Module):
         x = torch.cat((x, y), dim=1)  # (B, C_x + C_hidden//2, H, W)
 
         # Denoise
-        x = self.unet(
-            x=x,
-            noise_labels=t,
-            class_labels=None
-        )  # (B, C_x, H, W)
+        x = self.unet(x=x, noise_labels=sigma, class_labels=None)  # (B, C_x, H, W)
 
         return x

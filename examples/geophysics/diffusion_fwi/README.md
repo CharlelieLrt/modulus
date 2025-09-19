@@ -342,10 +342,13 @@ $$
 $$
 
 where $\mathcal{R}$ is the solution operator associated to the wave equation
-(detailed in the [Problem Overview](#problem-overview) section), and $\Sigma$
-is a parameter related to the measurement noise. These parameters are defined
-following an [adapted version](https://arxiv.org/abs/2506.22780) of the method
-introduced in [Score-based data assimilation (SDA)](https://proceedings.neurips.cc/paper_files/paper/2023/hash/7f7fa581cc8a1970a4332920cdf87395-Abstract-Conference.html).
+(detailed in the [Problem Overview](#problem-overview) section),
+$\hat{\mathbf{x}}_0$ is an estimate of the clean velocity model from the
+diffusion model, and $\Sigma$ is a parameter related to the measurement noise.
+These parameters are defined following an [adapted
+version](https://arxiv.org/abs/2506.22780) of the method introduced in
+[Score-based data assimilation
+(SDA)](https://proceedings.neurips.cc/paper_files/paper/2023/hash/7f7fa581cc8a1970a4332920cdf87395-Abstract-Conference.html).
 
 >**Note:** The present approach is not true DPS, as the latter is usually based
 >on an unconditional prior score $\nabla_{\mathbf{x}_t} \log p(\mathbf{x}_t)$,
