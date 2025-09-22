@@ -154,6 +154,7 @@ def test_diffusion_fwi_net_non_regression(device, arch_type):
     Test that DiffusionFWINet can be instantiated and compare the output with a
     reference output generated with v1.2.0.
     """
+    run_id = f"{arch_type}_{'cpu' if device == 'cpu' else 'gpu'}"
     model = _instantiate_diffusion_fwi_net(arch_type=arch_type).to(device)
 
     x, y, sigma = generate_data(device)
@@ -161,7 +162,7 @@ def test_diffusion_fwi_net_non_regression(device, arch_type):
 
     assert common.validate_accuracy(
         out,
-        file_name=f"output_diffusion_fwi_net_{arch_type}-v1.2.0.pth",
+        file_name=f"output_diffusion_fwi_net_{run_id}-v1.2.0.pth",
     )
 
 
@@ -183,10 +184,11 @@ def test_diffusion_fwi_net_non_regression_from_checkpoint(device, arch_type):
     Tests simple loading and non-regression of a checkpoint generated with the
     DiffusionFWINet class.
     """
+    run_id = f"{arch_type}_{'cpu' if device == 'cpu' else 'gpu'}"
     file_name: str = str(
         Path(__file__).parents[1].resolve()
         / Path("data")
-        / Path(f"checkpoint_diffusion_fwi_net_{arch_type}-v1.2.0.mdlus")
+        / Path(f"checkpoint_diffusion_fwi_net_{run_id}-v1.2.0.mdlus")
     )
 
     model: physicsnemo.Module = physicsnemo.Module.from_checkpoint(
@@ -205,7 +207,7 @@ def test_diffusion_fwi_net_non_regression_from_checkpoint(device, arch_type):
 
     assert common.validate_accuracy(
         out,
-        file_name=f"output_diffusion_fwi_net_{arch_type}-v1.2.0.pth",
+        file_name=f"output_diffusion_fwi_net_{run_id}-v1.2.0.pth",
     )
 
 
@@ -215,15 +217,21 @@ def test_diffusion_fwi_net_non_regression_from_checkpoint(device, arch_type):
 
 # For checkpoint and data generation
 # @pytest.mark.parametrize(
+#     "device",
+#     ["cpu", "cuda:0"],
+#     ids=["cpu", "gpu"],
+# )
+# @pytest.mark.parametrize(
 #     "arch_type",
 #     ["fwi_small"],
 #     ids=["small"],
 # )
-# def test_diffusion_fwi_net_generate_data(arch_type):
+# def test_diffusion_fwi_net_generate_data(device, arch_type):
 #     """
 #     Function to generate data for the DiffusionFWINet tests.
 #     """
-#     model = _instantiate_diffusion_fwi_net(arch_type=arch_type).to("cpu")
+#     run_id = f"{arch_type}_{'cpu' if device == 'cpu' else 'gpu'}"
+#     model = _instantiate_diffusion_fwi_net(arch_type=arch_type).to(device)
 
 #     # Check that the model is instantiated correctly
 #     if arch_type == "fwi_small":
@@ -232,9 +240,9 @@ def test_diffusion_fwi_net_non_regression_from_checkpoint(device, arch_type):
 #         assert model.y_resolution == (50, 32)
 #         assert model.y_channels == 6
 
-#     x, y, sigma = generate_data("cpu")
+#     x, y, sigma = generate_data(device)
 #     out: torch.Tensor = model(x, y, sigma)
 
 #     # Save model checkpoint and reference output
-#     model.save(f"checkpoint_diffusion_fwi_net_{arch_type}-v1.2.0.mdlus")
-#     torch.save(out, f"output_diffusion_fwi_net_{arch_type}-v1.2.0.pth")
+#     model.save(f"checkpoint_diffusion_fwi_net_{run_id}-v1.2.0.mdlus")
+#     torch.save(out, f"output_diffusion_fwi_net_{run_id}-v1.2.0.pth")
