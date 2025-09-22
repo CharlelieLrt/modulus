@@ -25,12 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Migrated Stokes MGN example to PyTorch Geometric.
 - Migrated Lennard Jones example to PyTorch Geometric.
+- Migrated physicsnemo.utils.sdf.signed_distance_field to a static return,
+  torch-only interface.  It also now works on distributed meshes and input fields.
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- Ensure stream dependencies are handled correctly in physicsnemo.utils.neighbors
 
 ### Security
 
