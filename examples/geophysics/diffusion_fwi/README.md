@@ -89,7 +89,7 @@ difficulty of FWI and makes it particularly suitable to be solved with
 generative models. This example uses a diffusion model to solve the FWI inverse
 problem.
 
-## Getting Started
+## Prerequisites
 
 This example requires basic knowledge of [denoising diffusion
 models](../../generative/README.md); it is also recommended to be familiar with
@@ -99,7 +99,23 @@ other examples using diffusion models, such as
 
 Start by installing PhysicsNeMo (if not already installed) and copying this
 folder (`examples/geophysics/diffusion_fwi`) to a system with a GPU available.
-This example comprises a succession of three steps:
+
+Then, install the required dependencies by running below:
+
+```bash
+pip install -r requirements.txt
+```
+
+or, if you need fine-grained control over the dependencies, you can install them individually:
+
+```bash
+pip install hydra-core>=1.2.0 omegaconf>=2.3.0 wandb>=0.13.7 deepwave>=0.0.21
+```
+
+Note that the `deepwave` dependency is only necessary for generating the
+dataset and for physics-informed sampling.
+
+This example comprises a succession of three steps, detailed below:
 
 1. [Dataset preprocessing](#dataset-preprocessing)
 2. [Training](#training)

@@ -98,4 +98,4 @@ wandb:
   # Directory to save wandb logs
   results_dir: "./wandb/"
   # Entity (username or team name) for Weights & Biases
-  entity: "modulus"
+  entity: <wandb_entity_name>

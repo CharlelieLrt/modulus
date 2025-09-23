@@ -94,7 +94,7 @@ wandb:
   # Directory to save wandb logs
   results_dir: "./wandb/"
   # Entity (username or team name) for Weights & Biases
-  entity: "modulus"
+  entity: <wandb_entity_name>
   # Wandb ID to resume from an existing run. Specify the run of the training
   # run to resume from. If null, a new run will be created.
   wandb_id: null
