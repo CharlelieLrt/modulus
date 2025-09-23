@@ -114,6 +114,14 @@ pip install hydra-core>=1.2.0 omegaconf>=2.3.0 wandb>=0.13.7 deepwave>=0.0.21
 
 Note that the `deepwave` dependency is only necessary for generating the
 dataset and for physics-informed sampling.
+For data download and processing, it is also required to have `zip` and `unzip`
+installed. As those may not be shipped in the currentb physicsnemo container,
+you may need to install them manually. For example, on Ubuntu, you can run:
+
+```bash
+sudo apt update
+sudo apt-get install zip unzip
+```
 
 This example comprises a succession of three steps, detailed below:
 
