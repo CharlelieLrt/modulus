@@ -290,8 +290,6 @@ class DiffusionFWINetMetaData(ModelMetaData):
     auto_grad: bool = False
 
 
-# TODO: enable conditioning concatenation at deeper level of the UNet, insteda
-# of input concatenation.
 class DiffusionFWINet(Module):
     r"""
     DiffusionFWINet is a conditional diffusion model designed to denoise a

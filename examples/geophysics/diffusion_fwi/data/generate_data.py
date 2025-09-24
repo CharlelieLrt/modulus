@@ -197,6 +197,7 @@ def process_file(
     input_path: str,
     output_path: str,
     device_id: int | str,
+    source_frequency: int = 15,
 ) -> tuple[str, str]:
     """
     Process a single file and save the results.
@@ -210,6 +211,8 @@ def process_file(
     device_id : int | str
         GPU ID to use for processing. If value provided is not an integer,
         the function will run on CPU.
+    source_frequency : int, optional
+        Source Ricker wavelet peak frequency in Hz. Defaults to 15.
 
     Returns
     -------
@@ -250,7 +253,7 @@ def process_file(
         dx: float = 5.0
         nt: int = 1000
         dt: float = 0.001
-        freq: int = 15
+        freq: int = source_frequency
         peak_time: float = 1.5 / freq
         n_shots: int = 5
         source_depth: int = 1
@@ -356,6 +359,13 @@ def main():
         "New files will be of the form out_dir/samples/train_sample_<idx>.npz "
         "or out_dir/samples/test_sample_<idx>.npz.",
     )
+    parser.add_argument(
+        "--source_frequency",
+        type=int,
+        default=15,
+        help="Peak frequency (Hz) of the Ricker source wavelet used during "
+        "forward modeling. Defaults to 15.",
+    )
     args = parser.parse_args()
 
     dataset_path: Path = Path(args.in_dir) / "samples"
@@ -378,11 +388,13 @@ def main():
 
     results: list[tuple[str, str]] = []
     num_gpus: int = torch.cuda.device_count()
+    user_source_frequency: int = args.source_frequency
 
     if num_gpus == 0:
         logging.warning("No GPUs found. Running on CPU. This will be very slow.")
-        args: list[tuple[str, str, str]] = [
-            (filepath, output_path, "cpu") for filepath in file_list
+        args: list[tuple[str, str, str, int]] = [
+            (filepath, output_path, "cpu", user_source_frequency)
+            for filepath in file_list
         ]
 
         for i, arg in enumerate(args):
@@ -391,8 +403,8 @@ def main():
                 logging.info(f"Processed {i + 1} / {total_files} files")
     else:
         logging.info(f"Found {num_gpus} GPUs. Starting parallel processing.")
-        args: list[tuple[str, str, int]] = [
-            (filepath, output_path, i % num_gpus)
+        args: list[tuple[str, str, int, int]] = [
+            (filepath, output_path, i % num_gpus, user_source_frequency)
             for i, filepath in enumerate(file_list)
         ]
 

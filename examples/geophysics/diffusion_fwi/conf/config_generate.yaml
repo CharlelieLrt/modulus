@@ -14,8 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# TODO: add all missing comments
-
 # Model configuration
 model:
   # Path to checkpoint file for the diffusion model
@@ -81,6 +79,21 @@ generation:
       norm_ord: 1
       # Whether to normalize the guidance term by its magnitude
       magnitude_scaling: true
+      # Frequency of the source in the physics-informed guidance term. Should
+      # be consistent with the frequency that is used to generate the seismic
+      # observations.
+      source_frequency: 15
+      # Physical range constraints for velocity model parameters.
+      # When null, defaults to [0, inf] (no constraints).
+      # Format: [min_value, max_value]. Providing these ranges may improve
+      # stability of the sampling procedure.
+      vp_range: null  # P-wave velocity range (m/s), e.g., [1500, 6000]
+      vs_range: null  # S-wave velocity range (m/s), e.g., [800, 3500]
+      rho_range: null  # Density range (kg/m³), e.g., [1000, 3000]
+      # Clip scaled score likelihood to given range. By default, the sclaled
+      # score is not clipped. Should typically of order [-1, 1]. Clipping may
+      # improve stability of the sampling procedure.
+      score_clip_range: null  # e.g., [-1, 1]
 
 # I/O configuration
 io:

@@ -24,6 +24,29 @@ import nvtx
 from physicsnemo.utils.diffusion import StackedRandomGenerator
 
 
+class _RemovableHandle:
+    r"""
+    A handle which provides the capability to remove a hook.
+
+    Parameters
+    ----------
+    hooks_list : List
+        The list of hooks from which to remove the hook.
+
+    """
+
+    def __init__(self, hooks_list: List):
+        self.hooks_list = hooks_list
+        self.id = None
+
+    def remove(self):
+        r"""
+        Remove the hook from the list of registered hooks.
+        """
+        if self.id is not None and self.id < len(self.hooks_list):
+            self.hooks_list[self.id] = None
+
+
 class ModelBasedGuidance:
     r"""
     Guidance function for `Diffusion Posterior Sampling (DPS)
@@ -144,6 +167,7 @@ class ModelBasedGuidance:
         self.power = power
         self.norm_ord = norm_ord
         self.magnitude_scaling = magnitude_scaling
+        self._score_post_hooks = []
         _valid_model_exec_mode = ["batched"]
         if model_exec_mode in _valid_model_exec_mode:
             self.model_exec_mode = model_exec_mode
@@ -152,6 +176,57 @@ class ModelBasedGuidance:
                 f"'model_exec_mode' should be one of {', '.join(_valid_model_exec_mode)}, "
                 f"but got {model_exec_mode}"
             )
+
+    def register_score_post_hook(self, hook):
+        r"""
+        Register a post-hook to be executed after the log-likelihood score is
+        computed.
+
+        The hook should be a callable with the following signature::
+
+            hook(guidance_instance, x, x_0_hat, sigma, y, log_p) -> None or torch.Tensor
+
+        where ``guidance_instance`` is the ``ModelBasedGuidance`` instance and
+        ``log_p`` is the computed log-likelihood tensor of shape :math:`(B,
+        *_x)`. The other arguments are the same as the forward method, that is
+        the latent state ``x``, the estimate of the clean latent state
+        ``x_0_hat``, the noise level ``sigma``, and the observed data ``y``.
+
+        If the hook returns a tensor, it will replace the original ``log_p``
+        value. If it returns ``None``, the original ``log_p`` is unchanged
+        (allows in-place modifications of the ``log_p`` tensor).
+
+        Parameters
+        ----------
+        hook : Callable[[ModelBasedGuidance, torch.Tensor], None|torch.Tensor]
+            The hook function to register. It will be called with the signature
+            specified above.
+
+        Returns
+        -------
+        RemovableHandle
+            A handle that can be used to remove the hook by calling
+            ``handle.remove()``.
+
+        Example
+        -------
+
+        .. doctest::
+           :skip:
+
+            >>> def my_hook(guidance, x, x_0_hat, sigma, y, log_p):
+            ...     # Apply some transformation to log_p
+            ...     return log_p * 2.0
+            >>> guidance = ModelBasedGuidance(my_model)
+            >>> handle = guidance.register_score_post_hook(my_hook)
+            >>> # Later, remove the hook
+            >>> handle.remove()
+
+        """
+        handle = _RemovableHandle(self._score_post_hooks)
+        self._score_post_hooks.append(hook)
+        handle.id = len(self._score_post_hooks) - 1
+        return handle
 
     def _log_likelihood(
         self,
@@ -180,6 +255,14 @@ class ModelBasedGuidance:
         log_p = -0.5 * (err1 / var.view(B, *([1] * (y.ndim - 1)))).sum(
             dim=tuple(range(1, y.ndim))
         )  # (B,)
+
+        # Execute post hooks
+        for hook in self._score_post_hooks:
+            if hook is not None:
+                result = hook(self, x, x_0_hat, sigma, y, log_p)
+                if result is not None:
+                    log_p = result
+
         return log_p
 
     def _get_score(

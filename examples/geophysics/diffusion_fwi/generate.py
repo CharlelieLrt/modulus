@@ -168,6 +168,14 @@ def main(cfg: DictConfig) -> None:
     # Wave operator for diffusion posterior sampling (DPS) based on PDE
     # constraint
     def wave_operator(x: torch.Tensor) -> torch.Tensor:
+        def smooth_clamp(
+            x: torch.Tensor,
+            min_val: float,
+            max_val: float,
+        ) -> torch.Tensor:
+            x_scaled = torch.sigmoid(x)
+            return min_val + (max_val - min_val) * x_scaled
+
         # Unpack velocity model from latent state x
         B = x.shape[0]
         x_vars = torch.split(x, 1, dim=1)
@@ -181,12 +189,29 @@ def main(cfg: DictConfig) -> None:
         vs = stats_mean["vs"] + stats_std["vs"] * vs  # (B, H, W)
         rho = stats_mean["rho"] + stats_std["rho"] * rho  # (B, H, W)
 
+        # Apply smooth clamping to denormalized values if ranges are specified
+        guidance_cfg = cfg.generation.sampler.physics_informed_guidance
+        vp_range = getattr(guidance_cfg, "vp_range", None)
+        if vp_range is not None:
+            vp_min, vp_max = list(vp_range)
+            vp = smooth_clamp(vp, vp_min, vp_max)
+
+        vs_range = getattr(guidance_cfg, "vs_range", None)
+        if vs_range is not None:
+            vs_min, vs_max = list(vs_range)
+            vs = smooth_clamp(vs, vs_min, vs_max)
+
+        rho_range = getattr(guidance_cfg, "rho_range", None)
+        if rho_range is not None:
+            rho_min, rho_max = list(rho_range)
+            rho = smooth_clamp(rho, rho_min, rho_max)
+
         # Define geometry, sources and receivers
         # NOTE: hard-coded resolution change from 70 to 80.
         dx = 5.0 * 7 / 8
         nt = cfg.dataset.y_resolution[0]
         dt = 0.001
-        freq = 15
+        freq = cfg.generation.sampler.physics_informed_guidance.source_frequency
         peak_time = 1.5 / freq
         n_shots = cfg.dataset.nb_shots
         source_depth = 1
@@ -265,11 +290,29 @@ def main(cfg: DictConfig) -> None:
         magnitude_scaling=cfg.generation.sampler.physics_informed_guidance.magnitude_scaling,
     )
 
+    # Add hook to perform score clipping if specified
+    if cfg.generation.sampler.physics_informed:
+        clip_range = getattr(
+            cfg.generation.sampler.physics_informed_guidance, "score_clip_range", None
+        )
+        if clip_range is not None:
+            clip_range = list(clip_range)
+
+            def score_clipping_hook(guidance, x, x_0_hat, sigma, y, log_p):
+                """Post-hook that applies clipping to the log-likelihood score."""
+                clip_min, clip_max = clip_range
+                return torch.clamp(log_p, min=clip_min, max=clip_max)
+
+            rank_zero_logger.info(
+                f"Registering score clipping hook with range {clip_range}"
+            )
+            physics_informed_guidance.register_score_post_hook(score_clipping_hook)
+
     output_dir = Path(to_absolute_path(cfg.io.output_dir))
     rank_zero_logger.info(f"Starting generation, saving results to {output_dir}...")
     for i, data in enumerate(val_dataset):
         # Stop generation after num_samples
-        if i > cfg.generation.num_samples:
+        if i >= cfg.generation.num_samples:
             break
 
         y = torch.cat(
