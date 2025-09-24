@@ -147,7 +147,7 @@ dataset by providing a data generation pipeline to:
 
 ### Step 1: Download and Reorganize the E-FWI Dataset
 
-Download the E-FWI dataset. Because the E-FWI
+The first step is to download the E-FWI dataset. Because the E-FWI
 dataset is composed of multiple sub-datasets (CFB, CFA, FVB), we provide
 utility functions to merge them into a single dataset and reorganize the data
 into a more convenient format.
@@ -171,8 +171,9 @@ python download_data.py --help
 
 ### Step 2: Generate Seismic Observations
 
-Regenerate seismic observations from the
-velocity models with variable density. The original wave speeds $V_\mathrm{P}$ and
+The second step consists in re-generating seismic observations from the
+velocity models with variable density.
+The original wave speeds $V_\mathrm{P}$ and 
 $V_\mathrm{S}$ from the E-FWI datasets are retained and the density is generated
 by the `generate_data.py` script. This script then solve an elastic wave
 equation using [Deepwave](https://zenodo.org/records/8381177) to generate the
@@ -185,6 +186,12 @@ python generate_data.py --in_dir ./all --out_dir <path_to_output_directory>
 
 This script will generate a new set of `.npz` files in the directory
 `<path_to_output_directory>/samples`.
+
+A useful option is to specify the frequency of the source signal, which can be
+done by passing the `--source_frequency <frequency>` option to the
+`generate_data.py` script. The default frequency is 15 Hz. This value
+correspond to the peak frequency of the Ricker wavelet used to generate the
+source signal.
 
 ### Step 3: Compute Dataset Statistics
 
