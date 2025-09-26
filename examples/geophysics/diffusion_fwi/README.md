@@ -49,13 +49,15 @@ hydro-carbon exploration:
 
 The goal of FWI is to reconstruct the velocity model $\mathbf{x}(r)$ from the
 entire set of seismic observations $\mathbf{y}$. To do so, standard FWI uses classical
-optimization techniques combined with the elastic wave equation, defined below.
+optimization techniques combined with the elastic wave equation, defined in
+Equation (1) below.
+
+$$
+\mathcal{A}_{\mathbf{x}} \lbrace \mathbf{u} \rbrace (r,t)=\dot{S}(t)\delta(r-r_s)
+$$
+
 
 ![Introduction to FWI](../../../docs/img/diffusion_fwi_intro.png)
-
-$$
-\mathcal{A}_{\mathbf{x}}\{\mathbf{u}\}(r,t)=\dot{S}(t)\delta(r-r_s)\tag{1}
-$$
 
  where $\dot{S}(t)\delta(r-r_s)$ is the source at location $r_s$ with time
  signal $\dot{S}(t)$, and $\mathcal{A}_{\mathbf{x}}$ is the elastic wave
