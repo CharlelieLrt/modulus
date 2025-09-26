@@ -17,8 +17,10 @@
 import importlib
 import inspect
 import json
+import keyword
 import logging
 import os
+import re
 import tarfile
 import tempfile
 import warnings
@@ -31,6 +33,9 @@ import physicsnemo
 from physicsnemo.models.meta import ModelMetaData
 from physicsnemo.registry import ModelRegistry
 from physicsnemo.utils.filesystem import _download_cached, _get_fs
+
+# Used for saving checkpoints of nested modules
+_BASE_CKPT_PREFIX = "__physicsnemo.Module__"
 
 
 def _load_state_dict_with_logging(
@@ -332,6 +337,38 @@ class Module(torch.nn.Module):
             If file_name does not end with .mdlus extension
         """
 
+        # Define some helper functions
+        def _save_process(module, args, metadata, mod_prefix="") -> None:
+            """Helper function to recursively populate the dictionaries args
+            and metadata required for saving the module and its submodules."""
+
+            # Pointer to args["__args__"] for submodules
+            if mod_prefix == "":
+                args_ptr = args["__args__"]
+            else:
+                args_ptr = args[mod_prefix]["__args__"]
+
+            for arg_name, arg_value in args_ptr.items():
+                if isinstance(arg_value, Module):
+                    next_mod_prefix = (
+                        f"{mod_prefix if mod_prefix else _BASE_CKPT_PREFIX}.{arg_name}"
+                    )
+                    args[next_mod_prefix] = arg_value._args.copy()
+                    # TODO: make sure this doesn't modify self._args
+                    args_ptr[arg_name] = next_mod_prefix
+                    metadata[f"{next_mod_prefix}.mdlus_file_version"] = (
+                        arg_value.__model_checkpoint_version__
+                    )
+                    _save_process(arg_value, args, metadata, next_mod_prefix)
+                elif isinstance(arg_value, torch.nn.Module):
+                    warnings.warn(
+                        f"Submodule {arg_name} of module {module.__class__.__name__} is"
+                        f" a PyTorch module, which is not supported by 'Module.save'. Please "
+                        f"first convert it to a PhysicsNeMo module using 'Module.from_torch'."
+                    )
+
+            return
+
         if file_name is not None and not file_name.endswith(self._file_extension):
             raise ValueError(
                 f"File name must end with {self._file_extension} extension"
@@ -347,9 +384,6 @@ class Module(torch.nn.Module):
 
             torch.save(self.state_dict(), local_path / "model.pt")
 
-            with open(local_path / "args.json", "w") as f:
-                json.dump(self._args, f)
-
             # Save the physicsnemo version and git hash (if available)
             metadata_info = {
                 "physicsnemo_version": physicsnemo.__version__,
@@ -364,6 +398,16 @@ class Module(torch.nn.Module):
                     metadata_info["git_hash"] = repo.head.object.hexsha
                 except git.InvalidGitRepositoryError:
                     metadata_info["git_hash"] = None
+
+            # Copy self._args to avoid side effects
+            _args = self._args.copy()
+
+            # Recursively populate _args and metadata_info with submodules
+            # information
+            _save_process(self, _args, metadata_info)
+
+            with open(local_path / "args.json", "w") as f:
+                json.dump(_args, f)
 
             with open(local_path / "metadata.json", "w") as f:
                 json.dump(metadata_info, f)
@@ -485,6 +529,128 @@ class Module(torch.nn.Module):
             If file_name provided does not exist or is not a valid checkpoint
         """
 
+        # Validate the format of override_args keys
+        override_args = override_args or {}
+        for k in override_args.keys():
+            if not isinstance(k, str):
+                raise ValueError(
+                    f"All keys in override_args must be strings, got {type(k)} for key {k}"
+                )
+            if not all(
+                p and p.isidentifier() and not keyword.iskeyword(p)
+                for p in k.split(".")
+            ):
+                raise ValueError(
+                    f"Key {k} in override_args does not match the expected format "
+                    f"arg_name1.arg_name2..."
+                )
+
+        # Define some helper functions
+        def _pop_by_prefix(d: Dict[str, Any], prefix: str) -> Dict[str, Any]:
+            """
+            Helper function to remove items from a dictionary based on a prefix. Returns
+            a dictionary of the removed items, with the prefix removed from their keys.
+            """
+            rx = re.compile(prefix)
+            removed: Dict[str, Any] = {}
+            for k in list(d.keys()):
+                m = rx.match(k)
+                if m:
+                    # Remove the prefix from the key
+                    new_key = k[m.end() :]
+                    # Only match if the suffix does not contain a dot
+                    if "." not in new_key:
+                        removed[new_key] = d.pop(k)
+            return removed
+
+        def _from_checkpoint_process(
+            cls_in,
+            args,
+            metadata,
+            override_args,
+            strict,
+            mod_prefix="",
+        ):
+            """Helper function to recursively instantiate the module and its
+            submodules"""
+
+            # Pointer to args (for submodules)
+            if mod_prefix == "":
+                args_ptr = {
+                    k: v for k, v in args.items() if not k.startswith(_BASE_CKPT_PREFIX)
+                }
+            else:
+                args_ptr = args[mod_prefix]
+
+            # Get the checkpoint version
+            version = metadata.get(
+                f"{mod_prefix}{'.' if mod_prefix else ''}mdlus_file_version",
+                cls_in.__model_checkpoint_version__,
+            )
+
+            # Get the class from args
+            _cls = Module._get_class_from_args(args_ptr)
+
+            # Check if the checkpoint version is compatible with the current version
+            # If not, apply backward compatibility mapping if method exists
+            if version != _cls.__model_checkpoint_version__:
+                if version in _cls.__supported_model_checkpoint_version__:
+                    warnings.warn(_cls.__supported_model_checkpoint_version__[version])
+                    args_ptr["__args__"] = _cls._backward_compat_arg_mapper(
+                        version, args_ptr["__args__"]
+                    )
+                else:
+                    raise IOError(
+                        f"Model checkpoint version {version} is not compatible with "
+                        f"current version {_cls.__model_checkpoint_version__} of class "
+                        f"{_cls.__name__}"
+                    )
+
+            # Process all args and recursively instantiate those that are
+            # submodules
+            for arg_name, arg_value in args_ptr["__args__"].items():
+                is_module = re.match(rf"{_BASE_CKPT_PREFIX}(.*)", arg_value)
+                if is_module:
+                    suffix = is_module.group(1)
+                    args_split = re.match(r"^(.*\.)*([^\.]+)$", suffix)
+                    if args_split:
+                        _arg_name = args_split.group(2)
+                        # Make sure that arg_value has the expected format
+                        if _arg_name != arg_name:
+                            raise ValueError(
+                                f"Argument name '{_arg_name}' does not match the "
+                                f"expected '{arg_name}' for module {_cls.__name__}"
+                            )
+                        # Instantiate the submodule
+                        next_mod_prefix = arg_value
+                        args_ptr["__args__"][arg_name] = _from_checkpoint_process(
+                            Module._get_class_from_args(args[next_mod_prefix]),
+                            args,
+                            metadata,
+                            _pop_by_prefix(override_args, f"{suffix}."),
+                            strict,
+                            mod_prefix=next_mod_prefix,
+                        )
+                        # Cleanup args and metadata by removing the items
+                        # related to the submodule
+                        args.pop(next_mod_prefix, None)
+                        metadata.pop(f"{next_mod_prefix}.mdlus_file_version", None)
+                    else:
+                        # Make sure that arg_value has the expected format
+                        raise ValueError(
+                            f"Argument value '{arg_value}' for argument '{arg_name}' "
+                            f"of module {_cls.__name__} does not match the expected format "
+                            f"{_BASE_CKPT_PREFIX}.arg_name1.arg_name2..."
+                        )
+
+            # Override args_ptr["__args__"] with override_args
+            if override_args is not None:
+                _cls._override_args(args_ptr["__args__"], override_args)
+
+            # Instantiate the module
+            model = Module.instantiate(args_ptr)
+            return model
+
         # Download and cache the checkpoint file if needed
         cached_file_name = _download_cached(file_name)
 
@@ -515,32 +681,14 @@ class Module(torch.nn.Module):
             # Load metadata to get version
             with open(local_path.joinpath("metadata.json"), "r") as f:
                 metadata = json.load(f)
-                version = metadata.get(
-                    "mdlus_file_version", cls.__model_checkpoint_version__
-                )
 
-            # Get class from args
-            _cls = Module._get_class_from_args(args)
-
-            # Check if the checkpoint version is compatible with the current version
-            # If not, apply backward compatibility mapping if method exists
-            if version != _cls.__model_checkpoint_version__:
-                if version in _cls.__supported_model_checkpoint_version__:
-                    warnings.warn(_cls.__supported_model_checkpoint_version__[version])
-                    args["__args__"] = _cls._backward_compat_arg_mapper(
-                        version, args["__args__"]
-                    )
-                else:
-                    raise IOError(
-                        f"Model checkpoint version {version} is not compatible with current version {_cls.__model_checkpoint_version__}"
-                    )
-
-            # Override args["__args__"] with override_args
-            if override_args is not None:
-                _cls._override_args(args["__args__"], override_args)
-
-            # Instantiate the model
-            model = Module.instantiate(args)
+            model = _from_checkpoint_process(
+                cls,
+                args,
+                metadata,
+                override_args,
+                strict,
+            )
 
             # Load the model weights
             model_dict = torch.load(
