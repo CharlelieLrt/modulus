@@ -72,7 +72,7 @@ $$
 
 We denote $\mathcal{R} (\mathbf{x}, s)$ the solution operator associated to the
 wave equation $(1)$. This operator maps a velocity model $\mathbf{x}$ and a
-source $\dot{S}(t)\,\delta(r-r_s)$ to the solution of the PDE at the receiver
+source $\dot{S}(t)\delta(r-r_s)$ to the solution of the PDE at the receiver
 locations: it therefore provides a simulated seismic observation $\hat{y}_s$.
 
 FWI seeks to solve an inverse problem of finding the velocity model $\mathbf{x}$
@@ -298,9 +298,9 @@ d \mathbf{x}_t = \left[ \mathbf{f} (\mathbf{x}_t, t) - g^2 (\mathbf{x}_t, t)
 (\mathbf{x}_t, t) d \mathbf{w}_t
 $$
 
-In this equation, $t$ is the diffusion time, and $\mathbf{f}(\mathbf{x}_t,t)$
-and $g(\mathbf{x}_t,t)$ are the drift and diffusion terms, respectively.
-$\nabla_{\mathbf{x}_t} \log p_t(\mathbf{x}_t | \mathbf{y})$ is the conditional
+In this equation, $t$ is the diffusion time, and $\mathbf{f}$
+and $g$ are the drift and diffusion terms, respectively.
+$\nabla_x \log p_t(\mathbf{x}_t | \mathbf{y})$ is the conditional
 score function previously learned during training, and $\mathbf{w}_t$ is a
 standard Wiener process. In this example, we adopt the [EDM
 framework](https://arxiv.org/abs/2206.00364) to solve this SDE and generate
@@ -379,10 +379,10 @@ version](https://arxiv.org/abs/2506.22780) of the method introduced in
 (SDA)](https://proceedings.neurips.cc/paper_files/paper/2023/hash/7f7fa581cc8a1970a4332920cdf87395-Abstract-Conference.html).
 
 **Note:** The present approach is not true DPS, as the latter is usually based
-on an unconditional prior score $\nabla_{\mathbf{x}_t} \log p(\mathbf{x}_t)$,
+on an unconditional prior score $\nabla_x \log p(\mathbf{x}_t)$,
 trained in an unsupervised manner.
 Instead we use an ad-hoc modification of DPS where we replace the unconditional
-prior score with a conditional score $\nabla_{\mathbf{x}_t} \log p_t(\mathbf{x}_t | \mathbf{y})$,
+prior score with a conditional score $\nabla_x \log p_t(\mathbf{x}_t | \mathbf{y})$,
 trained in a supervised manner.
 
 The `generate.py` script implements this sampling procedure by enabling it in
