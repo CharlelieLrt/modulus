@@ -14,6 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import importlib
 import inspect
 import json
@@ -344,9 +346,9 @@ class Module(torch.nn.Module):
 
             # Pointer to args["__args__"] for submodules
             if mod_prefix == "":
-                args_ptr = args["__args__"]
+                args_ptr = args["__args__"].copy()
             else:
-                args_ptr = args[mod_prefix]["__args__"]
+                args_ptr = args[mod_prefix]["__args__"].copy()
 
             for arg_name, arg_value in args_ptr.items():
                 if isinstance(arg_value, Module):
@@ -366,6 +368,11 @@ class Module(torch.nn.Module):
                         f" a PyTorch module, which is not supported by 'Module.save'. Please "
                         f"first convert it to a PhysicsNeMo module using 'Module.from_torch'."
                     )
+
+            if mod_prefix == "":
+                args["__args__"] = args_ptr
+            else:
+                args[mod_prefix]["__args__"] = args_ptr
 
             return
 
@@ -700,8 +707,8 @@ class Module(torch.nn.Module):
 
     @staticmethod
     def from_torch(
-        torch_model_class: torch.nn.Module, meta: ModelMetaData = None
-    ) -> "Module":
+        torch_model_class: type[torch.nn.Module], meta: ModelMetaData | None = None
+    ) -> type[Module]:
         """Construct a PhysicsNeMo module from a PyTorch module
 
         Parameters
@@ -725,7 +732,8 @@ class Module(torch.nn.Module):
             def forward(self, x):
                 return self.inner_model(x)
 
-        # Get the argument names and default values of the PyTorch model's init method
+        # Get the argument names and default values of the PyTorch model's init
+        # method
         init_argspec = inspect.getfullargspec(torch_model_class.__init__)
         model_argnames = init_argspec.args[1:]  # Exclude 'self'
         model_defaults = init_argspec.defaults or []
