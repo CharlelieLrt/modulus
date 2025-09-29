@@ -586,8 +586,20 @@ class Module(torch.nn.Module):
                 args_ptr = {
                     k: v for k, v in args.items() if not k.startswith(_BASE_CKPT_PREFIX)
                 }
+                override_args_ptr = {
+                    k: v
+                    for k, v in override_args.items()
+                    if k.isidentifier() and not keyword.iskeyword(k)
+                }
             else:
                 args_ptr = args[mod_prefix]
+                prefix = mod_prefix[len(_BASE_CKPT_PREFIX) + 1 :]
+                override_args_ptr = {}
+                for k, v in override_args.items():
+                    if k.startswith(f"{prefix}."):
+                        suffix = k[len(prefix) + 1 :]  # +1 for the dot
+                        if suffix.isidentifier() and not keyword.iskeyword(suffix):
+                            override_args_ptr[suffix] = v
 
             # Get the checkpoint version
             version = metadata.get(
@@ -616,6 +628,8 @@ class Module(torch.nn.Module):
             # Process all args and recursively instantiate those that are
             # submodules
             for arg_name, arg_value in args_ptr["__args__"].items():
+                if not isinstance(arg_value, str):
+                    continue
                 is_module = re.match(rf"{_BASE_CKPT_PREFIX}(.*)", arg_value)
                 if is_module:
                     suffix = is_module.group(1)
@@ -634,7 +648,7 @@ class Module(torch.nn.Module):
                             Module._get_class_from_args(args[next_mod_prefix]),
                             args,
                             metadata,
-                            _pop_by_prefix(override_args, f"{suffix}."),
+                            override_args,
                             strict,
                             mod_prefix=next_mod_prefix,
                         )
@@ -652,7 +666,7 @@ class Module(torch.nn.Module):
 
             # Override args_ptr["__args__"] with override_args
             if override_args is not None:
-                _cls._override_args(args_ptr["__args__"], override_args)
+                _cls._override_args(args_ptr["__args__"], override_args_ptr)
 
             # Instantiate the module
             model = Module.instantiate(args_ptr)

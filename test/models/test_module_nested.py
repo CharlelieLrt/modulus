@@ -47,6 +47,7 @@ class M(physicsnemo.Module):
     def __init__(self, a, m1, m2):
         super().__init__(meta=MMetaData())
         self.a = torch.nn.Parameter(torch.tensor(a, dtype=torch.float32))
+        self._a = a
         self.m1 = m1
         self.m2 = m2
 
@@ -77,6 +78,7 @@ class M1(physicsnemo.Module):
     def __init__(self, b):
         super().__init__(meta=M1MetaData())
         self.b = torch.nn.Parameter(torch.tensor(b, dtype=torch.float32))
+        self._b = b
 
     def forward(self, x):
         return self.b * x
@@ -100,9 +102,9 @@ class TorchModelMetaData(ModelMetaData):
 class TorchModel(torch.nn.Module):
     """Fake model"""
 
-    def __init__(self, b):
+    def __init__(self, c):
         super().__init__()
-        self.c = torch.nn.Parameter(torch.tensor(b, dtype=torch.float32))
+        self.c = torch.nn.Parameter(torch.tensor(c, dtype=torch.float32))
 
     def forward(self, x):
         return self.c * x
@@ -129,27 +131,29 @@ def test_save_load(device, override):
         m_loaded = physicsnemo.Module.from_checkpoint("checkpoint.mdlus")
     else:
         m_loaded = physicsnemo.Module.from_checkpoint(
-            "checkpoint.mdlus", override_args={"a": -0.1, "m2.b": -0.2, "m2.m2.b": -0.3}
+            "checkpoint.mdlus", override_args={"a": -0.1, "m2.a": -0.2, "m2.m2.b": -0.3}
         )
     assert isinstance(m_loaded, M)
     assert isinstance(m_loaded.m1, M1)
     assert isinstance(m_loaded.m2, M)
     assert isinstance(m_loaded.m2.m1, Mt)
     assert isinstance(m_loaded.m2.m2, M1)
-    assert m_loaded.a == (m_orig.a if not override else -0.1)
-    assert m_loaded.m1.b == m_orig.m1.b
-    assert m_loaded.m2.b == (m_orig.m2.b if not override else -0.2)
+    assert m_loaded.a == m_orig.a
+    assert m_loaded._a == (m_orig._a if not override else -0.1)
     assert m_loaded.m1.b == m_orig.m1.b
     assert m_loaded.m2.a == m_orig.m2.a
-    assert m_loaded.m2.m1.c == m_orig.m2.m1.c
-    assert m_loaded.m2.m2.b == (m_orig.m2.m2.b if not override else -0.3)
+    assert m_loaded.m2._a == (m_orig.m2._a if not override else -0.2)
+    assert m_loaded.m2.m1.inner_model.c == m_orig.m2.m1.inner_model.c
+    assert m_loaded.m2.m2.b == m_orig.m2.m2.b
+    assert m_loaded.m2.m2._b == (m_orig.m2.m2._b if not override else -0.3)
 
-    with pytest.raises(ValueError):
-        physicsnemo.Module.from_checkpoint(
-            "checkpoint.mdlus", override_args={"m2.m1.c": -0.4}
-        )
+    if override:
+        with pytest.raises(ValueError):
+            physicsnemo.Module.from_checkpoint(
+                "checkpoint.mdlus", override_args={"m2.m1.c": -0.4}
+            )
 
-    Path("checkpoint.mdlus").unlink(missing_ok=False)
+    # Path("checkpoint.mdlus").unlink(missing_ok=False)
 
 
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"], ids=["gpu", "cpu"])
@@ -166,20 +170,24 @@ def test_load_from_checkpoint(device, override):
         m_loaded = physicsnemo.Module.from_checkpoint(file_name).to(device)
     else:
         m_loaded = physicsnemo.Module.from_checkpoint(
-            file_name, override_args={"a": -0.1, "m2.b": -0.2, "m2.m2.b": -0.3}
+            file_name, override_args={"a": -0.1, "m2.a": -0.2, "m2.m2.b": -0.3}
         ).to(device)
     assert isinstance(m_loaded, M)
     assert isinstance(m_loaded.m1, M1)
     assert isinstance(m_loaded.m2, M)
     assert isinstance(m_loaded.m2.m1, Mt)
     assert isinstance(m_loaded.m2.m2, M1)
-    assert m_loaded.a == (m_orig.a if not override else -0.1)
-    assert m_loaded.m1.b == m_orig.m1.b
-    assert m_loaded.m2.b == (m_orig.m2.b if not override else -0.2)
+    assert m_loaded.a == m_orig.a
+    assert m_loaded._a == (m_orig._a if not override else -0.1)
     assert m_loaded.m1.b == m_orig.m1.b
     assert m_loaded.m2.a == m_orig.m2.a
-    assert m_loaded.m2.m1.c == m_orig.m2.m1.c
-    assert m_loaded.m2.m2.b == (m_orig.m2.m2.b if not override else -0.3)
+    assert m_loaded.m2._a == (m_orig.m2._a if not override else -0.2)
+    assert m_loaded.m2.m1.inner_model.c == m_orig.m2.m1.inner_model.c
+    assert m_loaded.m2.m2.b == m_orig.m2.m2.b
+    assert m_loaded.m2.m2._b == (m_orig.m2.m2._b if not override else -0.3)
 
-    with pytest.raises(ValueError):
-        physicsnemo.Module.from_checkpoint(file_name, override_args={"m2.m1.c": -0.4})
+    if override:
+        with pytest.raises(ValueError):
+            physicsnemo.Module.from_checkpoint(
+                file_name, override_args={"m2.m1.c": -0.4}
+            )
