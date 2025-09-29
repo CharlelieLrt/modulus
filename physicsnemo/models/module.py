@@ -356,7 +356,6 @@ class Module(torch.nn.Module):
                         f"{mod_prefix if mod_prefix else _BASE_CKPT_PREFIX}.{arg_name}"
                     )
                     args[next_mod_prefix] = arg_value._args.copy()
-                    # TODO: make sure this doesn't modify self._args
                     args_ptr[arg_name] = next_mod_prefix
                     metadata[f"{next_mod_prefix}.mdlus_file_version"] = (
                         arg_value.__model_checkpoint_version__
@@ -498,7 +497,7 @@ class Module(torch.nn.Module):
         file_name: str,
         override_args: Optional[Dict[str, Any]] = None,
         strict: bool = True,
-    ) -> "Module":
+    ) -> physicsnemo.Module:
         """Simple utility for constructing a model from a checkpoint
 
         Parameters
@@ -534,6 +533,39 @@ class Module(torch.nn.Module):
         ------
         IOError
             If file_name provided does not exist or is not a valid checkpoint
+
+        Examples
+        --------
+        .. testsetup:: *
+            :skipif: True
+
+        Simple argument override:
+
+        >>> class MyModel(Module):
+        ...     _overridable_args = set(["a", "b"])
+        ...     def __init__(self, a, b=2.0):
+        ...         super().__init__()
+        ...         # ... model implementation ...
+        >>> model = MyModel(1.0, b=2.0)
+        >>> model.save("checkpoint.pt")
+        >>> model_loaded = MyModel.from_checkpoint("checkpoint.pt", override_args={"a": 5.0})
+
+        Nested module override with dot-separated syntax:
+
+        >>> class SubModule(Module):
+        ...     _overridable_args = set(["a"])
+        ...     def __init__(self, a):
+        ...         super().__init__()
+        ...         # ... submodule implementation ...
+        >>> class MyModel(Module):
+        ...     def __init__(self, submodule):
+        ...         super().__init__()
+        ...         self.submodule = submodule
+        ...         # ... model implementation ...
+        >>> submodule = SubModule(1.0)
+        >>> model = MyModel(submodule)
+        >>> model.save("checkpoint.pt")
+        >>> model = MyModel.from_checkpoint("checkpoint.pt", override_args={"submodule.a": 2.0})
         """
 
         # Validate the format of override_args keys
