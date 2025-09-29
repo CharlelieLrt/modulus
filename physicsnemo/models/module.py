@@ -547,10 +547,10 @@ class Module(torch.nn.Module):
         ...         super().__init__()
         ...         # ... model implementation ...
         >>> model = MyModel(1.0, b=2.0)
-        >>> model.save("checkpoint.pt")
-        >>> model_loaded = MyModel.from_checkpoint("checkpoint.pt", override_args={"a": 5.0})
+        >>> model.save("checkpoint.mdlus")
+        >>> model_loaded = MyModel.from_checkpoint("checkpoint.mdlus", override_args={"a": 5.0})
 
-        Nested module override with dot-separated syntax:
+        For nested module, override is possible with dot-separated syntax:
 
         >>> class SubModule(Module):
         ...     _overridable_args = set(["a"])
@@ -564,8 +564,8 @@ class Module(torch.nn.Module):
         ...         # ... model implementation ...
         >>> submodule = SubModule(1.0)
         >>> model = MyModel(submodule)
-        >>> model.save("checkpoint.pt")
-        >>> model = MyModel.from_checkpoint("checkpoint.pt", override_args={"submodule.a": 2.0})
+        >>> model.save("checkpoint.mdlus")
+        >>> model = MyModel.from_checkpoint("checkpoint.mdlus", override_args={"submodule.a": 2.0})
         """
 
         # Validate the format of override_args keys

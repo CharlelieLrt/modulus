@@ -153,7 +153,7 @@ def test_save_load(device, override):
                 "checkpoint.mdlus", override_args={"m2.m1.c": -0.4}
             )
 
-    # Path("checkpoint.mdlus").unlink(missing_ok=False)
+    Path("checkpoint.mdlus").unlink(missing_ok=False)
 
 
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"], ids=["gpu", "cpu"])
