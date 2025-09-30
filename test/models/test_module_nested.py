@@ -22,6 +22,9 @@ import torch
 
 import physicsnemo
 from physicsnemo.models.meta import ModelMetaData
+from physicsnemo.registry import ModelRegistry
+
+registry = ModelRegistry()
 
 
 @dataclass
@@ -110,22 +113,21 @@ class TorchModel(torch.nn.Module):
         return self.c * x
 
 
-Mt = physicsnemo.Module.from_torch(TorchModel, meta=TorchModelMetaData())
-
-
 def make_model():
+    Mt = physicsnemo.Module.from_torch(TorchModel, meta=TorchModelMetaData())
     m21 = Mt(21.0)
     m22 = M1(22.0)
     m11 = M1(11.0)
     m12 = M(12.0, m21, m22)
     m = M(1.0, m11, m12)
-    return m
+    return m, Mt
 
 
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"], ids=["gpu", "cpu"])
 @pytest.mark.parametrize("override", [True, False], ids=["override", "no_override"])
 def test_save_load(device, override):
-    m_orig = make_model().to(device)
+    m_orig, Mt = make_model()
+    m_orig = m_orig.to(device)
     m_orig.save("checkpoint.mdlus")
     if not override:
         m_loaded = physicsnemo.Module.from_checkpoint("checkpoint.mdlus")
@@ -154,6 +156,8 @@ def test_save_load(device, override):
             )
 
     Path("checkpoint.mdlus").unlink(missing_ok=False)
+    registry.__clear_registry__()
+    registry.__restore_registry__()
 
 
 @pytest.mark.parametrize("device", ["cuda:0", "cpu"], ids=["gpu", "cpu"])
@@ -165,7 +169,8 @@ def test_load_from_checkpoint(device, override):
         / Path("checkpoint_nested_modules.mdlus")
     )
 
-    m_orig = make_model().to(device)
+    m_orig, Mt = make_model()
+    m_orig = m_orig.to(device)
     if not override:
         m_loaded = physicsnemo.Module.from_checkpoint(file_name).to(device)
     else:
@@ -191,3 +196,5 @@ def test_load_from_checkpoint(device, override):
             physicsnemo.Module.from_checkpoint(
                 file_name, override_args={"m2.m1.c": -0.4}
             )
+    registry.__clear_registry__()
+    registry.__restore_registry__()

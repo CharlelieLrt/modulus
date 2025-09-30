@@ -585,23 +585,6 @@ class Module(torch.nn.Module):
                 )
 
         # Define some helper functions
-        def _pop_by_prefix(d: Dict[str, Any], prefix: str) -> Dict[str, Any]:
-            """
-            Helper function to remove items from a dictionary based on a prefix. Returns
-            a dictionary of the removed items, with the prefix removed from their keys.
-            """
-            rx = re.compile(prefix)
-            removed: Dict[str, Any] = {}
-            for k in list(d.keys()):
-                m = rx.match(k)
-                if m:
-                    # Remove the prefix from the key
-                    new_key = k[m.end() :]
-                    # Only match if the suffix does not contain a dot
-                    if "." not in new_key:
-                        removed[new_key] = d.pop(k)
-            return removed
-
         def _from_checkpoint_process(
             cls_in,
             args,
