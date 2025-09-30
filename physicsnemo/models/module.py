@@ -74,14 +74,75 @@ class Module(torch.nn.Module):
     handling file system abstractions.
 
     There is one important requirement for all models in PhysicsNeMo. They must
-    have json serializable arguments in their __init__ function. This is
+    have json serializable arguments in their ``__init__`` function. This is
     required for saving and loading models and allow models to be instantiated
-    from a checkpoint.
+    from a checkpoint. The only one exception to this rule is when the argument
+    passed to the ``__init__`` function is itself a ``physicsnemo.Module`` instance.
+    In this case, it is possible to construct, save and load nested Modules,
+    with multiple levels of nesting and/or multiple ``physicsnemo.Module``
+    instances at each level.
+    To be able to pass a ``torch.nn.Module`` instance as an argument to the
+    ``__init__`` function, it is necessary to first use the ``Module.from_torch`` method
+    to convert the ``torch.nn.Module`` subclass to a ``physicsnemo.Module`` subclass
+    To pass nested ``torch.nn.Module`` instances as arguments to the
+    ``__init__`` function, it is necessary to convert **all** nested ``torch.nn.Module``
+    instances to ``physicsnemo.Module`` instances using the
+    ``Module.from_torch`` method. See the examples below for more details.
 
     Parameters
     ----------
     meta : ModelMetaData, optional
         Meta data class for storing info regarding model, by default None
+
+    Examples
+    --------
+    To construct nested ``physicsnemo.Module`` instances with multiple levels of nesting and/or
+    multiple ``physicsnemo.Module`` instances at each level:
+
+    .. code-block:: python
+
+        class InnerModel(physicsnemo.Module):
+            def __init__(self, hidden_size):
+                super().__init__(meta=ModelMetaData())
+                self.hidden_size = hidden_size
+
+        class OuterModel(physicsnemo.Module):
+            def __init__(self, inner_model):
+                super().__init__(meta=ModelMetaData())
+                self.inner_model = inner_model
+
+        # Create and save nested model
+        model = OuterModel(inner_model=InnerModel(128))
+        model.save("checkpoint.mdlus")
+        loaded = physicsnemo.Module.from_checkpoint("checkpoint.mdlus")
+
+    Applying this to a ``torch.nn.Module`` instance is also possible, as long
+    as all nested ``torch.nn.Module`` instances are converted to ``physicsnemo.Module``
+    instances using the ``Module.from_torch`` method:
+
+    .. code-block:: python
+
+        class TorchInnerModel(torch.nn.Module):
+            def __init__(self, size):
+                super().__init__()
+                self.size = size
+
+        class TorchMyModel(torch.nn.Module):
+            def __init__(self, inner_model):
+                super().__init__()
+                self.inner_model = inner_model
+
+        # Convert both torch.nn.Module to physicsnemo.Module
+        PNMInnerModel = physicsnemo.Module.from_torch(
+            TorchInnerModel, meta=ModelMetaData()
+        )
+        PNMMyModel = physicsnemo.Module.from_torch(
+            TorchMyModel, meta=ModelMetaData()
+        )
+
+        # Create nested model with converted torch modules
+        model = PNMMyModel(inner_model=PNMInnerModel(size=128))
+
     """
 
     _file_extension = ".mdlus"  # Set file extension for saving and loading
