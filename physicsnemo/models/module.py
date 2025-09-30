@@ -536,36 +536,37 @@ class Module(torch.nn.Module):
 
         Examples
         --------
-        .. testsetup:: *
-            :skipif: True
-
         Simple argument override:
 
-        >>> class MyModel(Module):
-        ...     _overridable_args = set(["a", "b"])
-        ...     def __init__(self, a, b=2.0):
-        ...         super().__init__()
-        ...         # ... model implementation ...
-        >>> model = MyModel(1.0, b=2.0)
-        >>> model.save("checkpoint.mdlus")
-        >>> model_loaded = MyModel.from_checkpoint("checkpoint.mdlus", override_args={"a": 5.0})
+        .. code-block:: python
+
+            class MyModel(Module):
+                _overridable_args = set(["a", "b"])
+                def __init__(self, a, b=2.0):
+                    super().__init__()
+                    # ... model implementation ...
+            model = MyModel(1.0, b=2.0)
+            model.save("checkpoint.mdlus")
+            model_loaded = MyModel.from_checkpoint("checkpoint.mdlus", override_args={"a": 5.0})
 
         For nested module, override is possible with dot-separated syntax:
 
-        >>> class SubModule(Module):
-        ...     _overridable_args = set(["a"])
-        ...     def __init__(self, a):
-        ...         super().__init__()
-        ...         # ... submodule implementation ...
-        >>> class MyModel(Module):
-        ...     def __init__(self, submodule):
-        ...         super().__init__()
-        ...         self.submodule = submodule
-        ...         # ... model implementation ...
-        >>> submodule = SubModule(1.0)
-        >>> model = MyModel(submodule)
-        >>> model.save("checkpoint.mdlus")
-        >>> model = MyModel.from_checkpoint("checkpoint.mdlus", override_args={"submodule.a": 2.0})
+        .. code-block:: python
+
+            class SubModule(Module):
+                _overridable_args = set(["a"])
+                def __init__(self, a):
+                    super().__init__()
+                    # ... submodule implementation ...
+            class MyModel(Module):
+                def __init__(self, submodule):
+                    super().__init__()
+                    self.submodule = submodule
+                    # ... model implementation ...
+            submodule = SubModule(1.0)
+            model = MyModel(submodule)
+            model.save("checkpoint.mdlus")
+            model = MyModel.from_checkpoint("checkpoint.mdlus", override_args={"submodule.a": 2.0})
         """
 
         # Validate the format of override_args keys
