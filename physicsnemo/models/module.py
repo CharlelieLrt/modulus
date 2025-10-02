@@ -402,8 +402,40 @@ class Module(torch.nn.Module):
 
         # Define some helper functions
         def _save_process(module, args, metadata, mod_prefix="") -> None:
-            """Helper function to recursively populate the dictionaries args
-            and metadata required for saving the module and its submodules."""
+            """Recursively serialize nested physicsnemo.Module instances for checkpoint saving.
+
+            Performs a depth-first search through the module's ``__init__`` arguments. When
+            an argument is a ``physicsnemo.Module`` instance, it is replaced with a
+            placeholder string (prefixed with ``_BASE_CKPT_PREFIX``) and the nested module's
+            information (``__name__``, ``__module__``, ``__args__``) is stored at the root level
+            of the ``args`` dictionary. The nested module metadata (e.g.,
+            ``__model_checkpoint_version__``) is also added at the root level
+            of ``metadata`` dictionary, with keys prefixed with
+            ``_BASE_CKPT_PREFIX``.
+
+            This allows for reconstruction of arbitrarily nested
+            module hierarchies during checkpoint loading.
+
+            Parameters
+            ----------
+            module : physicsnemo.Module
+                The module being processed
+            args : Dict[str, Any]
+                Dictionary to populate with serialized module arguments. Modified in-place.
+                Keys prefixed with ``_BASE_CKPT_PREFIX`` store nested module metadata.
+            metadata : Dict[str, Any]
+                Dictionary to populate with module metadata (e.g., version info).
+                Modified in-place.
+            mod_prefix : str, optional
+                Current module's prefix in the nested hierarchy, by default "". Root module
+                uses empty string; nested modules use format ``_BASE_CKPT_PREFIX.arg_name``.
+
+            Raises
+            ------
+            TypeError
+                If an argument is a ``torch.nn.Module`` instance that has not been converted
+                to a ``physicsnemo.Module`` using ``Module.from_torch``.
+            """
 
             # Pointer to args["__args__"] for submodules
             if mod_prefix == "":
@@ -423,7 +455,7 @@ class Module(torch.nn.Module):
                     )
                     _save_process(arg_value, args, metadata, next_mod_prefix)
                 elif isinstance(arg_value, torch.nn.Module):
-                    warnings.warn(
+                    raise TypeError(
                         f"Submodule {arg_name} of module {module.__class__.__name__} is"
                         f" a PyTorch module, which is not supported by 'Module.save'. Please "
                         f"first convert it to a PhysicsNeMo module using 'Module.from_torch'."
@@ -655,8 +687,46 @@ class Module(torch.nn.Module):
             strict,
             mod_prefix="",
         ):
-            """Helper function to recursively instantiate the module and its
-            submodules"""
+            """Recursively deserialize and instantiate nested physicsnemo.Module instances.
+
+            Performs a depth-first reconstruction of the module hierarchy from a checkpoint.
+            When an argument value is a placeholder string (prefixed with ``_BASE_CKPT_PREFIX``),
+            it is replaced with a recursively instantiated ``physicsnemo.Module`` instance.
+            This is the reciprocal operation of ``_save_process``, reconstructing the original
+            nested module structure from the serialized checkpoint data.
+
+            Parameters
+            ----------
+            cls_in : type
+                The class of the module to instantiate at the current recursion level
+            args : Dict[str, Any]
+                Dictionary containing serialized module arguments from the checkpoint.
+                Keys prefixed with ``_BASE_CKPT_PREFIX`` contain nested module metadata.
+                Modified in-place as nested modules are processed and removed.
+            metadata : Dict[str, Any]
+                Dictionary containing module metadata (e.g., version info) from the checkpoint.
+                Modified in-place as nested modules are processed and removed.
+            override_args : Dict[str, Any]
+                Dictionary of arguments to override in the module's ``__init__`` method.
+                Supports dot-separated syntax for nested module arguments.
+            strict : bool
+                Whether to strictly enforce that state_dict keys match when loading weights
+            mod_prefix : str, optional
+                Current module's prefix in the nested hierarchy, by default "". Root module
+                uses empty string; nested modules use format ``_BASE_CKPT_PREFIX.arg_name``.
+
+            Returns
+            -------
+            physicsnemo.Module
+                The instantiated module with all nested submodules recursively constructed
+
+            Raises
+            ------
+            IOError
+                If the checkpoint version is incompatible with the current model version
+            ValueError
+                If argument names or prefixes don't match the expected format
+            """
 
             # Pointer to args (for submodules)
             if mod_prefix == "":
