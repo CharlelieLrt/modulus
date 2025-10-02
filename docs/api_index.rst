@@ -8,7 +8,8 @@ API Reference
 
    api_models
 
-   api/physicsnemo.models.rst
+   .. api/physicsnemo.models.rst
+
    api/physicsnemo.datapipes.rst
    api/physicsnemo.metrics.rst
    api/physicsnemo.deploy.rst
