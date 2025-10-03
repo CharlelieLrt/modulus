@@ -5,7 +5,7 @@ PhysicsNeMo Models
 .. currentmodule:: physicsnemo.models
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
    :caption: PhysicsNeMo Models
    :name: PhysicsNeMo Models
 
