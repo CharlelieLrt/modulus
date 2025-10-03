@@ -1,7 +1,7 @@
 PhysicsNeMo Models
 ===================
 
-.. automodule:: physicsnemo.models
+.. .. automodule:: physicsnemo.models
 .. currentmodule:: physicsnemo.models
 
 .. toctree::
@@ -9,5 +9,5 @@ PhysicsNeMo Models
    :caption: PhysicsNeMo Models
    :name: PhysicsNeMo Models
 
-   api/models/basics.rst
+   api/models/modules.rst
    api/models/fully_connected.rst

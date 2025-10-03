@@ -8,7 +8,7 @@ PhysicsNeMo Models
 Basics
 ------
 
-PhysicsNeMo contains its own Model class for constructing neural networks. This model class
+PhysicsNeMo contains its own ``Module`` class for constructing neural networks. This model class
 is built on top of PyTorch's ``nn.Module`` and can be used interchangeably within the
 PyTorch ecosystem. Using PhysicsNeMo models allows you to leverage various features of
 PhysicsNeMo aimed at improving performance and ease of use. These features include, but are
