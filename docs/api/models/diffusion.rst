@@ -385,8 +385,8 @@ class to implement a regression model.
     :members:
     :exclude-members: forward
 
-``DhariwalUNet``
------------------
+:code:`DhariwalUNet`
+---------------------
 
 .. autoclass:: physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet
     :show-inheritance:
@@ -394,8 +394,8 @@ class to implement a regression model.
     :exclude-members: forward
 
 
-``SongUNetPosEmbd``
--------------------
+:code:`SongUNetPosEmbd`
+-----------------------
 
 .. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd
     :show-inheritance:
@@ -403,16 +403,16 @@ class to implement a regression model.
     :exclude-members: forward
 
 
-``SongUNetPosLtEmbd``
----------------------
+:code:`SongUNetPosLtEmbd`
+-------------------------
 
 .. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd
     :show-inheritance:
     :members:
     :exclude-members: forward
 
-``UNet``
---------
+:code:`UNet`
+------------
 
 .. autoclass:: physicsnemo.models.diffusion.unet.UNet
     :show-inheritance:
