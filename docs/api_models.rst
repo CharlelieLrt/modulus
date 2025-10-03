@@ -1,7 +1,6 @@
 PhysicsNeMo Models
 ===================
 
-.. .. automodule:: physicsnemo.models
 .. currentmodule:: physicsnemo.models
 
 .. toctree::
