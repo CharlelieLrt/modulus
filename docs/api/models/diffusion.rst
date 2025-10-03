@@ -377,33 +377,44 @@ diffusion models. For instance, the CorrDiff example in
 class to implement a regression model.
 
 
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
+``SongUNet``
+~~~~~~~~~~~~
 
-    .. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNet
-        :show-inheritance:
-        :members:
-        :exclude-members: forward
+.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNet
+    :show-inheritance:
+    :members:
+    :exclude-members: forward
 
-    .. autoclass:: physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet
-        :show-inheritance:
-        :members:
-        :exclude-members: forward
+``DhariwalUNet``
+~~~~~~~~~~~~~~~~
 
-
-    .. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd
-        :show-inheritance:
-        :members:
-        :exclude-members: forward
-
-    .. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd
-        :show-inheritance:
-        :members:
-        :exclude-members: forward
+.. autoclass:: physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet
+    :show-inheritance:
+    :members:
+    :exclude-members: forward
 
 
-    .. autoclass:: physicsnemo.models.diffusion.unet.UNet
-        :show-inheritance:
-        :members:
-        :exclude-members: forward
+``SongUNetPosEmbd``
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd
+    :show-inheritance:
+    :members:
+    :exclude-members: forward
+
+
+``SongUNetPosLtEmbd``
+~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd
+    :show-inheritance:
+    :members:
+    :exclude-members: forward
+
+``UNet``
+~~~~~~~~
+
+.. autoclass:: physicsnemo.models.diffusion.unet.UNet
+    :show-inheritance:
+    :members:
+    :exclude-members: forward
