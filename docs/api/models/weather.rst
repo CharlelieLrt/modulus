@@ -1,26 +1,28 @@
 Weather / Climate Models
 ========================
 
-.. automodule:: physicsnemo.models.dlwp.dlwp
-    :members:
+.. autoclass:: physicsnemo.models.dlwp.dlwp.DLWP
     :show-inheritance:
+    :members:
 
-.. automodule:: physicsnemo.models.dlwp_healpix.HEALPixRecUNet
-    :members:
+.. autoclass:: physicsnemo.models.dlwp_healpix.HEALPixRecUNet.HEALPixRecUNet
     :show-inheritance:
+    :members:
 
-.. automodule:: physicsnemo.models.graphcast.graph_cast_net
-    :members:
+.. autoclass:: physicsnemo.models.graphcast.graph_cast_net.GraphCastNet
     :show-inheritance:
+    :members:
 
-.. automodule:: physicsnemo.models.fengwu.fengwu
-    :members:
-    :show-inheritance:
+.. autofunction:: physicsnemo.models.graphcast.graph_cast_net.get_lat_lon_partition_separators
 
-.. automodule:: physicsnemo.models.pangu.pangu
-    :members:
+.. autoclass:: physicsnemo.models.fengwu.fengwu.Fengwu
     :show-inheritance:
+    :members:
 
-.. automodule:: physicsnemo.models.swinvrnn.swinvrnn
-    :members:
+.. autoclass:: physicsnemo.models.pangu.pangu.Pangu
     :show-inheritance:
+    :members:
+
+.. autoclass:: physicsnemo.models.swinvrnn.swinvrnn.SwinRNN
+    :show-inheritance:
+    :members:

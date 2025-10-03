@@ -1,14 +1,22 @@
 Graph Neural Networks
 =====================
 
-.. automodule:: physicsnemo.models.meshgraphnet.meshgraphnet
-    :members:
+.. autoclass:: physicsnemo.models.meshgraphnet.meshgraphnet.MeshGraphNet
     :show-inheritance:
+    :members:
+    :exclude-members: forward
 
-.. automodule:: physicsnemo.models.mesh_reduced.mesh_reduced
-    :members:
+.. autoclass:: physicsnemo.models.meshgraphnet.meshgraphnet.MeshGraphNetProcessor
     :show-inheritance:
+    :members:
+    :exclude-members: forward
 
-.. automodule:: physicsnemo.models.meshgraphnet.bsms_mgn
-    :members:
+.. autoclass:: physicsnemo.models.mesh_reduced.mesh_reduced.Mesh_Reduced
     :show-inheritance:
+    :members:
+    :exclude-members: forward
+
+.. autoclass:: physicsnemo.models.meshgraphnet.bsms_mgn.BiStrideMeshGraphNet
+    :show-inheritance:
+    :members:
+    :exclude-members: forward

@@ -1,6 +1,6 @@
 Operator Models
 ===============
 
-.. automodule:: physicsnemo.models.domino.model
-    :members:
+.. autoclass:: physicsnemo.models.domino.model.DoMINO
     :show-inheritance:
+    :members:

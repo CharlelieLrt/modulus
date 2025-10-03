@@ -1,6 +1,7 @@
 Fully Connected Network
 =======================
 
-.. automodule:: physicsnemo.models.mlp.fully_connected
-    :members:
+.. autoclass:: physicsnemo.models.mlp.fully_connected.FullyConnected
     :show-inheritance:
+    :members:
+    :exclude-members: forward
