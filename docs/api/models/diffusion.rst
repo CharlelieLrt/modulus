@@ -377,8 +377,8 @@ diffusion models. For instance, the CorrDiff example in
 class to implement a regression model.
 
 
-``SongUNet``
-~~~~~~~~~~~~
+:code:`SongUNet`
+----------------
 
 .. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNet
     :show-inheritance:
@@ -386,7 +386,7 @@ class to implement a regression model.
     :exclude-members: forward
 
 ``DhariwalUNet``
-~~~~~~~~~~~~~~~~
+-----------------
 
 .. autoclass:: physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet
     :show-inheritance:
@@ -395,7 +395,7 @@ class to implement a regression model.
 
 
 ``SongUNetPosEmbd``
-~~~~~~~~~~~~~~~~~~~
+-------------------
 
 .. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd
     :show-inheritance:
@@ -404,7 +404,7 @@ class to implement a regression model.
 
 
 ``SongUNetPosLtEmbd``
-~~~~~~~~~~~~~~~~~~~~~
+---------------------
 
 .. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd
     :show-inheritance:
@@ -412,7 +412,7 @@ class to implement a regression model.
     :exclude-members: forward
 
 ``UNet``
-~~~~~~~~
+--------
 
 .. autoclass:: physicsnemo.models.diffusion.unet.UNet
     :show-inheritance:
