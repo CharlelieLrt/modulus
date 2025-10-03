@@ -46,7 +46,7 @@ The PhysicsNeMo implementation of these models follows closely that used in the 
 models can be found in the `EDM repository <https://github.com/NVlabs/edm>`_.
 
 Model backbones can be used as is, such as in in
-`the StormCast example <../examples/weather/stormcast/README.rst>`_, but they can also be used as a base class for
+`the StormCast example <../../examples/weather/stormcast/README.rst>`_, but they can also be used as a base class for
 more complex models.
 
 One of the most common diffusion backbones for image generation is the
@@ -147,7 +147,7 @@ Specialized Architectures
 Note that even though backbones can be used as is, some of the examples in
 PhysicsNeMo examples use specialized architectures. These specialized architectures
 typically inherit from the backbones and implement additional functionalities for specific
-applications. For example the `CorrDiff example <../examples/weather/corrdiff/README.rst>`_
+applications. For example the `CorrDiff example <../../examples/weather/corrdiff/README.rst>`_
 uses the specialized architectures :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd`
 and :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd` to implement
 the diffusion model.
@@ -160,7 +160,7 @@ diffusion models to large domains. The idea is to split the full domain into
 patches, and run a diffusion model on each patch in parallel. The generated
 patches are then fused back to form the final image. This technique is
 particularly useful for domains that are too large to fit into the memory of
-a single GPU. The `CorrDiff example <../examples/weather/corrdiff/README.rst>`_
+a single GPU. The `CorrDiff example <../../examples/weather/corrdiff/README.rst>`_
 uses patch-based diffusion for weather downscaling on large domains. A key
 ingredient in the implementation of patch-based diffusion is the use of a
 global spatial grid, that is used to inform each patch with their respective
@@ -230,7 +230,7 @@ to the patch resolution and concatenate it to each individual patch.
 In practice it is not necessary to manually extract the patches from the latent
 state and the global grid, as PhysicsNeMo provides utilities to help with the
 patching operations, in :mod:`~physicsnemo.utils.patching`. For an example of how
-to use these utilities, see the `CorrDiff example <../examples/weather/corrdiff/README.rst>`_.
+to use these utilities, see the `CorrDiff example <../../examples/weather/corrdiff/README.rst>`_.
 
 .. code:: python
 
@@ -373,7 +373,7 @@ around the model backbones or specialized architectures that provide a more
 user-friendly interface for specific applications. Note that not all these
 classes are true diffusion models, but can also be used in conjunction with
 diffusion models. For instance, the CorrDiff example in
-`CorrDiff example <../examples/weather/corrdiff/README.rst>`_ uses the :class:`~physicsnemo.models.diffusion.unet.UNet`
+`CorrDiff example <../../examples/weather/corrdiff/README.rst>`_ uses the :class:`~physicsnemo.models.diffusion.unet.UNet`
 class to implement a regression model.
 
 
