@@ -12,19 +12,24 @@ classes that are wrappers around backbones or specialized architectures.
 .. autoclass:: physicsnemo.models.diffusion.preconditioning.VPPrecond
     :show-inheritance:
     :members:
+    :exclude-members: forward
 
 .. autoclass:: physicsnemo.models.diffusion.preconditioning.VEPrecond
     :show-inheritance:
     :members:
+    :exclude-members: forward
 
 .. autoclass:: physicsnemo.models.diffusion.preconditioning.iDDPMPrecond
     :show-inheritance:
     :members:
+    :exclude-members: forward
 
 .. autoclass:: physicsnemo.models.diffusion.preconditioning.EDMPrecond
     :show-inheritance:
     :members:
+    :exclude-members: forward
 
 .. autoclass:: physicsnemo.models.diffusion.preconditioning.EDMPrecondSuperResolution
     :show-inheritance:
     :members:
+    :exclude-members: forward
