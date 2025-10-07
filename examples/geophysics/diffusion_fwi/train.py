@@ -103,7 +103,7 @@ def main(cfg: DictConfig) -> None:
     # diffusion model compatible with EDM preconditioning and ResidualLoss
     model = DiffusionAdapter(
         model=model_arch,
-        args_map=("x", "t", {"y": "y"}),
+        args_map=("x", "sigma", {"y": "y"}),
     )
 
     rank_zero_logger.info(
