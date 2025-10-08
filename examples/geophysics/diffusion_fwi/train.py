@@ -75,6 +75,7 @@ def main(cfg: DictConfig) -> None:
         resume=resume,
         save_code=True,
         name=f"train-{timestamp}",
+        init_timeout=600,
     )
 
     logger.info(f"Rank: {dist.rank}, Device: {dist.device}")
