@@ -423,11 +423,10 @@ class DiffusionFWINet(Module):
         )
 
         # Denoising UNet
+        # Note: encoder output channels is always encoder_hidden_channels // 2
         self.unet = SongUNetPosEmbd(
             img_resolution=self.x_resolution,
-            in_channels=(
-                x_channels + self.time_signal_encoder.out_channels + N_grid_channels
-            ),
+            in_channels=(x_channels + encoder_hidden_channels // 2 + N_grid_channels),
             out_channels=x_channels,
             label_dim=0,
             augment_dim=0,
