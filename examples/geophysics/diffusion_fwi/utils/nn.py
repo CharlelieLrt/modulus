@@ -438,11 +438,14 @@ class DiffusionFWINet(Module):
             **unet_kwargs,
         )
 
-        # Grid to receivers transform
-        self.grid_to_receivers = AttentionPool(
-            num_channels=N_grid_channels,
-            out_length=4,
-        )
+        # Grid to receivers transform (only needed for conditional models)
+        if self.unconditional:
+            self.grid_to_receivers = None
+        else:
+            self.grid_to_receivers = AttentionPool(
+                num_channels=N_grid_channels,
+                out_length=4,
+            )
 
     def forward(
         self,
