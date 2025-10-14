@@ -87,6 +87,7 @@ def main(cfg: DictConfig) -> None:
         rank_zero_logger.info(f"Using model configuration: {model_args}")
     else:
         model_args = {}
+    unconditional = getattr(cfg.model, "unconditional", False)
     model_arch = DiffusionFWINet(
         x_resolution=list(cfg.model.x_resolution),
         x_channels=cfg.model.x_channels,
@@ -98,6 +99,7 @@ def main(cfg: DictConfig) -> None:
         model_channels=cfg.model.model_channels,
         channel_mult=list(cfg.model.channel_mult),
         num_blocks=cfg.model.num_blocks,
+        unconditional=unconditional,
         **model_args,
     ).to(dist.device)
     # Thin wrapper around the model_backbone to convert it into a conditional
@@ -109,6 +111,9 @@ def main(cfg: DictConfig) -> None:
 
     rank_zero_logger.info(
         f"Using model DiffusionFWINet with {model.num_parameters()} parameters."
+    )
+    rank_zero_logger.info(
+        f"Training {'unconditional' if unconditional else 'conditional'} model."
     )
 
     # Distributed learning (Data parallel)
