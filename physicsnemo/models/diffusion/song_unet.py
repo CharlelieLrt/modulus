@@ -525,11 +525,48 @@ class SongUNet(Module):
             if self.profile_mode
             else contextlib.nullcontext()
         ):
-            # Validate input shape
-            if any(d % self._input_shape_mult != 0 for d in x.shape[-2:]):
+            # Validate input shapes
+            batch_size = x.shape[0]
+
+            if x.ndim != 4:
                 raise ValueError(
-                    f"Input spatial dimensions ({x.shape[-2:]}) must be multiples"
-                    f" of 2**N where N (={self._num_levels}) is the number of levels in the U-Net"
+                    f"Expected 'x' to be a 4D tensor, "
+                    f"got {x.ndim}D tensor with shape {tuple(x.shape)}"
+                )
+
+            # Check spatial dimensions are powers of 2 or multiples of 2^N
+            for d in x.shape[-2:]:
+                # Check if d is a power of 2
+                is_power_of_2 = (d & (d - 1)) == 0 and d > 0
+                # If not power of 2, must be multiple of self._input_shape_mult
+                if not (is_power_of_2 or d % self._input_shape_mult == 0):
+                    raise ValueError(
+                        f"Input spatial dimensions ({x.shape[-2:]}) must be "
+                        f"either powers of 2 or multiples of 2**N where "
+                        f"N (={self._num_levels}) is the number of levels "
+                        f"in the U-Net."
+                    )
+
+            if noise_labels.ndim != 1 or noise_labels.shape[0] != batch_size:
+                raise ValueError(
+                    f"Expected 'noise_labels' shape ({batch_size},), "
+                    f"got {tuple(noise_labels.shape)}"
+                )
+
+            if class_labels is not None and (
+                class_labels.ndim != 2 or class_labels.shape[0] != batch_size
+            ):
+                raise ValueError(
+                    f"Expected 'class_labels' shape ({batch_size}, C), "
+                    f"got {tuple(class_labels.shape)}"
+                )
+
+            if augment_labels is not None and (
+                augment_labels.ndim != 2 or augment_labels.shape[0] != batch_size
+            ):
+                raise ValueError(
+                    f"Expected 'augment_labels' shape ({batch_size}, C), "
+                    f"got {tuple(augment_labels.shape)}"
                 )
 
             if (
