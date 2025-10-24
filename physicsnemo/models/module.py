@@ -639,8 +639,18 @@ class Module(torch.nn.Module):
             class is known beforehand (say ``MyModuleSubclass``), it is
             recommended to use ``MyModuleSubclass.from_checkpoint`` instead.
             This applies to both models classes included as part of the
-            PhysicsNeMo libraray, as well as user-defined subclasses of
-            ``physicsnemo.Module``.
+            PhysicsNeMo library, as well as user-defined subclasses of
+            ``physicsnemo.Module``. More specifically, the mechanism for inferring
+            the class attempts to, by order of precedence:
+
+                1. Use the qualifier (in the example above,
+                   "MyModuleSubclass") as the class.
+                2. Lookup the class in the model registry
+                   (:class:`~physicsnemo.registry.model_registry.ModelRegistry`).
+                3. Import the class from the module path specified in
+                   the checkpoint file. Note that this will fail if the module
+                   path is modified from the original path (e.g. if the class
+                   definition was moved from one module to another).
 
 
         Examples
