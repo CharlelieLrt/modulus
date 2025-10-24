@@ -336,6 +336,9 @@ class SongUNet(Module):
             self.img_shape_y = img_resolution[0]
             self.img_shape_x = img_resolution[1]
 
+        self._num_levels = len(channel_mult)
+        self._input_shape_mult = 2**self._num_levels
+
         # set the threshold for checkpointing based on image resolution
         self.checkpoint_threshold = (
             math.floor(math.sqrt(self.img_shape_x * self.img_shape_y))
@@ -522,6 +525,13 @@ class SongUNet(Module):
             if self.profile_mode
             else contextlib.nullcontext()
         ):
+            # Validate input shape
+            if any(d % self._input_shape_mult != 0 for d in x.shape[-2:]):
+                raise ValueError(
+                    f"Input spatial dimensions ({x.shape[-2:]}) must be multiples"
+                    f" of 2**N where N (={self._num_levels}) is the number of levels in the U-Net"
+                )
+
             if (
                 self.use_apex_gn
                 and (not x.is_contiguous(memory_format=torch.channels_last))
