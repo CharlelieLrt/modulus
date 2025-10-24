@@ -539,7 +539,10 @@ class SongUNet(Module):
                 # Check if d is a power of 2
                 is_power_of_2 = (d & (d - 1)) == 0 and d > 0
                 # If not power of 2, must be multiple of self._input_shape_mult
-                if not (is_power_of_2 or d % self._input_shape_mult == 0):
+                if not (
+                    (is_power_of_2 and d < self._input_shape_mult)
+                    or (d % self._input_shape_mult == 0)
+                ):
                     raise ValueError(
                         f"Input spatial dimensions ({x.shape[-2:]}) must be "
                         f"either powers of 2 or multiples of 2**N where "
