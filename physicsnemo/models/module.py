@@ -591,12 +591,16 @@ class Module(torch.nn.Module):
         override_args: Optional[Dict[str, Any]] = None,
         strict: bool = True,
     ) -> physicsnemo.Module:
-        """Simple utility for constructing a model from a checkpoint
+        r"""
+        Simple utility for constructing a model from a checkpoint. This method
+        implements a mechanism to instantiatie the model from a checkpoint file,
+        such that it is able to instantiate models that are **not already
+        instantiated**.
 
         Parameters
         ----------
         file_name : str
-            Checkpoint file name
+            Checkpoint file name. Should be a ``.mdlus`` file.
         override_args : Optional[Dict[str, Any]], optional, default=None
             Dictionary of arguments to override the ``__init__`` method's
             arguments saved in the checkpoint. The override of arguments occurs
@@ -626,6 +630,18 @@ class Module(torch.nn.Module):
         ------
         IOError
             If file_name provided does not exist or is not a valid checkpoint
+
+        .. important::
+
+            Calling ``physicsnemo.Module.from_checkpoint`` on a PhysicsNeMo
+            model checkpoint (``.mdlus`` file) will attempt to automatically infer
+            the class of the model from the checkpoint file. However, if the
+            class is known beforehand (say ``MyModuleSubclass``), it is
+            recommended to use ``MyModuleSubclass.from_checkpoint`` instead.
+            This applies to both models classes included as part of the
+            PhysicsNeMo libraray, as well as user-defined subclasses of
+            ``physicsnemo.Module``.
+
 
         Examples
         --------
