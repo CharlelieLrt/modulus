@@ -403,9 +403,15 @@ class Module(torch.nn.Module):
         ValueError
             If file_name does not end with .mdlus extension
 
-        # TODO: add an Examples section with 1 example that shows import an
-        easy module from Physicsnemo (pick the module of your choice), and save
-        it. Use a >>> code section for the example, so it must be able to run in CI tests.
+        Examples
+        --------
+        >>> from physicsnemo.models.mlp import FullyConnected
+        >>> model = FullyConnected(in_features=32, out_features=64)
+        >>> # Save a checkpoint with the default file name 'FullyConnected.mdlus'.
+        >>> # In this case, the model.meta.name coincides with the model class name, but that is not always the case.
+        >>> model.save()
+        >>> # Save a checkpoint to a specified file name 'my_model.mdlus'
+        >>> model.save("my_model.mdlus")
         """
 
         # Define some helper functions
@@ -574,8 +580,13 @@ class Module(torch.nn.Module):
                     f"Checkpoint file {file_path} is neither a valid zip "
                     f"nor tar archive"
                 )
+        # TODO-CURSOR: the catch-all exception would be better to be avoided.
+        # Can you think of a way to improve this by still reporting the specific
+        # exception that was raised?
         except Exception as e:
-            raise IOError(f"Could not determine checkpoint format for {file_path}: {e}")
+            raise IOError(
+                f"Could not determine checkpoint format for {file_path}: {e}"
+            ) from e
 
     @staticmethod
     def _check_checkpoint(local_path: Path | str) -> None:
@@ -612,10 +623,34 @@ class Module(torch.nn.Module):
         IOError
             If ``file_name`` provided does not exist or is not a valid checkpoint
 
-        # TODO: add an example, where you import a simple easy to understand
-        module from physicsnemo, and run model.load("checkpoint.mdlus"). Maybe
-        make s second example with slightly more complex options. Put those in
-        code-blocks since we don;t want them to run in CI tests.
+        Examples
+        --------
+        Basic example loading the model weights (state_dict) from a checkpoint:
+
+        .. code-block:: python
+
+            from physicsnemo.models.mlp import FullyConnected
+
+            # Create a model with the same architecture as the saved one
+            model = FullyConnected(in_features=32, out_features=64)
+
+            # Load the weights from checkpoint
+            model.load("FullyConnected.mdlus")
+
+        Loading with specific device mapping:
+
+        .. code-block:: python
+
+            import torch
+            from physicsnemo.models.mlp import FullyConnected
+
+            model = FullyConnected(in_features=32, out_features=64)
+
+            # Load checkpoint to CPU even if it was saved on GPU
+            model.load("FullyConnected.mdlus", map_location="cpu")
+
+            # Or load to a specific GPU
+            model.load("FullyConnected.mdlus", map_location=torch.device("cuda:0"))
         """
 
         # Download and cache the checkpoint file if needed
@@ -639,7 +674,9 @@ class Module(torch.nn.Module):
                 # Load model weights directly from zip
                 with archive.open("model.pt") as f:
                     model_dict = torch.load(f, map_location=device)
-                _load_state_dict_with_logging(self, model_dict, strict=strict)
+
+            # Load state_dict into the model
+            _load_state_dict_with_logging(self, model_dict, strict=strict)
 
         else:  # tar format (backward compatibility)
             # Use a temporary directory to extract the tar file
@@ -664,7 +701,9 @@ class Module(torch.nn.Module):
                 model_dict = torch.load(
                     local_path.joinpath("model.pt"), map_location=device
                 )
-                _load_state_dict_with_logging(self, model_dict, strict=strict)
+
+            # Load state dict into the model
+            _load_state_dict_with_logging(self, model_dict, strict=strict)
 
     @classmethod
     def from_checkpoint(
@@ -939,7 +978,8 @@ class Module(torch.nn.Module):
                 with archive.open("model.pt") as f:
                     model_dict = torch.load(f, map_location=model.device)
 
-                _load_state_dict_with_logging(model, model_dict, strict=strict)
+            # Load state_dict into the model
+            _load_state_dict_with_logging(model, model_dict, strict=strict)
 
         else:  # tar format (backward compatibility)
             # Use a temporary directory to extract the tar file
@@ -981,7 +1021,8 @@ class Module(torch.nn.Module):
                     local_path.joinpath("model.pt"), map_location=model.device
                 )
 
-                _load_state_dict_with_logging(model, model_dict, strict=strict)
+            # Load state_dict into the model
+            _load_state_dict_with_logging(model, model_dict, strict=strict)
 
         return model
 
