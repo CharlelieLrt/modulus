@@ -550,9 +550,11 @@ class SongUNet(Module):
                         f"in the U-Net."
                     )
 
-            if noise_labels.ndim != 1 or noise_labels.shape[0] != batch_size:
+            # TODO: noise_labels of shape (1,) means that all inputs share the
+            # same noise level. This should be removed in the future, though.
+            if noise_labels.ndim != 1 or noise_labels.shape[0] not in (batch_size, 1):
                 raise ValueError(
-                    f"Expected 'noise_labels' shape ({batch_size},), "
+                    f"Expected 'noise_labels' shape ({batch_size},) or (1,), "
                     f"got {tuple(noise_labels.shape)}"
                 )
 
