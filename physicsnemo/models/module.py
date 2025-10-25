@@ -571,10 +571,13 @@ class Module(torch.nn.Module):
             If file format cannot be determined
         """
         try:
-            if zipfile.is_zipfile(file_path):
-                return "zip"
-            elif tarfile.is_tarfile(file_path):
+            # NOTE: the check for tarfile MUST come first, as older checkpoints
+            # will be both zip and tar archives, but newer checkpoints will
+            # only be zip.
+            if tarfile.is_tarfile(file_path):
                 return "tar"
+            elif zipfile.is_zipfile(file_path):
+                return "zip"
             else:
                 raise IOError(
                     f"Checkpoint file {file_path} is neither a valid zip "
