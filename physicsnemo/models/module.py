@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import io
 import json
 import keyword
 import logging
@@ -26,6 +27,7 @@ import re
 import tarfile
 import tempfile
 import warnings
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Union
 
@@ -384,20 +386,26 @@ class Module(torch.nn.Module):
         # fh = logging.FileHandler(f'physicsnemo-core-{self.meta.name}.log')
 
     def save(self, file_name: Union[str, None] = None, verbose: bool = False) -> None:
-        """Simple utility for saving just the model
+        """
+        Utility method for saving a ``Module`` instance to a '.mdlus' checkpoint file.
 
         Parameters
         ----------
-        file_name : Union[str,None], optional
-            File name to save model weight to. When none is provide it will default to
-            the model's name set in the meta data, by default None
-        verbose : bool, optional
-            Whether to save the model in verbose mode which will include git hash, etc, by default False
+        file_name : Union[str,None], optional, default=None
+            File name to save the model checkpoint to. When ``None`` is provided it will default to
+            the model's name set in the meta data (the model's metadata must
+            have a 'name' attribute in this case).
+        verbose : bool, optional, default=False
+            Whether to save the model in verbose mode which will include git hash, etc.
 
         Raises
         ------
         ValueError
             If file_name does not end with .mdlus extension
+
+        # TODO: add an Examples section with 1 example that shows import an
+        easy module from Physicsnemo (pick the module of your choice), and save
+        it. Use a >>> code section for the example, so it must be able to run in CI tests.
         """
 
         # Define some helper functions
@@ -478,50 +486,96 @@ class Module(torch.nn.Module):
             self._orig_mod.save(file_name, verbose)
             return
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_path = Path(temp_dir)
+        # Save the physicsnemo version and git hash (if available)
+        metadata_info = {
+            "physicsnemo_version": physicsnemo.__version__,
+            "mdlus_file_version": self.__model_checkpoint_version__,
+        }
 
-            torch.save(self.state_dict(), local_path / "model.pt")
+        if verbose:
+            import git
 
-            # Save the physicsnemo version and git hash (if available)
-            metadata_info = {
-                "physicsnemo_version": physicsnemo.__version__,
-                "mdlus_file_version": self.__model_checkpoint_version__,
-            }
+            try:
+                repo = git.Repo(search_parent_directories=True)
+                metadata_info["git_hash"] = repo.head.object.hexsha
+            except git.InvalidGitRepositoryError:
+                metadata_info["git_hash"] = None
 
-            if verbose:
-                import git
+        # Copy self._args to avoid side effects
+        _args = self._args.copy()
 
-                try:
-                    repo = git.Repo(search_parent_directories=True)
-                    metadata_info["git_hash"] = repo.head.object.hexsha
-                except git.InvalidGitRepositoryError:
-                    metadata_info["git_hash"] = None
+        # Recursively populate _args and metadata_info with submodules
+        # information
+        _save_process(self, _args, metadata_info)
 
-            # Copy self._args to avoid side effects
-            _args = self._args.copy()
+        # If file_name is not provided, use the model's name from the metadata
+        if file_name is None:
+            meta_name = getattr(self.meta, "name", None)
+            if meta_name is None:
+                raise ValueError(
+                    "Model metadata does not have a 'name' attribute, please set it "
+                    "explicitly or pass a 'file_name' argument to save a checkpoint."
+                )
+            file_name = f"{meta_name}.mdlus"
 
-            # Recursively populate _args and metadata_info with submodules
-            # information
-            _save_process(self, _args, metadata_info)
+        # Write directly to zip file (no temporary directory needed)
+        fs = _get_fs(file_name)
+        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+            tmp_path = tmp.name
 
-            with open(local_path / "args.json", "w") as f:
-                json.dump(_args, f)
+        try:
+            with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                # Save model state dict
+                state_dict_buffer = io.BytesIO()
+                torch.save(self.state_dict(), state_dict_buffer)
+                archive.writestr("model.pt", state_dict_buffer.getvalue())
 
-            with open(local_path / "metadata.json", "w") as f:
-                json.dump(metadata_info, f)
+                # Save args
+                args_str = json.dumps(_args)
+                archive.writestr("args.json", args_str)
 
-            # Once all files are saved, package them into a tar file
-            with tarfile.open(local_path / "model.tar", "w") as tar:
-                for file in local_path.iterdir():
-                    tar.add(str(file), arcname=file.name)
+                # Save metadata
+                metadata_str = json.dumps(metadata_info)
+                archive.writestr("metadata.json", metadata_str)
 
-            if file_name is None:
-                file_name = self.meta.name + ".mdlus"
+            # Upload to final destination
+            fs.put(tmp_path, file_name)
+        finally:
+            # Clean up temporary file
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
 
-            # Save files to remote destination
-            fs = _get_fs(file_name)
-            fs.put(str(local_path / "model.tar"), file_name)
+    @staticmethod
+    def _detect_checkpoint_format(file_path: str) -> str:
+        """Detect whether checkpoint is zip or tar format
+
+        Parameters
+        ----------
+        file_path : str
+            Path to checkpoint file
+
+        Returns
+        -------
+        str
+            Either 'zip' or 'tar'
+
+        Raises
+        ------
+        IOError
+            If file format cannot be determined
+        """
+        try:
+            if zipfile.is_zipfile(file_path):
+                return "zip"
+            elif tarfile.is_tarfile(file_path):
+                return "tar"
+            else:
+                raise IOError(
+                    f"Checkpoint file {file_path} is neither a valid zip "
+                    f"nor tar archive"
+                )
+        except Exception as e:
+            raise IOError(f"Could not determine checkpoint format for {file_path}: {e}")
 
     @staticmethod
     def _check_checkpoint(local_path: Path | str) -> None:
@@ -537,52 +591,80 @@ class Module(torch.nn.Module):
         map_location: Union[None, str, torch.device] = None,
         strict: bool = True,
     ) -> None:
-        """Simple utility for loading the model weights from checkpoint
+        """
+        Utility method for loading the model weights from a '.mdlus'
+        checkpoint file. Unlike
+        :meth:`~physicsnemo.models.module.Module.from_checkpoint`, this method
+        *does not* instantiate the model, but rather loads the ``state_dict`` for an
+        already instantiated model.
 
         Parameters
         ----------
         file_name : str
-            Checkpoint file name
-        map_location : Union[None, str, torch.device], optional
-            Map location for loading the model weights, by default None will use model's device
-        strict: bool, optional
-            whether to strictly enforce that the keys in state_dict match, by default True
+            Checkpoint file name. Must be a valid '.mdlus' checkpoint file.
+        map_location : Union[None, str, torch.device], optional, default=None
+            Map location for loading the model weights, ``None`` will use the model's device.
+        strict: bool, optional, default=True
+            Whether to strictly enforce that the keys in ``state_dict`` match.
 
         Raises
         ------
         IOError
-            If file_name provided does not exist or is not a valid checkpoint
+            If ``file_name`` provided does not exist or is not a valid checkpoint
+
+        # TODO: add an example, where you import a simple easy to understand
+        module from physicsnemo, and run model.load("checkpoint.mdlus"). Maybe
+        make s second example with slightly more complex options. Put those in
+        code-blocks since we don;t want them to run in CI tests.
         """
 
         # Download and cache the checkpoint file if needed
         cached_file_name = _download_cached(file_name)
 
-        # Use a temporary directory to extract the tar file
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_path = Path(temp_dir)
+        # Detect checkpoint format
+        checkpoint_format = Module._detect_checkpoint_format(cached_file_name)
 
-            # Open the tar file and extract its contents to the temporary directory
-            with tarfile.open(cached_file_name, "r") as tar:
-                # Safely extract while supporting Python versions < 3.12 that lack the
-                # ``filter`` keyword.  Starting with 3.12, ``filter="data"`` is the
-                # recommended way to avoid unsafe members
-                extract_kwargs = dict(
-                    path=local_path,
-                    members=list(Module._safe_members(tar, local_path)),
+        device = map_location if map_location is not None else self.device
+
+        if checkpoint_format == "zip":
+            # Load directly from zip file (no extraction needed)
+            with zipfile.ZipFile(cached_file_name, "r") as archive:
+                # Check if all expected files are present
+                expected_files = ["args.json", "metadata.json", "model.pt"]
+                archive_files = archive.namelist()
+                for expected_file in expected_files:
+                    if expected_file not in archive_files:
+                        raise IOError(f"File '{expected_file}' not found in checkpoint")
+
+                # Load model weights directly from zip
+                with archive.open("model.pt") as f:
+                    model_dict = torch.load(f, map_location=device)
+                _load_state_dict_with_logging(self, model_dict, strict=strict)
+
+        else:  # tar format (backward compatibility)
+            # Use a temporary directory to extract the tar file
+            with tempfile.TemporaryDirectory() as temp_dir:
+                local_path = Path(temp_dir)
+
+                # Open tar file and extract contents to temporary directory
+                with tarfile.open(cached_file_name, "r") as tar:
+                    # Safely extract while supporting Python < 3.12
+                    extract_kwargs = dict(
+                        path=local_path,
+                        members=list(Module._safe_members(tar, local_path)),
+                    )
+                    if "filter" in tar.extractall.__code__.co_varnames:
+                        extract_kwargs["filter"] = "data"
+                    tar.extractall(**extract_kwargs)  # noqa: S202
+
+                # Check if the checkpoint is valid
+                Module._check_checkpoint(local_path)
+
+                # Load the model weights
+                model_dict = torch.load(
+                    local_path.joinpath("model.pt"), map_location=device
                 )
-                if "filter" in tar.extractall.__code__.co_varnames:
-                    extract_kwargs["filter"] = "data"
-                tar.extractall(**extract_kwargs)  # noqa: S202
-
-            # Check if the checkpoint is valid
-            Module._check_checkpoint(local_path)
-
-            # Load the model weights
-            device = map_location if map_location is not None else self.device
-            model_dict = torch.load(
-                local_path.joinpath("model.pt"), map_location=device
-            )
-            _load_state_dict_with_logging(self, model_dict, strict=strict)
+                _load_state_dict_with_logging(self, model_dict, strict=strict)
 
     @classmethod
     def from_checkpoint(
@@ -591,12 +673,14 @@ class Module(torch.nn.Module):
         override_args: Optional[Dict[str, Any]] = None,
         strict: bool = True,
     ) -> physicsnemo.Module:
-        """Simple utility for constructing a model from a checkpoint
+        """
+        Utility class method for instantiating and loading a ``Module``
+        instance from a '.mdlus' checkpoint file.
 
         Parameters
         ----------
         file_name : str
-            Checkpoint file name
+            Checkpoint file name. Must be a valid '.mdlus' checkpoint file.
         override_args : Optional[Dict[str, Any]], optional, default=None
             Dictionary of arguments to override the ``__init__`` method's
             arguments saved in the checkpoint. The override of arguments occurs
@@ -822,48 +906,83 @@ class Module(torch.nn.Module):
         # Download and cache the checkpoint file if needed
         cached_file_name = _download_cached(file_name)
 
-        # Use a temporary directory to extract the tar file
-        with tempfile.TemporaryDirectory() as temp_dir:
-            local_path = Path(temp_dir)
+        # Detect checkpoint format
+        checkpoint_format = Module._detect_checkpoint_format(cached_file_name)
 
-            # Open the tar file and extract its contents to the temporary directory
-            with tarfile.open(cached_file_name, "r") as tar:
-                # Safely extract while supporting Python versions < 3.12 that lack the
-                # ``filter`` keyword.  Starting with 3.12, ``filter="data"`` is the
-                # recommended way to avoid unsafe members;
-                extract_kwargs = dict(
-                    path=local_path,
-                    members=list(Module._safe_members(tar, local_path)),
+        if checkpoint_format == "zip":
+            # Load directly from zip file (no extraction needed)
+            with zipfile.ZipFile(cached_file_name, "r") as archive:
+                # Check if all expected files are present
+                expected_files = ["args.json", "metadata.json", "model.pt"]
+                archive_files = archive.namelist()
+                for expected_file in expected_files:
+                    if expected_file not in archive_files:
+                        raise IOError(f"File '{expected_file}' not found in checkpoint")
+
+                # Load model arguments and instantiate the model
+                with archive.open("args.json") as f:
+                    args = json.loads(f.read().decode("utf-8"))
+
+                # Load metadata to get version
+                with archive.open("metadata.json") as f:
+                    metadata = json.loads(f.read().decode("utf-8"))
+
+                model = _from_checkpoint_process(
+                    cls,
+                    args,
+                    metadata,
+                    override_args,
+                    strict,
                 )
-                if "filter" in tar.extractall.__code__.co_varnames:
-                    extract_kwargs["filter"] = "data"
-                tar.extractall(**extract_kwargs)  # noqa: S202
 
-            # Check if the checkpoint is valid
-            Module._check_checkpoint(local_path)
+                # Load the model weights
+                with archive.open("model.pt") as f:
+                    model_dict = torch.load(f, map_location=model.device)
 
-            # Load model arguments and instantiate the model
-            with open(local_path.joinpath("args.json"), "r") as f:
-                args = json.load(f)
+                _load_state_dict_with_logging(model, model_dict, strict=strict)
 
-            # Load metadata to get version
-            with open(local_path.joinpath("metadata.json"), "r") as f:
-                metadata = json.load(f)
+        else:  # tar format (backward compatibility)
+            # Use a temporary directory to extract the tar file
+            with tempfile.TemporaryDirectory() as temp_dir:
+                local_path = Path(temp_dir)
 
-            model = _from_checkpoint_process(
-                cls,
-                args,
-                metadata,
-                override_args,
-                strict,
-            )
+                # Open tar file and extract contents to temporary directory
+                with tarfile.open(cached_file_name, "r") as tar:
+                    # Safely extract while supporting Python < 3.12
+                    extract_kwargs = dict(
+                        path=local_path,
+                        members=list(Module._safe_members(tar, local_path)),
+                    )
+                    if "filter" in tar.extractall.__code__.co_varnames:
+                        extract_kwargs["filter"] = "data"
+                    tar.extractall(**extract_kwargs)  # noqa: S202
 
-            # Load the model weights
-            model_dict = torch.load(
-                local_path.joinpath("model.pt"), map_location=model.device
-            )
+                # Check if the checkpoint is valid
+                Module._check_checkpoint(local_path)
 
-            _load_state_dict_with_logging(model, model_dict, strict=strict)
+                # Load model arguments and instantiate the model
+                with open(local_path.joinpath("args.json"), "r") as f:
+                    args = json.load(f)
+
+                # Load metadata to get version
+                with open(local_path.joinpath("metadata.json"), "r") as f:
+                    metadata = json.load(f)
+
+                model = _from_checkpoint_process(
+                    cls,
+                    args,
+                    metadata,
+                    override_args,
+                    strict,
+                )
+
+                # Load the model weights
+                model_dict = torch.load(
+                    local_path.joinpath("model.pt"), map_location=model.device
+                )
+
+                _load_state_dict_with_logging(model, model_dict, strict=strict)
+
         return model
 
     @staticmethod
