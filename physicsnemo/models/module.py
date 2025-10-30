@@ -537,10 +537,10 @@ class Module(torch.nn.Module):
 
         if not legacy_format:
             # Save in zip format (default)
-            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-                tmp_path = tmp.name
-
             try:
+                with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                    tmp_path = tmp.name
+
                 with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as archive:
                     # Save model state dict
                     state_dict_buffer = io.BytesIO()
@@ -705,9 +705,11 @@ class Module(torch.nn.Module):
                     if expected_file not in archive_files:
                         raise IOError(f"File '{expected_file}' not found in checkpoint")
 
-                # Load model weights directly from zip
-                with archive.open("model.pt") as f:
-                    model_dict = torch.load(f, map_location=device)
+                # Read into memory
+                model_bytes = archive.read("model.pt")
+
+            # Load state dict after closing archive
+            model_dict = torch.load(io.BytesIO(model_bytes), map_location=device)
 
             # Load state_dict into the model
             _load_state_dict_with_logging(self, model_dict, strict=strict)
@@ -1008,9 +1010,11 @@ class Module(torch.nn.Module):
                     strict,
                 )
 
-                # Load the model weights
-                with archive.open("model.pt") as f:
-                    model_dict = torch.load(f, map_location=model.device)
+                # Read into memory
+                model_bytes = archive.read("model.pt")
+
+            # Load state dict after closing archive
+            model_dict = torch.load(io.BytesIO(model_bytes), map_location=model.device)
 
             # Load state_dict into the model
             _load_state_dict_with_logging(model, model_dict, strict=strict)
