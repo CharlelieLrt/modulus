@@ -385,7 +385,12 @@ class Module(torch.nn.Module):
         # TODO: set up debug log
         # fh = logging.FileHandler(f'physicsnemo-core-{self.meta.name}.log')
 
-    def save(self, file_name: Union[str, None] = None, verbose: bool = False) -> None:
+    def save(
+        self,
+        file_name: Union[str, None] = None,
+        verbose: bool = False,
+        legacy_format: bool = False,
+    ) -> None:
         """
         Utility method for saving a ``Module`` instance to a '.mdlus' checkpoint file.
 
@@ -397,6 +402,9 @@ class Module(torch.nn.Module):
             have a 'name' attribute in this case).
         verbose : bool, optional, default=False
             Whether to save the model in verbose mode which will include git hash, etc.
+        legacy_format : bool, optional, default=False
+            Whether to save the model in legacy tar format. If True, saves as tar archive.
+            If False (default), saves as zip archive.
 
         Raises
         ------
@@ -524,32 +532,58 @@ class Module(torch.nn.Module):
                 )
             file_name = f"{meta_name}.mdlus"
 
-        # Write directly to zip file (no temporary directory needed)
+        # Write checkpoint file
         fs = _get_fs(file_name)
-        with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
-            tmp_path = tmp.name
 
-        try:
-            with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        if not legacy_format:
+            # Save in zip format (default)
+            with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+                tmp_path = tmp.name
+
+            try:
+                with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as archive:
+                    # Save model state dict
+                    state_dict_buffer = io.BytesIO()
+                    torch.save(self.state_dict(), state_dict_buffer)
+                    archive.writestr("model.pt", state_dict_buffer.getvalue())
+
+                    # Save args
+                    args_str = json.dumps(_args)
+                    archive.writestr("args.json", args_str)
+
+                    # Save metadata
+                    metadata_str = json.dumps(metadata_info)
+                    archive.writestr("metadata.json", metadata_str)
+
+                # Upload to final destination
+                fs.put(tmp_path, file_name)
+            finally:
+                # Clean up temporary file
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+        else:
+            # Save in legacy tar format
+            with tempfile.TemporaryDirectory() as temp_dir:
+                local_path = Path(temp_dir)
+
                 # Save model state dict
-                state_dict_buffer = io.BytesIO()
-                torch.save(self.state_dict(), state_dict_buffer)
-                archive.writestr("model.pt", state_dict_buffer.getvalue())
+                torch.save(self.state_dict(), local_path / "model.pt")
 
                 # Save args
-                args_str = json.dumps(_args)
-                archive.writestr("args.json", args_str)
+                with open(local_path / "args.json", "w") as f:
+                    json.dump(_args, f)
 
                 # Save metadata
-                metadata_str = json.dumps(metadata_info)
-                archive.writestr("metadata.json", metadata_str)
+                with open(local_path / "metadata.json", "w") as f:
+                    json.dump(metadata_info, f)
 
-            # Upload to final destination
-            fs.put(tmp_path, file_name)
-        finally:
-            # Clean up temporary file
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
+                # Create tar archive
+                with tarfile.open(local_path / "model.tar", "w") as tar:
+                    for file in local_path.iterdir():
+                        tar.add(str(file), arcname=file.name)
+
+                # Upload to final destination
+                fs.put(local_path / "model.tar", file_name)
 
     @staticmethod
     def _detect_checkpoint_format(file_path: str) -> str:
@@ -583,9 +617,6 @@ class Module(torch.nn.Module):
                     f"Checkpoint file {file_path} is neither a valid zip "
                     f"nor tar archive"
                 )
-        # TODO-CURSOR: the catch-all exception would be better to be avoided.
-        # Can you think of a way to improve this by still reporting the specific
-        # exception that was raised?
         except Exception as e:
             raise IOError(
                 f"Could not determine checkpoint format for {file_path}: {e}"
