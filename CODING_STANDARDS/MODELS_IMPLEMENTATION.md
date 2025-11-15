@@ -44,18 +44,28 @@ This document is structured in two main sections:
   all applicable rules.
 - **When refactoring**: Ensure refactored code maintains or improves compliance
   with these standards.
-- **For AI agents**: This document is formatted for easy parsing. Each rule has
+- **For AI agents that generate code**: This document is formatted for easy parsing. Each rule has
   a unique ID and structured sections (Description, Rationale, Example,
-  Anti-pattern) that can be extracted and used as context.
+  Anti-pattern) that can be extracted and used as context. When generating code
+  based on a rule, an AI agent should explicitly quote the rule ID that it is
+  following, and explicitly quote the relevant extract from the rule that it is
+  using as context. For example, "Following rule MOD-000, the new model class
+  should be ..."
+- **For AI agents that review code**: When reviewing code, the AI agent should
+  explicitly identify which rules are violated by the code, and provide a clear
+  explanation of why the code violates the rule. The AI agent should explicitly
+  quote the rule ID that the code is violating, and explicitly quote the relevant
+  extract from the rule that it is using as context. For example, "Code violates
+  rule MOD-000, because the new model class is not..."
 
 ## Rule Index
 
 | Rule ID | Summary | Apply When |
 |---------|---------|------------|
-| `MOD-000` | Models organization and where to place new model classes | Creating or refactoring new model classes |
-| `MOD-001` | Use proper class inheritance for all models | Creating or refactoring new model classes |
-| `MOD-002` | Model classes lifecycle | Creating or moving existing model classes |
-| `MOD-003` | Model classes documentation | Creating or editing any docstring in a model class |
+| [`MOD-000`](#mod-000-models-organization-and-where-to-place-new-model-classes) | Models organization and where to place new model classes | Creating or refactoring new model classes |
+| [`MOD-001`](#mod-001-use-proper-class-inheritance-for-all-models) | Use proper class inheritance for all models | Creating or refactoring new model classes |
+| [`MOD-002`](#mod-002-model-classes-lifecycle) | Model classes lifecycle | Creating or moving existing model classes |
+| [`MOD-003`](#mod-003-model-classes-documentation) | Model classes documentation | Creating or editing any docstring in a model class |
 
 ---
 
@@ -67,7 +77,7 @@ This document is structured in two main sections:
 
 There are two types of models in PhysicsNeMo:
 
-- Reusable layers that are the building blocks of more complex artchitectures.
+- Reusable layers that are the building blocks of more complex architectures.
   Those should go into `physicsnemo/nn`. Those include for instance
   `FullyConnected`, various variants of attention layers, `UNetBlock` (a block
   of a U-Net), etc.
@@ -95,25 +105,68 @@ repository, in particular a clear separation between reusable layers and more
 complete models that are applicable to a specific domain or specific data
 modality.
 
+**Example:**
+
+```python
+# Good: Reusable layer in physicsnemo/nn/attention.py
+class MultiHeadAttention(Module):
+    """A reusable attention layer that can be used in various architectures."""
+    pass
+
+# Good: Complete model in physicsnemo/models/transformer.py
+class TransformerModel(Module):
+    """A complete transformer model composed of attention and feedforward layers."""
+    def __init__(self):
+        super().__init__()
+        self.attention = MultiHeadAttention(...)
+        self.ffn = FeedForward(...)
+
+# Good: Example-specific utility in examples/weather/utils/nn.py
+class WeatherSpecificLayer(Module):
+    """Layer highly specific to the weather forecasting example."""
+    pass
+```
+
+**Anti-pattern:**
+
+```python
+# WRONG: Complete model placed in physicsnemo/nn/ instead of physicsnemo/models/
+# File: physicsnemo/nn/transformer.py
+class TransformerModel(Module):
+    """Should be in physicsnemo/models/ not physicsnemo/nn/"""
+    pass
+
+# WRONG: Reusable layer placed in physicsnemo/models/ instead of physicsnemo/nn/
+# File: physicsnemo/models/attention.py
+class MultiHeadAttention(Module):
+    """Should be in physicsnemo/nn/ not physicsnemo/models/"""
+    pass
+```
+
 ---
 
 ### MOD-001: Use proper class inheritance for all models
 
 **Description:**
-All model classes must inherit from `physicsnemo.Module`. Subclasses of
-`torch.nn.Module` are not allowed.
+All model classes must inherit from `physicsnemo.Module`. Direct subclasses of
+`torch.nn.Module` are not allowed. Direct subclasses of `physicsnemo.Module`
+are allowed (note that `physicsnemo.Module` is a subclass of `torch.nn.Module`).
 Ensure proper initialization of parent classes using `super().__init__()`. Pass
 the `meta` argument to the `super().__init__()` call if appropriate, otherwise
 set it manually with `self.meta = meta`.
 
 **Rationale:**
 Ensures invariants and functionality of the `physicsnemo.Module` class for all
-models.
+models. In particular, instances of `physicsnemo.Module` benefit from features
+that are not available in `torch.nn.Module` instances. Those include serialization
+for checkpointing and loading modules and submodules, versioning system to
+handle backward compatibility, as well as ability to be registered in the
+`physicsnemo.registry` for easy instantiation and use in any codebase.
 
 **Example:**
 
 ```python
-from physicsnemo.models import Module
+from physicsnemo import Module
 
 class MyModel(Module):
     def __init__(self, input_dim: int, output_dim: int):
@@ -144,8 +197,8 @@ All model classes must follow the following lifecycle:
   `physicsnemo/experimental/models` for more complete models. The `experimental`
   folder is used to store models that are still under development (beta or
   alpha releases) during this stage, backward compatibility is not guaranteed.
-  One exception is when the developper is highly confident that the model
-  is sufficiently mature andapplicable to many domains or use cases. In this
+  One exception is when the developer is highly confident that the model
+  is sufficiently mature and applicable to many domains or use cases. In this
   case the model class can be created in the `physicsnemo/nn` or `physicsnemo/models`
   folders directly, and backward compatibility is guaranteed. Another exception
   is when the model class is highly specific to a single example. In this case,
@@ -159,14 +212,14 @@ All model classes must follow the following lifecycle:
   guaranteed.
 
 - Stage 3: Pre-deprecation. For a model class in stage 3 in `physicsnemo/nn` or
-  `physicsnemo/models`, the developper should start planning its deprecation.
+  `physicsnemo/models`, the developer should start planning its deprecation.
   This is done by adding a warning message to the model class, indicating that
   the model class is deprecated and will be removed in a future release. The
   warning message should be a clear and concise message that explains why the
   model class is being deprecated and what the user should do instead. The
   deprecation message should be added to both the docstring and should be
-  raised at runtime. The developper is free to choose the mechanism to raise the
-  deprecation warning. A mnodel class cannot be deprecated without staying in
+  raised at runtime. The developer is free to choose the mechanism to raise the
+  deprecation warning. A model class cannot be deprecated without staying in
   stage 3 "pre-deprecation" for at least 1 release cycle.
 
 - Stage 4: Deprecation. After staying in stage 3 "pre-deprecation" for at least 1
@@ -183,17 +236,83 @@ migrate to newer alternatives, preventing breaking changes that could disrupt
 their workflows. This graduated approach balances innovation with stability,
 a critical requirement for a scientific computing framework.
 
+**Example:**
+
+```python
+# Good: Stage 1 - New experimental model
+# File: physicsnemo/experimental/models/new_diffusion.py
+class DiffusionModel(Module):
+    """New diffusion model under active development. API may change."""
+    pass
+
+# Good: Stage 2 - Promoted to production after 1 release cycle
+# File: physicsnemo/models/diffusion.py (moved from experimental/)
+class DiffusionModel(Module):
+    """Stable diffusion model with backward compatibility guarantees."""
+    pass
+
+# Good: Stage 3 - Pre-deprecation with warning
+# File: physicsnemo/models/old_diffusion.py
+class DiffusionModel(Module):
+    """
+    Legacy diffusion model.
+
+    .. deprecated:: 0.5.0
+        ``OldDiffusionModel`` is deprecated and will be removed in version 0.7.0.
+        Use :class:`~physicsnemo.models.NewDiffusionModel` instead.
+    """
+    def __init__(self):
+        import warnings
+        warnings.warn(
+            "OldDiffusionModel is deprecated. Use DiffusionModel instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        super().__init__()
+
+# Good: Stage 4 - Model removed after deprecation period
+# (File deleted from codebase)
+```
+
+**Anti-pattern:**
+
+```python
+# WRONG: New model directly in production folder without experimental phase
+# File: physicsnemo/models/brand_new_model.py (should be in experimental/ first)
+class BrandNewModel(Module):
+    """Skipped experimental stage - risky for stability"""
+    pass
+
+# WRONG: Breaking changes in production without deprecation cycle
+# File: physicsnemo/models/diffusion.py
+class DiffusionModel(Module):
+    def __init__(self, new_required_param):  # Breaking change!
+        # Changed API without deprecation warning - breaks user code
+        pass
+
+# WRONG: Deprecation without sufficient warning period
+# (Model deprecated and removed in same release)
+
+# WRONG: No deprecation warning in code
+# File: physicsnemo/models/old_model.py
+class OldModel(Module):
+    """Will be removed next release."""  # Docstring mentions it but no runtime warning
+    def __init__(self):
+        # Missing: warnings.warn(..., DeprecationWarning)
+        super().__init__()
+```
+
 ---
 
-### MOD-003: Use proper class inheritance for all models
+### MOD-003: Model classes documentation
 
 **Description:**
 
 Every new model or modification of any model code should be documented with a
 comprehensive docstring. Each method of the model class should be documented with a
-docstring as well. The foward method should be documented in the docstring of the
+docstring as well. The forward method should be documented in the docstring of the
 model class, instead of being in the docstring of the forward method itself. A
-doctrsing for the forward is still possible but it should be concise and to the
+docstring for the forward is still possible but it should be concise and to the
 point. To document the forward method, use the sections `Forward` and
 `Outputs`. In addition, all docstrings should be written in the NumPy style,
 and adopt formatting to be compatible with our Sphinx restructured text (RST)
@@ -214,7 +333,7 @@ The docstrings should follow the following requirements:
 
 - All tensors should be documented with their shape, using LaTeX math notation such
   as :math:`(N, C, H_{in}, W_{in})` (there is flexibility for naming the
-  dimensions, but te math format should be enforced). Our documentation is
+  dimensions, but the math format should be enforced). Our documentation is
   rendered using LaTeX, and supports a rich set of LaTeX commands, so
   it is recommended to use LaTeX commands whenever possible for mathematical
   variables in the docstrings. The mathematical notations should be to some degree
@@ -222,7 +341,7 @@ The docstrings should follow the following requirements:
   that is not always possible, to avoid too complex formatting).
 
 - For arguments or variables that are callback functions, (e.g. Callable), the
-  docstring should include a clear sepaarted ..code-block:: that specifies the
+  docstring should include a clear separated ..code-block:: that specifies the
   required signature and return type of the callback function. This is not only
   true for callback functions, but for any type of parameters or arguments that
   has some complex type specification or API requirements. The explanation code
@@ -230,14 +349,14 @@ The docstrings should follow the following requirements:
   not in the `Parameters` or `Forward` or `Outputs` sections, for readability
   and clarity.
 
-- Inline code should be formatted double backticks, such as ```my_variable```.
+- Inline code should be formatted double backticks, such as ``my_variable``.
   Single backticks are not allowed as they don't render properly in our Sphinx
   documentation.
 
 - All parameters should be documented with their type and default values on a
   single line.
 
-- When possible docstring should use links to other docstrings, such as
+- When possible, docstrings should use links to other docstrings, such as
   :class:`~physicsnemo.models.some_model.SomeModel`, or
   :func:`~physicsnemo.utils.common_function`, or
   :meth:`~physicsnemo.models.some_model.SomeModel.some_method`.
