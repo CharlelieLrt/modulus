@@ -1,8 +1,9 @@
-<!-- markdownlint-disable MD012 MD013 MD024 MD031 MD033 MD034 MD040 MD046 -->
+<!-- markdownlint-disable MD012 MD013 MD024 MD031 MD032 MD033 MD034 MD040 MD046 -->
 <!-- MD012: Multiple consecutive blank lines -->
 <!-- MD013: Line length -->
 <!-- MD024: Multiple headings with the same content -->
 <!-- MD031: Fenced code blocks should be surrounded by blank lines -->
+<!-- MD032: Lists should be surrounded by blank lines -->
 <!-- MD033: Inline HTML -->
 <!-- MD034: Bare URL used -->
 <!-- MD040: Fenced code blocks should have a language specified -->
@@ -66,6 +67,11 @@ This document is structured in two main sections:
 | [`MOD-001`](#mod-001-use-proper-class-inheritance-for-all-models) | Use proper class inheritance for all models | Creating or refactoring new model classes |
 | [`MOD-002`](#mod-002-model-classes-lifecycle) | Model classes lifecycle | Creating or moving existing model classes |
 | [`MOD-003`](#mod-003-model-classes-documentation) | Model classes documentation | Creating or editing any docstring in a model class |
+| [`MOD-004`](#mod-004-self-contained-model-modules) | Keep utility functions in the same module as the model | Organizing or refactoring model code |
+| [`MOD-005`](#mod-005-tensor-shape-validation) | Validate tensor shapes in forward and public methods | Implementing or modifying model forward or public methods |
+| [`MOD-006`](#mod-006-jaxtyping-annotations) | Use jaxtyping for tensor type annotations | Adding or editing any new public method of a model class |
+| [`MOD-007`](#mod-007-backward-compatibility) | Maintain backward compatibility for model signatures | Modifying existing production models |
+| [`MOD-008`](#mod-008-minimal-ci-testing-requirements) | Provide comprehensive CI tests for all models | Moving models out of experimental or adding new models |
 
 ---
 
@@ -365,6 +371,13 @@ The docstrings should follow the following requirements:
   documentation, docstrings should use links to the external resource in the
   format `some link text <some_url>`_.
 
+- Docstrings are strongly encouraged to have an `Examples` section that
+  demonstrates basic construction and usage of the model. These example sections
+  serve as both documentation and tests, as our CI system automatically tests
+  these code sections for correctness when present. Examples should be
+  executable Python code showing typical use cases, including model
+  instantiation, input preparation, and forward pass execution.
+
 **Rationale:**
 Comprehensive and well-formatted documentation is essential for scientific
 software. It enables users to understand model capabilities, expected inputs,
@@ -593,7 +606,546 @@ class BadEncoder(Module):
 
 ---
 
+### MOD-004: Self-contained model modules
 
+**Description:**
+
+All utility functions for a model class should be contained in the same module
+file as the model class itself. For a model called `MyModelName` in
+`my_model_name.py`, all utility functions specific to that model should also be
+in `my_model_name.py`. Utility functions should never be placed in separate
+files like `my_model_name_utils.py` or `my_model_name/utils.py`.
+
+The only exception to this rule is when a utility function is used across
+multiple models. In that case, the shared utility should be placed in an
+appropriate shared module and imported in `my_model_name.py`.
+
+**Rationale:**
+
+Self-contained modules are easier to understand, maintain, and navigate. Having
+all model-specific code in one place reduces cognitive load and makes it clear
+which utilities are model-specific versus shared. This also simplifies code
+reviews and reduces the likelihood of orphaned utility files when models are
+refactored or removed.
+
+**Example:**
+
+```python
+# Good: Utility function in the same file as the model
+# File: physicsnemo/models/my_transformer.py
+
+def _compute_attention_mask(seq_length: int) -> torch.Tensor:
+    """Helper function specific to MyTransformer."""
+    mask = torch.triu(torch.ones(seq_length, seq_length), diagonal=1)
+    return mask.masked_fill(mask == 1, float('-inf'))
+
+class MyTransformer(Module):
+    """A transformer model."""
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        mask = _compute_attention_mask(x.shape[1])
+        return self._apply_attention(x, mask)
+```
+
+**Anti-pattern:**
+
+```python
+# WRONG: Utility function in separate file
+# File: physicsnemo/models/my_transformer_utils.py
+def _compute_attention_mask(seq_length: int) -> torch.Tensor:
+    """Should be in my_transformer.py, not in a separate utils file."""
+    mask = torch.triu(torch.ones(seq_length, seq_length), diagonal=1)
+    return mask.masked_fill(mask == 1, float('-inf'))
+
+# File: physicsnemo/models/my_transformer.py
+from physicsnemo.models.my_transformer_utils import _compute_attention_mask  # WRONG
+
+class MyTransformer(Module):
+    """A transformer model."""
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        mask = _compute_attention_mask(x.shape[1])
+        return self._apply_attention(x, mask)
+```
+
+---
+
+### MOD-005: Tensor shape validation
+
+**Description:**
+
+All forward methods and other public methods that accept tensor arguments must
+validate tensor shapes at the beginning of the method. This rule applies to:
+- Individual tensor arguments
+- Containers of tensors (lists, tuples, dictionaries)
+
+For containers, validate their length, required keys, and the shapes of
+contained tensors. Validation statements should be concise (ideally one check
+per argument). Error messages must follow the standardized format:
+`"Expected tensor of shape (B, D) but got tensor of shape {actual_shape}"`.
+
+To avoid interactions with `torch.compile`, all validation must be wrapped in a
+conditional check using `torch.compiler.is_compiling()`. Follow the "fail-fast"
+approach by validating inputs before any computation.
+
+**Rationale:**
+
+Early shape validation catches errors at the API boundary with clear, actionable
+error messages, making debugging significantly easier. Without validation, shape
+mismatches result in cryptic errors deep in the computation graph. The
+`torch.compile` guard ensures that validation overhead is eliminated in
+production compiled code while preserving debug-time safety.
+
+**Example:**
+
+```python
+def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    """Forward pass with shape validation."""
+    ### Input validation
+    # Skip validation when running under torch.compile for performance
+    if not torch.compiler.is_compiling():
+        # Extract expected dimensions
+        B, C, H, W = x.shape if x.ndim == 4 else (None, None, None, None)
+
+        # Validate x shape
+        if x.ndim != 4:
+            raise ValueError(
+                f"Expected 4D input tensor (B, C, H, W), got {x.ndim}D tensor with shape {tuple(x.shape)}"
+            )
+
+        if C != self.in_channels:
+            raise ValueError(
+                f"Expected {self.in_channels} input channels, got {C} channels"
+            )
+
+        # Validate optional mask
+        if mask is not None:
+            if mask.shape != (B, H, W):
+                raise ValueError(
+                    f"Expected mask shape ({B}, {H}, {W}), got {tuple(mask.shape)}"
+                )
+
+    # Actual computation happens after validation
+    return self._process(x, mask)
+
+def process_list(self, tensors: List[torch.Tensor]) -> torch.Tensor:
+    """Process a list of tensors with validation."""
+    ### Input validation
+    if not torch.compiler.is_compiling():
+        if len(tensors) == 0:
+            raise ValueError("Expected non-empty list of tensors")
+
+        # Validate all tensors have consistent shapes
+        ref_shape = tensors[0].shape
+        for i, t in enumerate(tensors[1:], start=1):
+            if t.shape != ref_shape:
+                raise ValueError(
+                    f"All tensors must have the same shape. "
+                    f"Tensor 0 has shape {tuple(ref_shape)}, "
+                    f"but tensor {i} has shape {tuple(t.shape)}"
+                )
+
+    return torch.stack(tensors)
+```
+
+**Anti-pattern:**
+
+```python
+# WRONG: No validation at all
+def forward(self, x: torch.Tensor) -> torch.Tensor:
+    return self.layer(x)  # Will fail with cryptic error if shape is wrong
+
+# WRONG: Validation not guarded by torch.compiler.is_compiling()
+def forward(self, x: torch.Tensor) -> torch.Tensor:
+    if x.ndim != 4:  # Breaks torch.compile
+        raise ValueError(f"Expected 4D tensor, got {x.ndim}D")
+    return self.layer(x)
+
+# WRONG: Validation after computation has started
+def forward(self, x: torch.Tensor) -> torch.Tensor:
+    h = self.layer1(x)  # Computation started
+    if x.shape[1] != self.in_channels:  # Too late!
+        raise ValueError(f"Wrong number of channels")
+    return self.layer2(h)
+
+# WRONG: Non-standard error message format
+def forward(self, x: torch.Tensor) -> torch.Tensor:
+    if not torch.compiler.is_compiling():
+        if x.ndim != 4:
+            raise ValueError("Input must be 4D")  # Missing actual shape info
+    return self.layer(x)
+```
+
+---
+
+### MOD-006: Jaxtyping annotations
+
+**Description:**
+
+All tensor arguments and variables in model `__init__`, `forward`, and other
+public methods must have type annotations using `jaxtyping`. This provides
+runtime-checkable shape information in type hints.
+
+Use the format `Float[torch.Tensor, "shape_spec"]` where shape_spec describes
+tensor dimensions using space-separated dimension names (e.g., `"batch channels height width"`
+or `"b c h w"`).
+
+**Rationale:**
+
+Jaxtyping annotations provide explicit, machine-readable documentation of
+expected tensor shapes. This enables better IDE support, catches shape errors
+earlier, and makes code more self-documenting. The annotations serve as both
+documentation and optional runtime checks when jaxtyping's validation is
+enabled.
+
+**Example:**
+
+```python
+from jaxtyping import Float
+import torch
+
+class MyConvNet(Module):
+    def __init__(self, in_channels: int, out_channels: int):
+        super().__init__()
+        self.conv = torch.nn.Conv2d(in_channels, out_channels, kernel_size=3)
+
+    def forward(
+        self,
+        x: Float[torch.Tensor, "batch in_channels height width"]
+    ) -> Float[torch.Tensor, "batch out_channels height width"]:
+        """Process input with convolution."""
+        return self.conv(x)
+
+def process_attention(
+    query: Float[torch.Tensor, "batch seq_len d_model"],
+    key: Float[torch.Tensor, "batch seq_len d_model"],
+    value: Float[torch.Tensor, "batch seq_len d_model"]
+) -> Float[torch.Tensor, "batch seq_len d_model"]:
+    """Compute attention with clear shape annotations."""
+    pass
+```
+
+**Anti-pattern:**
+
+```python
+# WRONG: No jaxtyping annotations
+def forward(self, x: torch.Tensor) -> torch.Tensor:
+    return self.layer(x)
+
+# WRONG: Using plain comments instead of jaxtyping
+def forward(self, x: torch.Tensor) -> torch.Tensor:
+    # x: (batch, channels, height, width)  # Use jaxtyping instead
+    return self.layer(x)
+
+# WRONG: Incomplete annotations (missing jaxtyping for tensor arguments)
+def forward(
+    self,
+    x: Float[torch.Tensor, "b c h w"],
+    mask: torch.Tensor  # Missing jaxtyping annotation
+) -> Float[torch.Tensor, "b c h w"]:
+    return self.layer(x, mask)
+```
+
+---
+
+### MOD-007: Backward compatibility
+
+**Description:**
+
+For any model in `physicsnemo/nn` or `physicsnemo/models`, it is strictly
+forbidden to change the signature of `__init__`, any public method, or any
+public attribute without maintaining backward compatibility. This includes:
+- Adding new required parameters
+- Removing parameters
+- Renaming parameters
+- Changing parameter types
+- Changing return types
+
+If a signature change is absolutely necessary, the developer must:
+1. Add a backward compatibility mapping in the model class
+2. Increment the model version number
+3. Maintain support for the old API for at least 2 release cycles
+4. Add deprecation warnings for the old API
+
+**Rationale:**
+
+PhysicsNeMo is used in production environments and research code where
+unexpected API changes can break critical workflows. Maintaining backward
+compatibility ensures that users can upgrade to new versions without their code
+breaking. Version numbers and compatibility mappings provide a clear migration
+path when changes are necessary.
+
+**Example:**
+
+```python
+from typing import Any, Dict, Optional
+
+# Good: Adding optional parameter with default value (backward compatible)
+class MyModel(Module):
+    __model_checkpoint_version__ = "2.0"
+    __supported_model_checkpoint_version__ = {
+        "1.0": "Loading checkpoint from version 1.0 (current is 2.0). Still supported."
+    }
+
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        dropout: float = 0.0,  # New parameter with default
+        new_feature: bool = False  # New parameter with default
+    ):
+        super().__init__(meta=MyModelMetaData())
+        # ... implementation
+
+# Good: Proper backward compatibility when parameter must be renamed
+class MyModel(Module):
+    __model_checkpoint_version__ = "2.0"
+    __supported_model_checkpoint_version__ = {
+        "1.0": (
+            "Loading MyModel checkpoint from version 1.0 (current is 2.0). "
+            "Parameter 'hidden_dim' has been renamed to 'hidden_size'. "
+            "Consider re-saving to upgrade to version 2.0."
+        )
+    }
+
+    @classmethod
+    def _backward_compat_arg_mapper(
+        cls, version: str, args: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Map arguments from older versions to current version format."""
+        # Call parent class method first
+        args = super()._backward_compat_arg_mapper(version, args)
+
+        if version == "1.0":
+            # Map old parameter name to new name
+            if "hidden_dim" in args:
+                args["hidden_size"] = args.pop("hidden_dim")
+
+            # Remove deprecated parameters that are no longer used
+            if "legacy_param" in args:
+                _ = args.pop("legacy_param")
+
+        return args
+
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        hidden_size: int = 128,  # New name (was 'hidden_dim' in v1.0)
+    ):
+        super().__init__(meta=MyModelMetaData())
+        self.hidden_size = hidden_size
+        # ... implementation
+```
+
+**Anti-pattern:**
+
+```python
+# WRONG: Changing parameter name without backward compatibility
+class MyModel(Module):
+    __model_checkpoint_version__ = "2.0"
+    # Missing: __supported_model_checkpoint_version__ and _backward_compat_arg_mapper
+
+    def __init__(self, input_dim: int, hidden_size: int):  # Renamed from hidden_dim
+        super().__init__(meta=MyModelMetaData())
+        # WRONG: Old checkpoints with 'hidden_dim' will fail to load!
+
+# WRONG: Adding required parameter without default
+class MyModel(Module):
+    __model_checkpoint_version__ = "2.0"
+
+    def __init__(self, input_dim: int, output_dim: int, new_param: int):  # No default!
+        super().__init__(meta=MyModelMetaData())
+        # WRONG: Old checkpoints without 'new_param' will fail to load!
+
+# WRONG: Not incrementing version when making breaking changes
+class MyModel(Module):
+    __model_checkpoint_version__ = "1.0"  # Should be "2.0"!
+
+    @classmethod
+    def _backward_compat_arg_mapper(cls, version: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        # WRONG: Making breaking changes but not updating version number
+        if "hidden_dim" in args:
+            args["hidden_size"] = args.pop("hidden_dim")
+        return args
+
+# WRONG: Not calling super() in _backward_compat_arg_mapper
+class MyModel(Module):
+    @classmethod
+    def _backward_compat_arg_mapper(cls, version: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        # WRONG: Missing super()._backward_compat_arg_mapper(version, args)
+        if version == "1.0":
+            if "hidden_dim" in args:
+                args["hidden_size"] = args.pop("hidden_dim")
+        return args
+
+# WRONG: Changing return type without compatibility
+class MyModel(Module):
+    __model_checkpoint_version__ = "2.0"
+
+    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        # WRONG: v1.0 returned single tensor, v2.0 returns tuple - breaks user code!
+        return output, loss
+```
+
+---
+
+### MOD-008: Minimal CI testing requirements
+
+**Description:**
+
+Every model in a module file `my_model_name.py` in `physicsnemo/nn` or
+`physicsnemo/models` must have corresponding tests in
+`test/models/test_<my_model_name>.py`. Tests should roughly follow a similar
+template and, three types of tests are required:
+
+1. **Constructor and attribute tests**: Verify model instantiation and all
+   public attributes (excluding buffers and parameters).
+
+2. **Non-regression test with reference data**: Instantiate a model, run
+   forward pass, and compare outputs against reference data saved in a `.pth`
+   file.
+
+3. **Non-regression test from checkpoint**: Load a model from a checkpoint file
+   (`.mdlus`) and verify outputs match reference data.
+
+Additional requirements:
+- All tests must use `pytest` parameterization syntax
+- At least 2 configurations must be tested: one with all default arguments, one
+  with non-default arguments. More variations specific to some relevant
+  use-cases are also encouraged.
+- Test tensors must have realistic shapes (e.g. no singleton dimensions) and
+  should be as meaningful and representative of actual use cases as possible.
+- All public methods must have the same non-regression tests as the forward
+  method
+- Simply checking output shapes is NOT sufficient - actual values must be
+  compared
+- **Critical:** Per MOD-002, it is forbidden to move a model out of the
+  experimental stage/directory without these tests
+
+**Rationale:**
+
+Comprehensive tests ensure model correctness and prevent regressions as code
+evolves. Non-regression tests with reference data catch subtle numerical changes
+that could break reproducibility. Checkpoint tests verify serialization and
+deserialization work correctly. Parameterized tests ensure models work across
+different configurations. These tests are required before models can graduate
+from experimental to production status.
+
+**Example:**
+
+```python
+# Good: Following the test_layers_unet_block.py template
+import pytest
+import torch
+from physicsnemo.models import MyModel
+
+def _instantiate_model(cls, seed: int = 0, **kwargs):
+    """Helper to create model with reproducible parameters."""
+    model = cls(**kwargs)
+    gen = torch.Generator(device="cpu")
+    gen.manual_seed(seed)
+    with torch.no_grad():
+        for param in model.parameters():
+            param.copy_(torch.randn(param.shape, generator=gen, dtype=param.dtype))
+    return model
+
+@pytest.mark.parametrize("device", ["cuda:0", "cpu"])
+@pytest.mark.parametrize(
+    "config",
+    ["default", "custom"],
+    ids=["with_defaults", "with_custom_args"]
+)
+def test_my_model_non_regression(device, config):
+    """Test model forward pass against reference output."""
+    # Setup model configuration
+    if config == "default":
+        model = _instantiate_model(MyModel, input_dim=64, output_dim=32)
+    else:
+        model = _instantiate_model(
+            MyModel,
+            input_dim=64,
+            output_dim=32,
+            hidden_dim=256,
+            dropout=0.1
+        )
+
+    model = model.to(device)
+
+    # Test constructor and attributes
+    assert model.input_dim == 64
+    assert model.output_dim == 32
+    if config == "custom":
+        assert model.hidden_dim == 256
+        assert model.dropout == 0.1
+
+    # Load reference data (meaningful shapes, no singleton dimensions)
+    data = torch.load(f"test/models/data/my_model_{config}_v1.0.pth")
+    x = data["x"].to(device)  # Shape: (4, 64), not (1, 64)
+    out_ref = data["out"].to(device)
+
+    # Run forward and compare
+    out = model(x)
+    assert torch.allclose(out, out_ref, atol=1e-5, rtol=1e-5)
+
+@pytest.mark.parametrize("device", ["cuda:0", "cpu"])
+def test_my_model_from_checkpoint(device):
+    """Test loading model from checkpoint and verify outputs."""
+    model = physicsnemo.Module.from_checkpoint(
+        "test/models/data/my_model_default_v1.0.mdlus"
+    ).to(device)
+
+    # Test attributes
+    assert model.input_dim == 64
+    assert model.output_dim == 32
+
+    # Load reference and verify
+    data = torch.load("test/models/data/my_model_default_v1.0.pth")
+    x = data["x"].to(device)
+    out_ref = data["out"].to(device)
+    out = model(x)
+    assert torch.allclose(out, out_ref, atol=1e-5, rtol=1e-5)
+
+@pytest.mark.parametrize("device", ["cuda:0", "cpu"])
+def test_my_model_public_method_non_regression(device):
+    """Test public method compute_loss against reference."""
+    model = _instantiate_model(MyModel, input_dim=64, output_dim=32).to(device)
+
+    data = torch.load("test/models/data/my_model_loss_v1.0.pth")
+    pred = data["pred"].to(device)
+    target = data["target"].to(device)
+    loss_ref = data["loss"].to(device)
+
+    loss = model.compute_loss(pred, target)
+    assert torch.allclose(loss, loss_ref, atol=1e-6, rtol=1e-6)
+```
+
+**Anti-pattern:**
+
+```python
+# WRONG: Only testing output shapes
+def test_my_model_bad(device):
+    model = MyModel(input_dim=64, output_dim=32).to(device)
+    x = torch.randn(4, 64).to(device)
+    out = model(x)
+    assert out.shape == (4, 32)  # NOT SUFFICIENT!
+
+# WRONG: Using singleton dimensions in test data
+def test_my_model_bad(device):
+    x = torch.randn(1, 1, 64)  # WRONG: Trivial shapes hide bugs
+
+# WRONG: No parameterization
+def test_my_model_bad():
+    model = MyModel(input_dim=64, output_dim=32)  # Only tests defaults
+
+# WRONG: No checkpoint loading test
+# (Missing test_my_model_from_checkpoint entirely)
+
+# WRONG: Public methods not tested
+class MyModel(Module):
+    def compute_loss(self, pred, target):  # No test for this method
+        return F.mse_loss(pred, target)
+```
+
+---
 
 ## Compliance
 
