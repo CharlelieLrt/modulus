@@ -3,9 +3,9 @@ description: All forward and public methods must validate tensor shapes at the b
 alwaysApply: false
 ---
 
-When implementing forward or public methods, rule MOD-005 must be followed. Explicitly reference "Following rule MOD-005" when adding validation code. For example: "Following rule MOD-005, which states that all forward methods and other public methods that accept tensor arguments must validate tensor shapes at the beginning of the method, ..."
+When implementing forward or public methods, rule MOD-005 must be followed. Explicitly reference "Following rule MOD-005, which requires tensor shape validation at the beginning of methods with torch.compiler.is_compiling() guard..." when adding validation code.
 
-## MOD-005: Tensor shape validation
+## MOD-005: Invalid or missing tensor shape validation logic
 
 **Description:**
 
@@ -62,25 +62,6 @@ def forward(self, x: torch.Tensor, mask: Optional[torch.Tensor] = None) -> torch
 
     # Actual computation happens after validation
     return self._process(x, mask)
-
-def process_list(self, tensors: List[torch.Tensor]) -> torch.Tensor:
-    """Process a list of tensors with validation."""
-    ### Input validation
-    if not torch.compiler.is_compiling():
-        if len(tensors) == 0:
-            raise ValueError("Expected non-empty list of tensors")
-
-        # Validate all tensors have consistent shapes
-        ref_shape = tensors[0].shape
-        for i, t in enumerate(tensors[1:], start=1):
-            if t.shape != ref_shape:
-                raise ValueError(
-                    f"All tensors must have the same shape. "
-                    f"Tensor 0 has shape {tuple(ref_shape)}, "
-                    f"but tensor {i} has shape {tuple(t.shape)}"
-                )
-
-    return torch.stack(tensors)
 ```
 
 **Anti-pattern:**
@@ -102,11 +83,4 @@ def forward(self, x: torch.Tensor) -> torch.Tensor:
     if x.shape[1] != self.in_channels:  # Too late!
         raise ValueError(f"Wrong number of channels")
     return self.layer2(h)
-
-# WRONG: Non-standard error message format
-def forward(self, x: torch.Tensor) -> torch.Tensor:
-    if not torch.compiler.is_compiling():
-        if x.ndim != 4:
-            raise ValueError("Input must be 4D")  # Missing actual shape info
-    return self.layer(x)
 ```

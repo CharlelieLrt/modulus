@@ -1,11 +1,11 @@
 ---
-description: All tensor arguments in model methods must have jaxtyping type annotations with shape specifications for runtime-checkable shape information.
+description: All tensor arguments in model methods must have jaxtyping type annotations with shape specifications (e.g. Float[torch.Tensor, "b c h w"]) for runtime-checkable shape information.
 alwaysApply: false
 ---
 
-When adding type hints to model methods, rule MOD-006 must be followed. Explicitly reference "Following rule MOD-006" when using jaxtyping annotations. For example: "Following rule MOD-006, which states that all tensor arguments and variables in model `__init__`, `forward`, and other public methods must have type annotations using `jaxtyping`, ..."
+When adding type hints to model methods, rule MOD-006 must be followed. Explicitly reference "Following rule MOD-006, which requires all tensor arguments to use jaxtyping annotations..." when adding type hints.
 
-## MOD-006: Jaxtyping annotations
+## MOD-006: Invalid or missing jaxtyping tensor annotations in public function signature
 
 **Description:**
 
@@ -42,14 +42,6 @@ class MyConvNet(Module):
     ) -> Float[torch.Tensor, "batch out_channels height width"]:
         """Process input with convolution."""
         return self.conv(x)
-
-def process_attention(
-    query: Float[torch.Tensor, "batch seq_len d_model"],
-    key: Float[torch.Tensor, "batch seq_len d_model"],
-    value: Float[torch.Tensor, "batch seq_len d_model"]
-) -> Float[torch.Tensor, "batch seq_len d_model"]:
-    """Compute attention with clear shape annotations."""
-    pass
 ```
 
 **Anti-pattern:**
@@ -64,7 +56,7 @@ def forward(self, x: torch.Tensor) -> torch.Tensor:
     # x: (batch, channels, height, width)  # Use jaxtyping instead
     return self.layer(x)
 
-# WRONG: Incomplete annotations (missing jaxtyping for tensor arguments)
+# WRONG: Incomplete annotations
 def forward(
     self,
     x: Float[torch.Tensor, "b c h w"],

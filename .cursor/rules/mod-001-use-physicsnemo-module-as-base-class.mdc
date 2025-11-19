@@ -1,13 +1,14 @@
 ---
-description: All model classes must inherit from physicsnemo.Module (not torch.nn.Module directly) to ensure proper serialization, versioning, and registry functionality.
+description: All model and layer classes must inherit from physicsnemo.Module (not torch.nn.Module directly) to ensure proper serialization, versioning, and registry functionality.
 alwaysApply: false
 ---
 
-When creating or modifying model classes, rule MOD-001 must be strictly followed. Explicitly reference "Following rule MOD-001" when explaining inheritance decisions and quote the requirement that all models inherit from `physicsnemo.Module`.
+When creating or modifying model classes, rule MOD-001 must be strictly followed. Explicitly reference "Following rule MOD-001, which states that all model classes must inherit from physicsnemo.Module..." when explaining inheritance decisions.
 
-## MOD-001: Use proper class inheritance for all models
+## MOD-001: Use physicsnemo.Module as model base classes
 
 **Description:**
+
 All model classes must inherit from `physicsnemo.Module`. Direct subclasses of
 `torch.nn.Module` are not allowed. Direct subclasses of `physicsnemo.Module`
 are allowed (note that `physicsnemo.Module` is a subclass of `torch.nn.Module`).
@@ -16,6 +17,7 @@ the `meta` argument to the `super().__init__()` call if appropriate, otherwise
 set it manually with `self.meta = meta`.
 
 **Rationale:**
+
 Ensures invariants and functionality of the `physicsnemo.Module` class for all
 models. In particular, instances of `physicsnemo.Module` benefit from features
 that are not available in `torch.nn.Module` instances. Those include serialization
