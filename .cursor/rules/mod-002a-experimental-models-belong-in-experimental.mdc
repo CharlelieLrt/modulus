@@ -29,8 +29,8 @@ least 1 release cycle), the model class can be promoted to production. It is
 then moved to the `physicsnemo/nn` or `physicsnemo/models` folders, based on
 whether it's a reusable layer or complete model (see MOD-000a and MOD-000b).
 
-**Note:** Per MOD-008, it is forbidden to move a model out of the experimental
-stage/directory without the required CI tests.
+**Note:** Per MOD-008a, MOD-008b, and MOD-008c, it is forbidden to move a model
+out of the experimental stage/directory without the required CI tests.
 
 **Rationale:**
 

@@ -3,9 +3,9 @@ description: All parameters must be documented with their type and default value
 alwaysApply: false
 ---
 
-When documenting parameters, rule MOD-003g must be followed. Explicitly reference "Following rule MOD-003g, which requires parameters to be documented with type and default on a single line..." when formatting parameter documentation.
+When documenting parameters, rule MOD-003h must be followed. Explicitly reference "Following rule MOD-003h, which requires parameters to be documented with type and default on a single line..." when formatting parameter documentation.
 
-## MOD-003g: Parameters must be documented on single line
+## MOD-003h: Parameters must be documented on single line
 
 **Description:**
 

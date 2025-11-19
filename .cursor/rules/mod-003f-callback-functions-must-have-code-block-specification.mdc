@@ -3,9 +3,9 @@ description: Callback function parameters must include a ..code-block:: specific
 alwaysApply: false
 ---
 
-When documenting callback functions or complex API parameters, rule MOD-003e must be followed. Explicitly reference "Following rule MOD-003e, which requires callback functions to have a ..code-block:: specification..." when adding these specifications.
+When documenting callback functions or complex API parameters, rule MOD-003f must be followed. Explicitly reference "Following rule MOD-003f, which requires callback functions to have a ..code-block:: specification..." when adding these specifications.
 
-## MOD-003e: Callback functions must have code-block specification
+## MOD-003f: Callback functions must have code-block specification
 
 **Description:**
 

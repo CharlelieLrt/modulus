@@ -3,9 +3,9 @@ description: Model and method docstrings must be prefixed with r""" (raw string 
 alwaysApply: false
 ---
 
-When writing docstrings, rule MOD-003a must be followed. Explicitly reference "Following rule MOD-003a, which requires docstrings to be prefixed with r"""..." when explaining docstring format.
+When writing docstrings, rule MOD-003b must be followed. Explicitly reference "Following rule MOD-003b, which requires docstrings to be prefixed with r"""..." when explaining docstring format.
 
-## MOD-003a: Docstring must use raw string prefix r"""
+## MOD-003b: Docstring must use raw string prefix r"""
 
 **Description:**
 

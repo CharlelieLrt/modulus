@@ -3,9 +3,9 @@ description: Docstrings should include an Examples section with executable code 
 alwaysApply: false
 ---
 
-When writing model docstrings, rule MOD-003i should be followed. Explicitly reference "Following rule MOD-003i, which encourages an Examples section that CI will automatically test..." when adding examples.
+When writing model docstrings, rule MOD-003j should be followed. Explicitly reference "Following rule MOD-003j, which encourages an Examples section that CI will automatically test..." when adding examples.
 
-## MOD-003i: Docstrings should include Examples section
+## MOD-003j: Docstrings should include Examples section
 
 **Description:**
 

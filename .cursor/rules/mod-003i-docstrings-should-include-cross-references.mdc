@@ -3,9 +3,9 @@ description: Docstrings should use Sphinx cross-references (:class:, :func:, :me
 alwaysApply: false
 ---
 
-When writing docstrings with references to other code, rule MOD-003h should be followed. Explicitly reference "Following rule MOD-003h, which encourages cross-references using :class:, :func:, :meth:..." when adding links.
+When writing docstrings with references to other code, rule MOD-003i should be followed. Explicitly reference "Following rule MOD-003i, which encourages cross-references using :class:, :func:, :meth:..." when adding links.
 
-## MOD-003h: Docstrings should include cross-references
+## MOD-003i: Docstrings should include cross-references
 
 **Description:**
 

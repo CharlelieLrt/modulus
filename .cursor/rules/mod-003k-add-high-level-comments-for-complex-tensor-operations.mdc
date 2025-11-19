@@ -3,9 +3,9 @@ description: Complex tensor operations should include high-level semantic commen
 alwaysApply: false
 ---
 
-When writing model code with complex tensor operations, rule MOD-003j should be followed. Explicitly reference "Following rule MOD-003j, which recommends high-level comments for complex tensor operations..." when adding explanatory comments.
+When writing model code with complex tensor operations, rule MOD-003k should be followed. Explicitly reference "Following rule MOD-003k, which recommends high-level comments for complex tensor operations..." when adding explanatory comments.
 
-## MOD-003j: Add high-level comments for complex tensor operations
+## MOD-003k: Add high-level comments for complex tensor operations
 
 **Description:**
 

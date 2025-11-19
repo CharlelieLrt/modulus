@@ -3,9 +3,9 @@ description: Inline code in docstrings must be formatted with double backticks `
 alwaysApply: false
 ---
 
-When writing inline code in docstrings, rule MOD-003f must be followed. Explicitly reference "Following rule MOD-003f, which requires inline code to use double backticks..." when formatting code references.
+When writing inline code in docstrings, rule MOD-003g must be followed. Explicitly reference "Following rule MOD-003g, which requires inline code to use double backticks..." when formatting code references.
 
-## MOD-003f: Inline code must use double backticks
+## MOD-003g: Inline code must use double backticks
 
 **Description:**
 

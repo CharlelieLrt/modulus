@@ -587,7 +587,7 @@ section and a `Returns` section. Other sections such as `Notes`, `Examples`, or
 recognized by our Sphinx documentation and are prohibited.
 
 Note: The forward method is a special case - its full documentation should be in
-the class docstring (see MOD-003b), though a concise forward method docstring is
+the class docstring (see MOD-003c), though a concise forward method docstring is
 permitted.
 
 **Rationale:**

@@ -3,9 +3,9 @@ description: All tensor shapes in docstrings must use LaTeX math notation like :
 alwaysApply: false
 ---
 
-When documenting tensor shapes, rule MOD-003d must be followed. Explicitly reference "Following rule MOD-003d, which requires tensor shapes to use LaTeX math notation :math:`...`..." when documenting tensors.
+When documenting tensor shapes, rule MOD-003e must be followed. Explicitly reference "Following rule MOD-003e, which requires tensor shapes to use LaTeX math notation :math:`...`..." when documenting tensors.
 
-## MOD-003d: Tensor shapes must use LaTeX math notation
+## MOD-003e: Tensor shapes must use LaTeX math notation
 
 **Description:**
 
