@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import warnings
 from importlib.metadata import EntryPoint, entry_points
-from typing import List, Union
+from typing import TYPE_CHECKING, List, Union
 
-from .base import RegisterableModule
+if TYPE_CHECKING:
+    from physicsnemo.core.module import Module
 
 # NOTE: This is for backport compatibility, some entry points seem to be using this old class
 # Exact cause of this is unknown but it seems to be related to multiple versions
@@ -75,9 +76,7 @@ class ModelRegistry:
 
         return registry
 
-    def register(
-        self, model: type[RegisterableModule], name: Union[str, None] = None
-    ) -> None:
+    def register(self, model: type[Module], name: Union[str, None] = None) -> None:
         """
         Registers a physicsnemo model class in the model registry under the provided name. If no name
         is provided, the model's name (from its `__name__` attribute) is used. If the
@@ -97,7 +96,7 @@ class ModelRegistry:
         """
 
         # Check if model is a physicsnemo module
-        if not issubclass(model, RegisterableModule):
+        if not issubclass(model, Module):
             raise ValueError(
                 f"Only subclasses of physicsnemo.core.Module can be registered. "
                 f"Provided model is of type {type(model)}"
@@ -114,7 +113,7 @@ class ModelRegistry:
         # Add this class to the dict of model registry
         self._model_registry[name] = model
 
-    def factory(self, name: str) -> RegisterableModule:
+    def factory(self, name: str) -> Module:
         """
         Returns a registered model given its name.
 
