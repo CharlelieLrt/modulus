@@ -31,7 +31,6 @@ registry = ModelRegistry()
 class MMetaData(ModelMetaData):
     """Custom User Metadata for Model"""
 
-    name: str = "M"
     # Optimization    jit: bool = True
     cuda_graphs: bool = True
     amp: bool = True
@@ -62,7 +61,6 @@ class M(physicsnemo.core.Module):
 class M1MetaData(ModelMetaData):
     """Custom User Metadata for Model"""
 
-    name: str = "M1"
     # Optimization    jit: bool = True
     cuda_graphs: bool = True
     amp: bool = True
@@ -91,7 +89,6 @@ class M1(physicsnemo.core.Module):
 class TorchModelMetaData(ModelMetaData):
     """Custom User Metadata for Model"""
 
-    name: str = "TorchModel"
     # Optimization    jit: bool = True
     cuda_graphs: bool = True
     amp: bool = True

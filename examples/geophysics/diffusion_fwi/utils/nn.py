@@ -275,7 +275,6 @@ class DiffusionFWINetMetaData(ModelMetaData):
     Metadata for the DiffusionFWINet model.
     """
 
-    name: str = "DiffusionFWINet"
     # Optimization
     jit: bool = False
     cuda_graphs: bool = False

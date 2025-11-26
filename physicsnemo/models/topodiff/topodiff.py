@@ -40,7 +40,6 @@ from ..diffusion import (
 
 @dataclass
 class MetaData(ModelMetaData):
-    name: str = "TopoDiff"
     # Optimization
     jit: bool = False
     cuda_graphs: bool = False

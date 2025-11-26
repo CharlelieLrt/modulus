@@ -212,7 +212,6 @@ class Transolver_block(nn.Module):
 
 @dataclass
 class MetaData(ModelMetaData):
-    name: str = "Transolver"
     # Optimization
     jit: bool = False
     cuda_graphs: bool = False

@@ -66,7 +66,6 @@ from physicsnemo.utils.profiling import profile
 
 @dataclass
 class MetaData(ModelMetaData):
-    name: str = "MeshGraphNet"
     # Optimization, no JIT as DGLGraph causes trouble
     jit: bool = False
     cuda_graphs: bool = False

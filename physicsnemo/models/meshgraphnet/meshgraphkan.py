@@ -60,7 +60,6 @@ from physicsnemo.nn.kan_layers import KolmogorovArnoldNetwork
 
 @dataclass
 class MetaData(ModelMetaData):
-    name: str = "MeshGraphKAN"
     # Optimization, no JIT as DGLGraph causes trouble
     jit: bool = False
     cuda_graphs: bool = False

@@ -28,7 +28,6 @@ from physicsnemo.nn.activations import get_activation
 
 @dataclass
 class MetaData(ModelMetaData):
-    name: str = "AeroGraphNet"
     jit: bool = False
     cuda_graphs: bool = False
     amp_cpu: bool = False

@@ -520,7 +520,6 @@ class DecoderBlock(nn.Module):
 
 @dataclass
 class MetaData(ModelMetaData):
-    name: str = "UNet"
     # Optimization
     jit: bool = False
     cuda_graphs: bool = True
