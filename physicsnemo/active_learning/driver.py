@@ -648,22 +648,14 @@ class Driver(p.DriverProtocol):
 
         # Save model weights (separate from training state)
         if isinstance(self.learner, Module):
-            model_name = (
-                self.learner.meta.name
-                if self.learner.meta
-                else self.learner.__class__.__name__
-            )
+            model_name = self.learner.__class__.__name__
             model_path = checkpoint_dir / f"{model_name}.mdlus"
             self.learner.save(str(model_path))
         elif hasattr(self.learner, "module") and isinstance(
             self.learner.module, Module
         ):
             # Unwrap DDP
-            model_name = (
-                self.learner.module.meta.name
-                if self.learner.module.meta
-                else self.learner.module.__class__.__name__
-            )
+            model_name = self.learner.module.__class__.__name__
             model_path = checkpoint_dir / f"{model_name}.mdlus"
             self.learner.module.save(str(model_path))
         else:
@@ -785,9 +777,7 @@ class Driver(p.DriverProtocol):
             # Load model weights into provided learner
             # Determine expected model filename based on learner type
             if isinstance(learner, Module):
-                model_name = (
-                    learner.meta.name if learner.meta else learner.__class__.__name__
-                )
+                model_name = learner.__class__.__name__
                 model_path = checkpoint_path / f"{model_name}.mdlus"
                 if model_path.exists():
                     learner.load(str(model_path))
@@ -798,11 +788,7 @@ class Driver(p.DriverProtocol):
                         learner.load(str(mdlus_files[0]))
             elif hasattr(learner, "module") and isinstance(learner.module, Module):
                 # Unwrap DDP
-                model_name = (
-                    learner.module.meta.name
-                    if learner.module.meta
-                    else learner.module.__class__.__name__
-                )
+                model_name = learner.module.__class__.__name__
                 model_path = checkpoint_path / f"{model_name}.mdlus"
                 if model_path.exists():
                     learner.module.load(str(model_path))

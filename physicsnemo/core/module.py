@@ -391,14 +391,14 @@ class Module(torch.nn.Module):
         self.logger.handlers.clear()
         handler = logging.StreamHandler()
         formatter = logging.Formatter(
-            f"[%(asctime)s - %(levelname)s - {self.meta.name}] %(message)s",
+            f"[%(asctime)s - %(levelname)s - {type(self).__name__}] %(message)s",
             datefmt="%Y-%m-%d %H:%M:%S",
         )
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
         self.logger.setLevel(logging.DEBUG)
         # TODO: set up debug log
-        # fh = logging.FileHandler(f'physicsnemo-core-{self.meta.name}.log')
+        # fh = logging.FileHandler(f'physicsnemo-core-{type(self).__name__}.log')
 
     def save(
         self,
@@ -413,8 +413,7 @@ class Module(torch.nn.Module):
         ----------
         file_name : Union[str,None], optional, default=None
             File name to save the model checkpoint to. When ``None`` is provided it will default to
-            the model's name set in the meta data (the model's metadata must
-            have a 'name' attribute in this case).
+            the model's class name.
         verbose : bool, optional, default=False
             Whether to save the model in verbose mode which will include git hash, etc.
         legacy_format : bool, optional, default=False
@@ -430,8 +429,7 @@ class Module(torch.nn.Module):
         --------
         >>> from physicsnemo.models.mlp import FullyConnected
         >>> model = FullyConnected(in_features=32, out_features=64)
-        >>> # Save a checkpoint with the default file name 'FullyConnected.mdlus'.
-        >>> # In this case, the model.meta.name coincides with the model class name, but that is not always the case.
+        >>> # Save a checkpoint with the default file name 'FullyConnected.mdlus' (using the class name).
         >>> model.save()
         >>> # Save a checkpoint to a specified file name 'my_model.mdlus'
         >>> model.save("my_model.mdlus")
@@ -537,15 +535,9 @@ class Module(torch.nn.Module):
         # information
         _save_process(self, _args, metadata_info)
 
-        # If file_name is not provided, use the model's name from the metadata
+        # If file_name is not provided, use the model's class name
         if file_name is None:
-            meta_name = getattr(self.meta, "name", None)
-            if meta_name is None:
-                raise ValueError(
-                    "Model metadata does not have a 'name' attribute, please set it "
-                    "explicitly or pass a 'file_name' argument to save a checkpoint."
-                )
-            file_name = f"{meta_name}.mdlus"
+            file_name = f"{type(self).__name__}.mdlus"
 
         # Write checkpoint file
         fs = _get_fs(file_name)
