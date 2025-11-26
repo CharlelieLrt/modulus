@@ -1222,7 +1222,7 @@ class Module(torch.nn.Module):
         PhysicsNeMoModel.__init__.__signature__ = init_signature
 
         # Generate a unique name for the created class
-        new_class_name = f"{torch_model_class.__name__}"
+        new_class_name = f"{torch_model_class.__name__}" if name is None else name
         PhysicsNeMoModel.__name__ = new_class_name
 
         # Add this class to the dict of models classes
