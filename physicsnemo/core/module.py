@@ -196,6 +196,22 @@ class Module(torch.nn.Module):
         self.register_buffer("device_buffer", torch.empty(0))
         self._setup_logger()
 
+    def __init_subclass__(cls, *, _register=True, **kwargs):
+        """
+        Register the subclass of Module in the model registry if _register is
+        True.
+
+        Parameters
+        ----------
+        _register : bool, optional
+            For internal use only. Whether to register the subclass in the
+            model registry, by default True
+        """
+        super().__init_subclass__()
+        if _register:
+            registry = ModelRegistry()
+            registry.register(cls, cls.__name__)
+
     def _setup_logger(self):
         self.logger = logging.getLogger("core.module")
         handler = logging.StreamHandler()
@@ -1065,24 +1081,115 @@ class Module(torch.nn.Module):
 
     @staticmethod
     def from_torch(
-        torch_model_class: type[torch.nn.Module], meta: ModelMetaData | None = None
+        torch_model_class: type[torch.nn.Module],
+        meta: ModelMetaData | None = None,
+        name: str | None = None,
     ) -> type[Module]:
-        """Construct a PhysicsNeMo module from a PyTorch module
+        """
+        Construct a PhysicsNeMo module from a PyTorch module. The resulting
+        class is a PhysicsNeMo Module class. Any instance of this class will be
+        a PhysicsNeMo Module instance with an attribute ``inner_model`` that is an
+        instance of the PyTorch model class.
 
         Parameters
         ----------
         torch_model_class : torch.nn.Module
             PyTorch module class
-        meta : ModelMetaData, optional
-            Meta data for the model, by default None
+        meta : ModelMetaData, optional, default=None
+            Meta data for the model.
+        name : str, optional, default=None
+            Name of the PhysicsNeMo model class. Used for registering the class in the
+            model registry. If None, the name of the PyTorch model class is
+            used.
 
         Returns
         -------
         Module
+
+        Examples
+        --------
+        Example 1: Convert a PyTorch model to PhysicsNeMo without specifying a name:
+
+        >>> import torch
+        >>> import torch.nn as nn
+        >>> from physicsnemo.core import Module, ModelMetaData, ModelRegistry
+        >>> # Define a simple MLP in PyTorch
+        >>> class SimpleMLP(nn.Module):
+        ...     def __init__(self, input_size, hidden_size, output_size):
+        ...         super().__init__()
+        ...         self.input_size = input_size
+        ...         self.hidden_size = hidden_size
+        ...         self.output_size = output_size
+        ...         self.fc1 = nn.Linear(input_size, hidden_size)
+        ...         self.relu = nn.ReLU()
+        ...         self.fc2 = nn.Linear(hidden_size, output_size)
+        ...
+        ...     def forward(self, x):
+        ...         x = self.fc1(x)
+        ...         x = self.relu(x)
+        ...         x = self.fc2(x)
+        ...         return x
+        >>> # Convert PyTorch model to PhysicsNeMo Module
+        >>> # The class name 'SimpleMLP' will be used for registration
+        >>> PNMSimpleMLP = Module.from_torch(SimpleMLP, meta=ModelMetaData())
+        >>> # Instantiate the PhysicsNeMo model
+        >>> model = PNMSimpleMLP(input_size=10, hidden_size=64, output_size=5)
+        >>> # Access the inner PyTorch model
+        >>> assert model.inner_model.input_size == 10
+        >>> assert model.inner_model.hidden_size == 64
+        >>> assert model.inner_model.output_size == 5
+        >>> # Use the model for inference
+        >>> x = torch.randn(32, 10)
+        >>> output = model(x)  # Shape: (32, 5)
+        >>> # Retrieve the model class from the registry
+        >>> registry = ModelRegistry()
+        >>> ModelClass = registry.factory('SimpleMLP')
+        >>> isinstance(ModelClass, type) and issubclass(ModelClass, Module)
+        True
+
+        Example 2: Convert a PyTorch model with a custom name:
+
+        >>> import torch
+        >>> import torch.nn as nn
+        >>> from physicsnemo.core import Module, ModelMetaData, ModelRegistry
+        >>> # Define a simple MLP in PyTorch
+        >>> class SimpleMLP(nn.Module):
+        ...     def __init__(self, input_size, hidden_size, output_size):
+        ...         super().__init__()
+        ...         self.input_size = input_size
+        ...         self.hidden_size = hidden_size
+        ...         self.output_size = output_size
+        ...         self.fc1 = nn.Linear(input_size, hidden_size)
+        ...         self.relu = nn.ReLU()
+        ...         self.fc2 = nn.Linear(hidden_size, output_size)
+        ...
+        ...     def forward(self, x):
+        ...         x = self.fc1(x)
+        ...         x = self.relu(x)
+        ...         x = self.fc2(x)
+        ...         return x
+        >>> # Convert with a custom name for the registry
+        >>> PNMSimpleMLP = Module.from_torch(
+        ...     SimpleMLP,
+        ...     meta=ModelMetaData(),
+        ...     name='CustomSimpleMLP'
+        ... )
+        >>> # Instantiate the PhysicsNeMo model
+        >>> model = PNMSimpleMLP(input_size=10, hidden_size=64, output_size=5)
+        >>> # Access the inner PyTorch model
+        >>> assert model.inner_model.input_size == 10
+        >>> assert model.inner_model.hidden_size == 64
+        >>> assert model.inner_model.output_size == 5
+        >>> # Retrieve the model class from the registry using the custom name
+        >>> registry = ModelRegistry()
+        >>> ModelClass = registry.factory('CustomSimpleMLP')
+        >>> isinstance(ModelClass, type) and issubclass(ModelClass, Module)
+        True
+
         """
 
         # Define an internal class as before
-        class PhysicsNeMoModel(Module):
+        class PhysicsNeMoModel(Module, _register=False):
             def __init__(self, *args, **kwargs):
                 super().__init__(meta=meta)
                 self.inner_model = torch_model_class(*args, **kwargs)
