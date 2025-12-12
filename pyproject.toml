@@ -197,17 +197,84 @@ exclude = ["docs", "physicsnemo/experimental"]
 
 
 [project.entry-points."physicsnemo.models"]
+# AFNO
 AFNO = "physicsnemo.models.afno:AFNO"
-DLWP = "physicsnemo.models.dlwp:DLWP"
-FNO = "physicsnemo.models.fno:FNO"
-GraphCastNet = "physicsnemo.models.graphcast:GraphCastNet"
-MeshGraphNet = "physicsnemo.models.meshgraphnet:MeshGraphNet"
-FullyConnected = "physicsnemo.models.mlp:FullyConnected"
-Pix2Pix = "physicsnemo.models.pix2pix:Pix2Pix"
-One2ManyRNN = "physicsnemo.models.rnn:One2ManyRNN"
-SRResNet = "physicsnemo.models.srrn:SRResNet"
-Pangu = "physicsnemo.models.pangu:Pangu"
-Fengwu = "physicsnemo.models.fengwu:Fengwu"
-SwinRNN = "physicsnemo.models.swinvrnn:SwinRNN"
+DistributedAFNO = "physicsnemo.models.afno:DistributedAFNO"
+ModAFNO = "physicsnemo.models.afno:ModAFNO"
+
+# Diffusion UNets
+SongUNet = "physicsnemo.models.diffusion:SongUNet"
+SongUNetPosEmbd = "physicsnemo.models.diffusion:SongUNetPosEmbd"
+SongUNetPosLtEmbd = "physicsnemo.models.diffusion:SongUNetPosLtEmbd"
+DhariwalUNet = "physicsnemo.models.diffusion:DhariwalUNet"
+
+# Diffusion wrappers
+CorrDiffRegressionUNet = "physicsnemo.models.diffusion:CorrDiffRegressionUNet"
+StormCastUNet = "physicsnemo.models.diffusion:StormCastUNet"
+
+# Diffusion Preconditioners
+EDMPrecond = "physicsnemo.models.diffusion:EDMPrecond"
+EDMPrecondSuperResolution = "physicsnemo.models.diffusion:EDMPrecondSuperResolution"
 EDMPrecondSR = "physicsnemo.models.diffusion:EDMPrecondSR"
-UNet = "physicsnemo.models.diffusion:UNet"
+VEPrecond = "physicsnemo.models.diffusion:VEPrecond"
+VPPrecond = "physicsnemo.models.diffusion:VPPrecond"
+iDDPMPrecond = "physicsnemo.models.diffusion:iDDPMPrecond"
+VEPrecond_dfsr_cond = "physicsnemo.models.diffusion:VEPrecond_dfsr_cond"
+VEPrecond_dfsr = "physicsnemo.models.diffusion:VEPrecond_dfsr"
+
+# DLWP
+DLWP = "physicsnemo.models.dlwp:DLWP"
+
+# DLWP HEALPix
+HEALPixRecUNet = "physicsnemo.models.dlwp_healpix:HEALPixRecUNet"
+HEALPixUNet = "physicsnemo.models.dlwp_healpix:HEALPixUNet"
+
+# DPOT
+DPOTNet = "physicsnemo.models.dpot:DPOTNet"
+
+# Fengwu
+Fengwu = "physicsnemo.models.fengwu:Fengwu"
+
+# FIGConvNet
+FIGConvUNet = "physicsnemo.models.figconvnet:FIGConvUNet"
+
+# FNO
+FNO = "physicsnemo.models.fno:FNO"
+
+# GraphCast
+GraphCastNet = "physicsnemo.models.graphcast:GraphCastNet"
+
+# MeshGraphNets
+MeshGraphNet = "physicsnemo.models.meshgraphnet:MeshGraphNet"
+BiStrideMeshGraphNet = "physicsnemo.models.meshgraphnet:BiStrideMeshGraphNet"
+MeshGraphKAN = "physicsnemo.models.meshgraphnet:MeshGraphKAN"
+HybridMeshGraphNet = "physicsnemo.models.meshgraphnet:HybridMeshGraphNet"
+
+# MLP
+FullyConnected = "physicsnemo.models.mlp:FullyConnected"
+
+# Pangu
+Pangu = "physicsnemo.models.pangu:Pangu"
+
+# Pix2Pix
+Pix2Pix = "physicsnemo.models.pix2pix:Pix2Pix"
+Pix2PixUnet = "physicsnemo.models.pix2pix:Pix2PixUnet"
+
+# RNNs
+One2ManyRNN = "physicsnemo.models.rnn:One2ManyRNN"
+Seq2SeqRNN = "physicsnemo.models.rnn:Seq2SeqRNN"
+
+# SRNNs
+SRResNet = "physicsnemo.models.srrn:SRResNet"
+
+# SwinRNN
+SwinRNN = "physicsnemo.models.swinvrnn:SwinRNN"
+
+# TopoDiff
+TopoDiff = "physicsnemo.models.topodiff:TopoDiff"
+
+# Transolver
+Transolver = "physicsnemo.models.transolver:Transolver"
+
+# VFGN
+VFGN = "physicsnemo.models.vfgn:VFGN"

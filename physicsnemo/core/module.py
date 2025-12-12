@@ -144,6 +144,22 @@ class Module(torch.nn.Module):
         # Create nested model with converted torch modules
         model = PNMMyModel(inner_model=PNMInnerModel(size=128))
 
+    When subclassing ``Module``, you can pass ``register=True`` as a class argument
+    to automatically register the class in the model registry. This allows the class to be retrieved later by name using
+    the :class:`~physicsnemo.core.registry.ModelRegistry`:
+
+    >>> from physicsnemo.core import Module, ModelMetaData, ModelRegistry
+    >>> class MyCustomModel(Module, register=True):
+    ...     def __init__(self, hidden_dim=64):
+    ...         super().__init__(meta=ModelMetaData())
+    ...         self.hidden_dim = hidden_dim
+    >>> # The class is now registered and can be retrieved by name
+    >>> registry = ModelRegistry()
+    >>> ModelClass = registry.factory('MyCustomModel')
+    >>> model = ModelClass(hidden_dim=128)
+    >>> model.hidden_dim
+    128
+
     """
 
     _file_extension = ".mdlus"  # Set file extension for saving and loading
@@ -196,19 +212,19 @@ class Module(torch.nn.Module):
         self.register_buffer("device_buffer", torch.empty(0))
         self._setup_logger()
 
-    def __init_subclass__(cls, *, _register=True, **kwargs):
+    def __init_subclass__(cls, *, register=False, **kwargs):
         """
-        Register the subclass of Module in the model registry if _register is
+        Register the subclass of Module in the model registry if register is
         True.
 
         Parameters
         ----------
-        _register : bool, optional
+        register : bool, optional, default=False
             For internal use only. Whether to register the subclass in the
-            model registry, by default True
+            model registry.
         """
         super().__init_subclass__()
-        if _register:
+        if register:
             registry = ModelRegistry()
             registry.register(cls, cls.__name__)
 
@@ -1076,6 +1092,7 @@ class Module(torch.nn.Module):
         torch_model_class: type[torch.nn.Module],
         meta: ModelMetaData | None = None,
         name: str | None = None,
+        register: bool = False,
     ) -> type[Module]:
         """
         Construct a PhysicsNeMo module from a PyTorch module. The resulting
@@ -1093,6 +1110,10 @@ class Module(torch.nn.Module):
             Name of the PhysicsNeMo model class. Used for registering the class in the
             model registry. If None, the name of the PyTorch model class is
             used.
+        register : bool, optional, default=False
+            Whether to register the class in the model registry. If True, the
+            class will be registered and can be retrieved later using
+            ``ModelRegistry().factory(name)``.
 
         Returns
         -------
@@ -1178,10 +1199,48 @@ class Module(torch.nn.Module):
         >>> isinstance(ModelClass, type) and issubclass(ModelClass, Module)
         True
 
+        Example 3: Convert a PyTorch model with explicit registration:
+
+        >>> import torch
+        >>> import torch.nn as nn
+        >>> from physicsnemo.core import Module, ModelMetaData, ModelRegistry
+        >>> # Define a simple MLP in PyTorch
+        >>> class SimpleMLP(nn.Module):
+        ...     def __init__(self, input_size, hidden_size, output_size):
+        ...         super().__init__()
+        ...         self.input_size = input_size
+        ...         self.hidden_size = hidden_size
+        ...         self.output_size = output_size
+        ...         self.fc1 = nn.Linear(input_size, hidden_size)
+        ...         self.relu = nn.ReLU()
+        ...         self.fc2 = nn.Linear(hidden_size, output_size)
+        ...
+        ...     def forward(self, x):
+        ...         x = self.fc1(x)
+        ...         x = self.relu(x)
+        ...         x = self.fc2(x)
+        ...         return x
+        >>> # Convert with register=True to add to the model registry
+        >>> PNMSimpleMLP = Module.from_torch(
+        ...     SimpleMLP,
+        ...     meta=ModelMetaData(),
+        ...     name='RegisteredMLP',
+        ...     register=True
+        ... )
+        >>> # The class is now registered and can be retrieved by name
+        >>> registry = ModelRegistry()
+        >>> ModelClass = registry.factory('RegisteredMLP')
+        >>> isinstance(ModelClass, type) and issubclass(ModelClass, Module)
+        True
+        >>> # Instantiate the model from the registry
+        >>> model = ModelClass(input_size=10, hidden_size=64, output_size=5)
+        >>> model.inner_model.input_size
+        10
+
         """
 
         # Define an internal class as before
-        class PhysicsNeMoModel(Module, _register=False):
+        class PhysicsNeMoModel(Module):
             def __init__(self, *args, **kwargs):
                 super().__init__(meta=meta)
                 self.inner_model = torch_model_class(*args, **kwargs)
@@ -1217,9 +1276,10 @@ class Module(torch.nn.Module):
         new_class_name = f"{torch_model_class.__name__}" if name is None else name
         PhysicsNeMoModel.__name__ = new_class_name
 
-        # Add this class to the dict of models classes
-        registry = ModelRegistry()
-        registry.register(PhysicsNeMoModel, new_class_name)
+        # Register the class in the model registry if requested
+        if register:
+            registry = ModelRegistry()
+            registry.register(PhysicsNeMoModel, new_class_name)
 
         return PhysicsNeMoModel
 
