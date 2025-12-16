@@ -48,7 +48,7 @@ def sphere_stl(tmp_path):
     return file_path
 
 
-@requires_module(["vtk", "warp"])
+@requires_module(["vtk", "warp", "stl"])
 def test_mesh_utils(tmp_path, pytestconfig):
     """Tests the utility for combining VTP files and converting tesselated files."""
 
