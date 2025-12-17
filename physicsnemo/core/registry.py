@@ -118,25 +118,6 @@ class ModelRegistry:
         >>> # Instantiate the model
         >>> model = ModelClass(hidden_size=128)
 
-        Example 2: Register a model class with a custom name:
-
-        >>> from physicsnemo.core import Module, ModelRegistry
-        >>> # Define a custom model class
-        >>> class MyCustomModel(Module):
-        ...     def __init__(self, hidden_size):
-        ...         super().__init__()
-        ...         self.hidden_size = hidden_size
-        ...
-        ...     def forward(self, x):
-        ...         return x
-        >>> # Get the registry instance
-        >>> registry = ModelRegistry()
-        >>> # Register the model with a custom name
-        >>> registry.register(AdvancedModel, name='my_advanced_model_v1')
-        >>> # Retrieve the model class from the registry using the custom name
-        >>> ModelClass = registry.factory('my_advanced_model_v1')
-        >>> # Instantiate the model
-        >>> model = ModelClass(hidden_size=128)
 
         """
 
