@@ -375,6 +375,7 @@ class StaticCaptureTraining(_StaticCapture):
     Example
     -------
     >>> # Create model
+    >>> import physicsnemo
     >>> model = physicsnemo.models.mlp.FullyConnected(2, 64, 2)
     >>> input = torch.rand(8, 2)
     >>> output = torch.rand(8, 2)
@@ -466,6 +467,7 @@ class StaticCaptureEvaluateNoGrad(_StaticCapture):
     Example
     -------
     >>> # Create model
+    >>> import physicsnemo
     >>> model = physicsnemo.models.mlp.FullyConnected(2, 64, 2)
     >>> input = torch.rand(8, 2)
     >>> # Create evaluate function with optimization wrapper
