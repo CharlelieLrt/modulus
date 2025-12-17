@@ -155,7 +155,7 @@ model-extras = [
 ]
 datapipes-extras = [
     "dask",
-    "tensorflow",
+    "tfrecord",
     "nvidia-physicsnemo[model-extras]",
 ]
 
