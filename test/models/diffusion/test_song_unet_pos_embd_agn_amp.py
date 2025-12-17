@@ -25,6 +25,9 @@ from test.conftest import requires_module
 
 @requires_module("apex")
 def test_song_unet_global_indexing(apex_device):
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
+
     torch.manual_seed(0)
     N_pos = 2
     batch_shape_x = 32
@@ -63,6 +66,9 @@ def test_song_unet_global_indexing(apex_device):
 @requires_module("apex")
 def test_song_unet_constructor(apex_device):
     """Test the Song UNet constructor options"""
+
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
 
     # DDM++
     img_resolution = 16
@@ -111,6 +117,9 @@ def test_song_unet_constructor(apex_device):
 
 @requires_module("apex")
 def test_song_unet_position_embedding(apex_device):
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
+
     # build unet
     img_resolution = 16
     in_channels = 2
@@ -163,6 +172,9 @@ def test_fails_if_grid_is_invalid(apex_device):
     in_channels = 2
     out_channels = 2
 
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
+
     with pytest.raises(ValueError):
         UNet(
             img_resolution=img_resolution,
@@ -189,6 +201,9 @@ def test_fails_if_grid_is_invalid(apex_device):
 @requires_module("apex")
 def test_song_unet_optims(apex_device):
     """Test Song UNet optimizations"""
+
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
 
     def setup_model():
         model = (
@@ -233,6 +248,10 @@ def test_song_unet_optims(apex_device):
 @requires_module("apex")
 def test_song_unet_checkpoint(apex_device):
     """Test Song UNet checkpoint save/load"""
+
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
+
     # Construct FNO models
     model_1 = (
         UNet(
@@ -273,6 +292,10 @@ def test_song_unet_checkpoint(apex_device):
 @common.check_ort_version()
 def test_son_unet_deploy(apex_device):
     """Test Song UNet deployment support"""
+
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
+
     model = (
         UNet(
             img_resolution=16,

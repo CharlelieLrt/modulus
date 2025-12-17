@@ -24,8 +24,8 @@ from numpy.typing import NDArray
 
 from physicsnemo.core.version_check import check_version_spec
 
-STL_AVAILABLE = check_version_spec("stl", hard_fail=False)
-SKIMAGE_AVAILABLE = check_version_spec("skimage", hard_fail=False)
+STL_AVAILABLE = check_version_spec("numpy-stl", hard_fail=False)
+SKIMAGE_AVAILABLE = check_version_spec("scikit-image", hard_fail=False)
 
 if STL_AVAILABLE:
     mesh = importlib.import_module("stl").mesh

@@ -15,6 +15,7 @@
 # limitations under the License.
 # ruff: noqa: E402
 
+import pytest
 import torch
 
 from physicsnemo.models.diffusion import SongUNetPosLtEmbd
@@ -23,9 +24,7 @@ from test.conftest import requires_module
 
 
 @requires_module("apex")
-def setup_model_learnable_embd(
-    apex_device, img_resolution, lt_steps, lt_channels, N_pos, seed=0
-):
+def setup_model_learnable_embd(img_resolution, lt_steps, lt_channels, N_pos, seed=0):
     """
     Create a model with similar architecture to CorrDiff (learnable positional
     embeddings, self-attention, learnable lead time embeddings).
@@ -199,6 +198,9 @@ def test_song_unet_forward_no_patches(apex_device):
     """
     torch._dynamo.reset()
 
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
+
     # Common parameters
     B, C_x, lt_steps = 3, 4, 4
 
@@ -262,6 +264,9 @@ def test_song_unet_forward_with_patches(apex_device):
     the model.
     """
     torch._dynamo.reset()
+
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
 
     # Common parameters
     P, B, C_x, H_p, W_p, lt_steps = 4, 3, 4, 32, 64, 4
@@ -440,6 +445,9 @@ def test_song_unet_checkpoint_no_patches(apex_device):
     # Common parameters
     lt_steps = 4
 
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
+
     # DDM++ model with square global shape
     H = W = 128
     lt_steps, lt_channels = 4, 8
@@ -511,6 +519,9 @@ def test_song_unet_checkpoint_with_patches(apex_device):
 
     # Common parameters
     H_p, W_p, lt_steps = 32, 64, 4
+
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
 
     # DDM++ model with square global shape
     H = W = 128

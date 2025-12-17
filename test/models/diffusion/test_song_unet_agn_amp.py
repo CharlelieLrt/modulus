@@ -15,6 +15,7 @@
 # limitations under the License.
 # ruff: noqa: E402
 
+import pytest
 import torch
 
 from physicsnemo.models.diffusion import SongUNet as UNet
@@ -25,6 +26,9 @@ from test.conftest import requires_module
 @requires_module("apex")
 def test_song_unet_constructor(apex_device):
     """Test the Song UNet constructor options"""
+
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
 
     # DDM++
     img_resolution = 16
@@ -180,6 +184,9 @@ def test_song_unet_constructor(apex_device):
 def test_song_unet_optims(apex_device):
     """Test Song UNet optimizations"""
 
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
+
     def setup_model():
         model = (
             UNet(
@@ -224,6 +231,9 @@ def test_song_unet_optims(apex_device):
 @requires_module("apex")
 def test_song_unet_checkpoint(apex_device):
     """Test Song UNet checkpoint save/load"""
+
+    if "cpu" in apex_device:
+        pytest.skip("Apex GN is not supported on CPU")
 
     model_1 = (
         UNet(
