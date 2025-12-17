@@ -21,7 +21,8 @@ import numpy as np
 import torch
 from torch import nn
 
-from physicsnemo.nn import Conv2d, get_group_norm
+from physicsnemo.nn.conv_layers import Conv2d
+from physicsnemo.nn.group_norm import get_group_norm
 from physicsnemo.nn.utils import get_earth_position_index, trunc_normal_
 
 

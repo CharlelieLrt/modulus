@@ -27,7 +27,7 @@ from .activations import (
 )
 from .attention_layers import Attention, AttentionOp, EarthAttention2D, EarthAttention3D
 from .ball_query import BQWarp
-from .conv_layers import Conv2d, ConvBlock, CubeEmbedding, UNetBlock
+from .conv_layers import Conv2d, ConvBlock, CubeEmbedding
 from .dgm_layers import DGMLayer
 from .embedding_layers import FourierEmbedding, PositionalEmbedding
 from .fourier_layers import (
@@ -68,5 +68,6 @@ from .transformer_layers import (
     FuserLayer,
     SwinTransformer,
 )
+from .unet_layers import UNetBlock
 from .weight_fact import WeightFactLinear
 from .weight_norm import WeightNormLinear

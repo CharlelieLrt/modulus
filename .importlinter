@@ -61,8 +61,10 @@ containers=
    physicsnemo.nn
 layers = 
    fourier_layers | transformer_layers
-   dgm_layers | mlp_layers | fully_connected_layers | gnn_layers
-    activations | attention_layers | ball_query | conv_layers  | drop | fft  | fused_silu | interpolation | kan_layers  | resample_layers | sdf | siren_layers | spectral_layers | transformer_decoder  | weight_fact | weight_norm
+   attention_layers
+   dgm_layers | mlp_layers  | gnn_layers  | conv_layers
+   fully_connected_layers | ball_query  | drop | fft  | fused_silu | interpolation | kan_layers  | resample_layers | sdf | siren_layers | spectral_layers | transformer_decoder
+   activations |weight_fact | weight_norm 
    neighbors 
    utils
 
