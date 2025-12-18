@@ -18,6 +18,7 @@ import importlib
 
 import torch
 from einops import rearrange
+from torch.nn.functional import elu, gelu, leaky_relu, relu, sigmoid, silu, tanh
 
 from physicsnemo.nn.utils.utils import _validate_amp
 
@@ -265,3 +266,23 @@ class GroupNorm(torch.nn.Module):
         if self.act_fn is not None:
             x = self.act_fn(x)
         return x
+
+    def get_activation_function(self):
+        """
+        Get activation function given string input
+        """
+
+        activation_map = {
+            "silu": silu,
+            "relu": relu,
+            "leaky_relu": leaky_relu,
+            "sigmoid": sigmoid,
+            "tanh": tanh,
+            "gelu": gelu,
+            "elu": elu,
+        }
+
+        act_fn = activation_map.get(self.act, None)
+        if act_fn is None:
+            raise ValueError(f"Unknown activation function: {self.act}")
+        return act_fn
