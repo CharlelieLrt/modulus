@@ -359,7 +359,11 @@ class Module(torch.nn.Module):
 
     @classmethod
     def instantiate(cls, arg_dict: Dict[str, Any]) -> "Module":
-        """Instantiate a model from a dictionary of arguments
+        """
+        Instantiate a model from a dictionary of arguments. This method is
+        reserved for advanced and internal use cases. For most use cases, it
+        is recommended to instantiate the model using standard instantiation
+        mechanisms.
 
         Parameters
         ----------
@@ -377,27 +381,19 @@ class Module(torch.nn.Module):
         Examples
         --------
         >>> from physicsnemo.core.module import Module
-        >>> from physicsnemo.core.registry import ModelRegistry
-        >>> registry = ModelRegistry()
-        >>> model_entry = registry.factory('FullyConnected')
-        >>> fcn = model_entry(**{'in_features': 10})
-        >>> fcn
-        FullyConnected(
-          (layers): ModuleList(
-            (0): FCLayer(
-              (activation_fn): SiLU()
-              (linear): Linear(in_features=10, out_features=512, bias=True)
-            )
-            (1-5): 5 x FCLayer(
-              (activation_fn): SiLU()
-              (linear): Linear(in_features=512, out_features=512, bias=True)
-            )
-          )
-          (final_layer): FCLayer(
-            (activation_fn): Identity()
-            (linear): Linear(in_features=512, out_features=512, bias=True)
-          )
-        )
+        >>> # Define the argument dictionary with the three required keys
+        >>> arg_dict = {
+        ...     '__name__': 'FullyConnected',
+        ...     '__module__': 'physicsnemo.models.mlp.fully_connected',
+        ...     '__args__': {'in_features': 10, 'out_features': 5}
+        ... }
+        >>> # Instantiate the model using the class method
+        >>> model = Module.instantiate(arg_dict)
+        >>> # Verify the model was created with the correct parameters
+        >>> model.in_features
+        10
+        >>> model.out_features
+        5
         """
         _cls = cls._get_class_from_args(arg_dict)
         return _cls(**arg_dict["__args__"])
@@ -1163,11 +1159,13 @@ class Module(torch.nn.Module):
         >>> # Use the model for inference
         >>> x = torch.randn(32, 10)
         >>> output = model(x)  # Shape: (32, 5)
-        >>> # Retrieve the model class from the registry
+        >>> # Cannot retrieve the model class from the registry because it is not registered
         >>> registry = ModelRegistry()
         >>> ModelClass = registry.factory('SimpleMLP')
         >>> isinstance(ModelClass, type) and issubclass(ModelClass, Module)
-        True
+        ...
+        KeyError: No model is registered under the name SimpleMLP. ...
+
 
         Example 2: Convert a PyTorch model with a custom name:
 
@@ -1202,11 +1200,11 @@ class Module(torch.nn.Module):
         >>> assert model.inner_model.input_size == 10
         >>> assert model.inner_model.hidden_size == 64
         >>> assert model.inner_model.output_size == 5
-        >>> # Retrieve the model class from the registry using the custom name
+        >>> # Cannot retrieve the model class from the registry because it is not registered
         >>> registry = ModelRegistry()
         >>> ModelClass = registry.factory('CustomSimpleMLP')
-        >>> isinstance(ModelClass, type) and issubclass(ModelClass, Module)
-        True
+        ...
+        KeyError: No model is registered under the name CustomSimpleMLP. ...
 
         Example 3: Convert a PyTorch model with explicit registration:
 

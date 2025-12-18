@@ -20,6 +20,8 @@ import warnings
 from importlib.metadata import EntryPoint, entry_points
 from typing import TYPE_CHECKING, Dict, List, Union
 
+from importlib_metadata import EntryPoint as ImportlibMetadataEntryPoint
+
 if TYPE_CHECKING:
     from physicsnemo.core.module import Module
 
@@ -28,6 +30,7 @@ if TYPE_CHECKING:
 # of importlib being present in the environment
 ENTRY_POINT_CLASSES = [
     EntryPoint,
+    ImportlibMetadataEntryPoint,
 ]
 # This is now deprecated, since EntryPoint is python 3.10 or higher.
 # try:
@@ -162,8 +165,8 @@ class ModelRegistry:
             return model
 
         raise KeyError(
-            f"No model is registered under the name {name}.\n"
-            f"Current registered models are: {sorted(self.list_models())}"
+            f"No model is registered under the name {name}. "
+            f"Current registered models are:\n{sorted(self.list_models())}"
         )
 
     def list_models(self) -> List[str]:
