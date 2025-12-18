@@ -814,7 +814,7 @@ class SongUNetPosEmbd(SongUNet):
     Examples
     --------
     >>> import torch
-    >>> from physicsnemo.models.diffusion_unets.song_unet import SongUNetPosEmbd
+    >>> from physicsnemo.models.diffusion_unets import SongUNetPosEmbd
     >>> from physicsnemo.diffusion.multi_diffusion import GridPatching2D
     >>>
     >>> # Model initialization - in_channels must include both original input channels (2)
@@ -1435,7 +1435,7 @@ class SongUNetPosLtEmbd(SongUNetPosEmbd):
     Example
     --------
     >>> import torch
-    >>> from physicsnemo.models.diffusion_unets.song_unet import SongUNetPosLtEmbd
+    >>> from physicsnemo.models.diffusion_unets import SongUNetPosLtEmbd
     >>> from physicsnemo.diffusion.multi_diffusion import GridPatching2D
     >>>
     >>> # Model initialization - in_channels must include original input channels (2),

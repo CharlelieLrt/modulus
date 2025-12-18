@@ -149,13 +149,13 @@ class Module(torch.nn.Module):
     the :class:`~physicsnemo.core.registry.ModelRegistry`:
 
     >>> from physicsnemo.core import Module, ModelMetaData, ModelRegistry
-    >>> class MyCustomModel(Module, register=True):
+    >>> class MyCustomModelA(Module, register=True):
     ...     def __init__(self, hidden_dim=64):
     ...         super().__init__(meta=ModelMetaData())
     ...         self.hidden_dim = hidden_dim
     >>> # The class is now registered and can be retrieved by name
     >>> registry = ModelRegistry()
-    >>> ModelClass = registry.factory('MyCustomModel')
+    >>> ModelClass = registry.factory('MyCustomModelA')
     >>> model = ModelClass(hidden_dim=128)
     >>> model.hidden_dim
     128
