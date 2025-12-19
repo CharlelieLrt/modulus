@@ -34,8 +34,8 @@ Diffusion model backbones are highly configurable architectures that can be used
 as a building block for more complex models. Backbones support
 both conditional and unconditional modeling. Currently, there are two provided
 backbones: the SongUNet, as implemented in the
-:class:`~physicsnemo.models.diffusion.song_unet.SongUNet` class and the DhariwalUNet,
-as implemented in the :class:`~physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet`
+:class:`~physicsnemo.models.diffusion_unets.SongUNet` class and the DhariwalUNet,
+as implemented in the :class:`~physicsnemo.models.diffusion_unets.DhariwalUNet`
 class. These models were introduced in the papers `Score-based generative modeling through stochastic
 differential equations, Song et al. <https://arxiv.org/abs/2011.13456>`_ and
 `Diffusion models beat gans on image synthesis, Dhariwal et al.
@@ -50,7 +50,7 @@ Model backbones can be used as is, such as in in
 more complex models.
 
 One of the most common diffusion backbones for image generation is the
-:class:`~physicsnemo.models.diffusion.song_unet.SongUNet`
+:class:`~physicsnemo.models.diffusion_unets.SongUNet`
 class. Its latent state :math:`\mathbf{x}` is a tensor of shape :math:`(B, C, H, W)`,
 where :math:`B` is the batch size, :math:`C` is the number of channels,
 and :math:`H` and :math:`W` are the height and width of the feature map. The
@@ -148,8 +148,8 @@ Note that even though backbones can be used as is, some of the examples in
 PhysicsNeMo examples use specialized architectures. These specialized architectures
 typically inherit from the backbones and implement additional functionalities for specific
 applications. For example the `CorrDiff example <../../examples/weather/corrdiff/README.rst>`_
-uses the specialized architectures :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd`
-and :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd` to implement
+uses the specialized architectures :class:`~physicsnemo.models.diffusion_unets.SongUNetPosEmbd`
+and :class:`~physicsnemo.models.diffusion_unets.SongUNetPosLtEmbd` to implement
 the diffusion model.
 
 Positional embeddings
@@ -164,7 +164,7 @@ a single GPU. The `CorrDiff example <../../examples/weather/corrdiff/README.rst>
 uses patch-based diffusion for weather downscaling on large domains. A key
 ingredient in the implementation of patch-based diffusion is the use of a
 global spatial grid, that is used to inform each patch with their respective
-position in the full domain. The :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd`
+position in the full domain. The :class:`~physicsnemo.models.diffusion_unets.SongUNetPosEmbd`
 class implements this functionality by providing multiple methods to encode
 global spatial coordinates of the pixels into a *global positional embedding grid*.
 In addition of multi-diffusion, spatial positional embeddings have also been
@@ -172,7 +172,7 @@ observed to improve the quality of the generated images, even for diffusion mode
 that operate on the full domain.
 
 The following example shows how to use the specialized architecture
-:class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd` to implement a
+:class:`~physicsnemo.models.diffusion_unets.SongUNetPosEmbd` to implement a
 multi-diffusion model. First, we create a ``SongUNetPosEmbd`` model similar to
 the one in :ref:`the conditional SongUnet example <example_song_unet_conditional>`
 with a global positional embedding grid of shape ``(C_pos_emb, res, res)``. We
@@ -279,9 +279,9 @@ diffusion to each of these latent states while accounting for their associated
 lead-time information.
 
 PhysicsNeMo provides a specialized architecture
-:class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd` that implements
+:class:`~physicsnemo.models.diffusion_unets.SongUNetPosLtEmbd` that implements
 lead-time aware models. This is an extension of the
-:class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd` class, and
+:class:`~physicsnemo.models.diffusion_unets.SongUNetPosEmbd` class, and
 additionally supports lead-time information. In its forward pass, the model
 uses the ``lead_time_label`` parameter to internally retrieve the associated
 lead-time embeddings; it then conditions the diffusion process on those with a
@@ -373,14 +373,15 @@ around the model backbones or specialized architectures that provide a more
 user-friendly interface for specific applications. Note that not all these
 classes are true diffusion models, but can also be used in conjunction with
 diffusion models. For instance, the CorrDiff example in
-`CorrDiff example <../../examples/weather/corrdiff/README.rst>`_ uses the :class:`~physicsnemo.models.diffusion.unet.UNet`
-class to implement a regression model.
+`CorrDiff example <../../examples/weather/corrdiff/README.rst>`_ uses the
+:class:`~physicsnemo.models.diffusion_unets.CorrDiffRegressionUNet` class to
+implement a regression model.
 
 
 :code:`SongUNet`
 ----------------
 
-.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNet
+.. autoclass:: physicsnemo.models.diffusion_unets.SongUNet
     :show-inheritance:
     :members:
     :exclude-members: forward
@@ -388,7 +389,7 @@ class to implement a regression model.
 :code:`DhariwalUNet`
 ---------------------
 
-.. autoclass:: physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet
+.. autoclass:: physicsnemo.models.diffusion_unets.DhariwalUNet
     :show-inheritance:
     :members:
     :exclude-members: forward
@@ -397,7 +398,7 @@ class to implement a regression model.
 :code:`SongUNetPosEmbd`
 -----------------------
 
-.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd
+.. autoclass:: physicsnemo.models.diffusion_unets.SongUNetPosEmbd
     :show-inheritance:
     :members:
     :exclude-members: forward
@@ -406,7 +407,7 @@ class to implement a regression model.
 :code:`SongUNetPosLtEmbd`
 -------------------------
 
-.. autoclass:: physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd
+.. autoclass:: physicsnemo.models.diffusion_unets.SongUNetPosLtEmbd
     :show-inheritance:
     :members:
     :exclude-members: forward
@@ -414,7 +415,7 @@ class to implement a regression model.
 :code:`UNet`
 ------------
 
-.. autoclass:: physicsnemo.models.diffusion.unet.UNet
+.. autoclass:: physicsnemo.models.diffusion_unets.CorrDiffRegressionUNet
     :show-inheritance:
     :members:
     :exclude-members: forward
