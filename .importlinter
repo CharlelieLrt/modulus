@@ -1,5 +1,3 @@
-# TODO-CL: add layers and stuff here + for diffusion package.
-
 [importlinter]
 root_package = physicsnemo
 include_external_packages = True
