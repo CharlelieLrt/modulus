@@ -13,8 +13,31 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ruff: noqa
 
-from .song_unet import SongUNet, SongUNetPosEmbd, SongUNetPosLtEmbd
-from .dhariwal_unet import DhariwalUNet
-from .unet import CorrDiffRegressionUNet, StormCastUNet, UNet
+import datetime
+
+import pytest
+import yaml
+
+from test.conftest import requires_module
+
+cftime = pytest.importorskip("cftime")
+
+
+def test_datetime_yaml():
+    """test parse time"""
+    dt = datetime.datetime(2011, 1, 1)
+    s = dt.isoformat()
+    loaded = yaml.safe_load(s)
+    assert dt == loaded
+
+
+@requires_module("cftime")
+def test_convert_to_cftime(pytestconfig):
+    """test parse time"""
+
+    from physicsnemo.models.diffusion.training_utils import convert_datetime_to_cftime
+
+    dt = datetime.datetime(2011, 1, 1)
+    expected = cftime.DatetimeGregorian(2011, 1, 1)
+    assert convert_datetime_to_cftime(dt) == expected

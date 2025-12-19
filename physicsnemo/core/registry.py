@@ -23,20 +23,6 @@ from typing import TYPE_CHECKING, Dict, List, Union
 if TYPE_CHECKING:
     from physicsnemo.core.module import Module
 
-# NOTE: This is for backport compatibility, some entry points seem to be using this old class
-# Exact cause of this is unknown but it seems to be related to multiple versions
-# of importlib being present in the environment
-ENTRY_POINT_CLASSES = [
-    EntryPoint,
-]
-# This is now deprecated, since EntryPoint is python 3.10 or higher.
-# try:
-#     from importlib_metadata import EntryPoint as EntryPointOld  # noqa: E402
-
-#     ENTRY_POINT_CLASSES.append(EntryPointOld)
-# except ImportError:
-#     pass
-
 
 # This model registry follows conventions similar to fsspec,
 # https://github.com/fsspec/filesystem_spec/blob/master/fsspec/registry.py#L62C2-L62C2
@@ -157,12 +143,14 @@ class ModelRegistry:
 
         model = self._model_registry.get(name)
         if model is not None:
-            if isinstance(model, tuple(ENTRY_POINT_CLASSES)):
+            if isinstance(model, EntryPoint):
                 model = model.load()
+                # Update the registry with the loaded object:
+                self._model_registry[name] = model
             return model
 
         raise KeyError(
-            f"No model is registered under the name {name}.\n"
+            f"No model is registered under the name {name}. "
             f"Current registered models are: {sorted(self.list_models())}"
         )
 

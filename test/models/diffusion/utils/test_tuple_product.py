@@ -13,8 +13,22 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-# ruff: noqa
 
-from .song_unet import SongUNet, SongUNetPosEmbd, SongUNetPosLtEmbd
-from .dhariwal_unet import DhariwalUNet
-from .unet import CorrDiffRegressionUNet, StormCastUNet, UNet
+from test.conftest import requires_module
+
+
+# Test tuple_product function
+@requires_module("cftime")
+def test_tuple_product(pytestconfig):
+    from physicsnemo.models.diffusion.training_utils import tuple_product
+
+    # Test with an empty tuple
+    assert tuple_product(()) == 1
+
+    # Test with a tuple containing one element
+    assert tuple_product((5,)) == 5
+
+    # Test with a tuple containing multiple elements
+    assert tuple_product((2, 3, 4)) == 24
+    assert tuple_product((1, 2, 3, 4, 5)) == 120
+    assert tuple_product((10, 20, 30, 40)) == 240000
