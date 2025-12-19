@@ -6,7 +6,7 @@ PhysicsNeMo Utils
 
 The PhysicsNeMo Utils module provides a comprehensive set of utilities that support various aspects of scientific computing,
 machine learning, and physics simulations. These utilities range from optimization helpers and distributed computing tools
-to specialized functions for weather/climate modeling and geometry processing. The module is designed to simplify common
+to specialized functions for weather and climate modeling, and geometry processing. The module is designed to simplify common
 tasks while maintaining high performance and scalability.
 
 .. autosummary::
@@ -121,7 +121,7 @@ Patching utilities are particularly useful for *patch-based* diffusion, also cal
 *multi-diffusion*. This approach is used to scale diffusion to very large images.
 The following patching utilities extract patches from 2D images, and typically gather
 them in the batch dimension. A batch of patches is therefore composed of multiple
-smaller patches extracted from each sample in the original batch of larger
+smaller patches that are extracted from each sample in the original batch of larger
 images. Diffusion models can then process these patches independently. These
 utilities also support fusing operations to reconstruct the entire predicted
 image from the individual predicted patches.
