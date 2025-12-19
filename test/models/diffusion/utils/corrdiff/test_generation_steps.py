@@ -46,7 +46,7 @@ class MockNet:
 
 @requires_module("cftime")
 def test_regression_step(device, pytestconfig):
-    from physicsnemo.diffusion.samplers import regression_step
+    from physicsnemo.diffusion.generate import regression_step
     from physicsnemo.models.diffusion_unets import CorrDiffRegressionUNet
 
     # define the net
@@ -71,10 +71,10 @@ def test_regression_step(device, pytestconfig):
 
 @requires_module("cftime")
 def test_diffusion_step(device, pytestconfig):
+    from physicsnemo.diffusion.generate import diffusion_step
     from physicsnemo.diffusion.preconditioners import EDMPrecondSuperResolution
     from physicsnemo.diffusion.samplers import (
         deterministic_sampler,
-        diffusion_step,
         stochastic_sampler,
     )
 
@@ -133,8 +133,9 @@ def test_diffusion_step(device, pytestconfig):
 
 @requires_module("cftime")
 def test_diffusion_step_rectangle(device, pytestconfig):
+    from physicsnemo.diffusion.generate import diffusion_step
     from physicsnemo.diffusion.multi_diffusion import GridPatching2D
-    from physicsnemo.diffusion.samplers import diffusion_step, stochastic_sampler
+    from physicsnemo.diffusion.samplers import stochastic_sampler
 
     torch._dynamo.reset()
 

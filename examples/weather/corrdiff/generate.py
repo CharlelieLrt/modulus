@@ -37,9 +37,8 @@ from physicsnemo import Module
 from physicsnemo.diffusion.samplers import (
     deterministic_sampler,
     stochastic_sampler,
-    regression_step,
-    diffusion_step,
 )
+from physicsnemo.diffusion.generate import regression_step, diffusion_step
 
 from helpers.generate_helpers import (
     get_dataset_and_sampler,
