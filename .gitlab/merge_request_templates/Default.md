@@ -12,6 +12,8 @@
 - [ ] The documentation is up to date with these changes.
 - [ ] The [CHANGELOG.md](https://github.com/NVIDIA/physicsnemo/blob/main/CHANGELOG.md) is
 up to date with these changes.
+- [ ] If I am implementing a new model or modifying any existing model, I have
+  followed the [Models Implementation Coding Standards](https://github.com/NVIDIA/physicsnemo/blob/main/CODING_STANDARDS/MODELS_IMPLEMENTATION.md)
 
 ## Dependencies
 
