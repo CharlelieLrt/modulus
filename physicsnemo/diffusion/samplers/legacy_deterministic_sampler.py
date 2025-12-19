@@ -14,14 +14,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import warnings
 from typing import Callable, Literal, Optional
 
 import numpy as np
 import nvtx
 import torch
 
+from physicsnemo.core.warnings import LegacyFeatureWarning
 from physicsnemo.diffusion.multi_diffusion import GridPatching2D
 from physicsnemo.diffusion.preconditioners import EDMPrecond
+
+warnings.warn(
+    "The 'deterministic_sampler' function from 'physicsnemo.diffusion.samplers' "
+    "is a legacy implementation that will be deprecated in a future release. "
+    "Updated implementations will be provided in an upcoming version.",
+    LegacyFeatureWarning,
+    stacklevel=2,
+)
 
 # ruff: noqa: E731
 

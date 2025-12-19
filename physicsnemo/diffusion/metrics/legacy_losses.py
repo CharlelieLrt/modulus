@@ -18,13 +18,25 @@
 """Loss functions used in the paper
 "Elucidating the Design Space of Diffusion-Based Generative Models"."""
 
+import warnings
 from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
 import torch
 from torch import Tensor
 
+from physicsnemo.core.warnings import LegacyFeatureWarning
 from physicsnemo.diffusion.multi_diffusion import RandomPatching2D
+
+warnings.warn(
+    "The loss classes 'VPLoss', 'VELoss', 'EDMLoss', 'EDMLossLogUniform', "
+    "'EDMLossSR', 'RegressionLoss', 'RegressionLossCE', 'ResidualLoss', and "
+    "'VELoss_dfsr' from 'physicsnemo.diffusion.metrics' are legacy "
+    "implementations that will be deprecated in a future release. Updated "
+    "implementations will be provided in an upcoming version.",
+    LegacyFeatureWarning,
+    stacklevel=2,
+)
 
 
 class VPLoss:

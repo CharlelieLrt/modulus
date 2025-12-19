@@ -14,14 +14,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
+import warnings
 from typing import Callable, Optional
 
 import torch
 from torch import Tensor
 
+from physicsnemo.core.warnings import LegacyFeatureWarning
 from physicsnemo.diffusion.multi_diffusion import GridPatching2D
 from physicsnemo.diffusion.preconditioners import EDMPrecond
+
+warnings.warn(
+    "The 'stochastic_sampler' function from 'physicsnemo.diffusion.samplers' "
+    "is a legacy implementation that will be deprecated in a future release. "
+    "Updated implementations will be provided in an upcoming version.",
+    LegacyFeatureWarning,
+    stacklevel=2,
+)
 
 
 # NOTE: use two wrappers for apply, to avoid recompilation when input shape changes

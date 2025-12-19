@@ -14,5 +14,5 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .legacy_deterministic_sampler import deterministic_sampler
-from .legacy_stochastic_sampler import stochastic_sampler
+from .legacy_deterministic_sampler import deterministic_sampler  # noqa: F401
+from .legacy_stochastic_sampler import stochastic_sampler  # noqa: F401

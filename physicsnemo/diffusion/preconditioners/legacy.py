@@ -14,22 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# SPDX-FileCopyrightText: Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES.
-# SPDX-FileCopyrightText: All rights reserved.
-# SPDX-License-Identifier: Apache-2.0
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
 """
 Preconditioning schemes used in the paper"Elucidating the Design Space of
 Diffusion-Based Generative Models".
@@ -45,8 +29,19 @@ import torch
 
 from physicsnemo.core.meta import ModelMetaData
 from physicsnemo.core.module import Module
+from physicsnemo.core.warnings import LegacyFeatureWarning
 
 from ._utils import _wrapped_property
+
+warnings.warn(
+    "The preconditioner classes 'VPPrecond', 'VEPrecond', 'iDDPMPrecond', "
+    "'EDMPrecond', 'EDMPrecondSuperResolution', 'EDMPrecondSR', 'VEPrecond_dfsr', "
+    "and 'VEPrecond_dfsr_cond' from 'physicsnemo.diffusion.preconditioners' are "
+    "legacy implementations that will be deprecated in a future release. Updated "
+    "implementations will be provided in an upcoming version.",
+    LegacyFeatureWarning,
+    stacklevel=2,
+)
 
 network_module = importlib.import_module("physicsnemo.models.diffusion_unets")
 
