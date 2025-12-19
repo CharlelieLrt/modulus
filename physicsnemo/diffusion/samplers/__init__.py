@@ -15,5 +15,4 @@
 # limitations under the License.
 
 from .legacy_deterministic_sampler import deterministic_sampler
-from .legacy_generate import diffusion_step, regression_step
 from .legacy_stochastic_sampler import stochastic_sampler
