@@ -32,7 +32,7 @@ Architecture Backbones
 
 Diffusion model backbones are highly configurable architectures that can be used
 as a building block for more complex models. Backbones support
-both conditional and unconditional modeling. Currently, there are two provided
+both conditional and unconditional modeling. There are two provided
 backbones: the SongUNet, as implemented in the
 :class:`~physicsnemo.models.diffusion.song_unet.SongUNet` class and the DhariwalUNet,
 as implemented in the :class:`~physicsnemo.models.diffusion.dhariwal_unet.DhariwalUNet`
@@ -61,8 +61,8 @@ previous level (odd resolutions are rounded down). Each level is composed of a s
 self-attention layers, as controlled by the ``attn_resolutions`` parameter. The feature map resolution
 is halved at the first block of each level and then remains constant within the level.
 
-Here we start by creating a ``SongUNet`` model with 3 levels, that applies self-attention
-at levels 1 and 2. The model is unconditional, *i.e.* it is not conditioned on any
+Here we start by creating a ``SongUNet`` model with three levels, that applies self-attention
+at levels one and two. The model is unconditional, *that is,* it is not conditioned on any
 class labels or images (but is still conditional on the noise level, as it is
 standard practice for diffusion models).
 
@@ -144,15 +144,15 @@ class label and a 3-channel image.
 Specialized Architectures
 -------------------------
 
-Note that even though backbones can be used as is, some of the examples in
+Even though backbones can be used as is, some of the examples in the
 PhysicsNeMo examples use specialized architectures. These specialized architectures
 typically inherit from the backbones and implement additional functionalities for specific
-applications. For example the `CorrDiff example <../../examples/weather/corrdiff/README.rst>`_
+applications. For example, the `CorrDiff example <../../examples/weather/corrdiff/README.rst>`_
 uses the specialized architectures :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd`
 and :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosLtEmbd` to implement
 the diffusion model.
 
-Positional embeddings
+Positional Embeddings
 ~~~~~~~~~~~~~~~~~~~~~
 
 Multi-diffusion (also called *patch-based* diffusion) is a technique to scale
@@ -167,16 +167,17 @@ global spatial grid, that is used to inform each patch with their respective
 position in the full domain. The :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd`
 class implements this functionality by providing multiple methods to encode
 global spatial coordinates of the pixels into a *global positional embedding grid*.
-In addition of multi-diffusion, spatial positional embeddings have also been
+In addition to multi-diffusion, spatial positional embeddings have also been
 observed to improve the quality of the generated images, even for diffusion models
 that operate on the full domain.
 
 The following example shows how to use the specialized architecture
 :class:`~physicsnemo.models.diffusion.song_unet.SongUNetPosEmbd` to implement a
-multi-diffusion model. First, we create a ``SongUNetPosEmbd`` model similar to
+multi-diffusion model:
+
+Create a ``SongUNetPosEmbd`` model similar to
 the one in :ref:`the conditional SongUnet example <example_song_unet_conditional>`
-with a global positional embedding grid of shape ``(C_pos_emb, res, res)``. We
-show that the model can be used with the entire latent state (full domain).
+with a global positional embedding grid of shape ``(C_pos_emb, res, res)``. The model can be used with the entire latent state (full domain).
 
 .. code:: python
 
@@ -215,22 +216,22 @@ show that the model can be used with the entire latent state (full domain).
     out = model(x_cond, noise_labels, class_labels, global_index=None)
     print(out.shape)  # Shape: (B, C_x, res, res), same as the latent state
 
-Now we show that the model can be used on local patches of the latent state
-(multi-diffusion approach). We manually extract 3 patches from the latent
+The model can be used on local patches of the latent state
+(multi-diffusion approach). We manually extract three patches from the latent
 state. Patches are treated as individual samples, so they are concatenated along
 the batch dimension. We also create a global grid of indices ``grid`` that
 contains the indices of the pixels in the full domain, and we exctract *the same
-3 patches* from the global grid and pass them to the ``global_index``
+three patches* from the global grid and pass them to the ``global_index``
 parameter. The model internally uses ``global_index`` to extract the corresponding
 patches from the positional embedding grid and concatenate them to the input
-``x_cond_patches`` before the first UNet block. Note that conditional
-multi-diffusion still requires each patch to *be conditioned on the entire
+``x_cond_patches`` before the first UNet block. Conditional
+multi-diffusion still requires that each patch *be conditioned on the entire
 conditioning image* ``cond``, which is why we interpolate the conditioning image
 to the patch resolution and concatenate it to each individual patch.
 In practice it is not necessary to manually extract the patches from the latent
-state and the global grid, as PhysicsNeMo provides utilities to help with the
+state and the global grid, because PhysicsNeMo provides utilities to help with the
 patching operations, in :mod:`~physicsnemo.diffusion.multi_diffusion`. For an example of how
-to use these utilities, see the `CorrDiff example <../../examples/weather/corrdiff/README.rst>`_.
+to use these utilities, refer to the `CorrDiff example <../../examples/weather/corrdiff/README.rst>`_.
 
 .. code:: python
 
@@ -266,7 +267,7 @@ to use these utilities, see the `CorrDiff example <../../examples/weather/corrdi
     out = model(x_cond_patches, noise_labels, class_labels, global_index=global_index)
     print(out.shape)  # Shape: (3, C_x, pres, pres), same as the patches extracted from the latent state
 
-Lead-time aware models
+Lead-Time Aware Models
 ~~~~~~~~~~~~~~~~~~~~~~
 
 In many diffusion applications, the latent state is time-dependent, and the
@@ -288,13 +289,13 @@ lead-time embeddings; it then conditions the diffusion process on those with a
 channel-wise concatenation to the latent-state before the first UNet block.
 
 Here we show an example extending the previous ones with lead-time information.
-We assume that we have a batch of 3 latent states at times :math:`T + 2 \Delta t`
-(2 time intervals forward), :math:`T + 0 \Delta t` (current time),
-and :math:`T + \Delta t` (1 time interval forward). The associated lead-time labels are
+We assume that we have a batch of three latent states at times :math:`T + 2 \Delta t`
+(two time intervals forward), :math:`T + 0 \Delta t` (current time),
+and :math:`T + \Delta t` (one time interval forward). The associated lead-time labels are
 ``[2, 0, 1]``. In addition, the ``SongUNetPosLtEmbd`` model has the ability to
 predict probabilities for some channels of the latent state, specified by the
-``prob_channels`` parameter. Here we assume that channels 1 and 3 are
-probability (i.e. classification) outputs, while other channels are regression
+``prob_channels`` parameter. Here we assume that channels one and three are
+probability (that is, classification) outputs, while other channels are regression
 outputs.
 
 .. code:: python
@@ -351,27 +352,25 @@ outputs.
     might however be produced by such an autoregressive/rollout model.
 
 .. note::
-    The ``SongUNetPosLtEmbd`` model cannot be scaled to very long lead-time
+   - The ``SongUNetPosLtEmbd`` model cannot be scaled to very long lead-time
     horizons (controlled by the ``lead_time_steps`` parameter). This is because
     the lead-time embeddings are represented by a grid of learnable parameters of
     shape ``(lead_time_steps, C_LT, res, res)``. For very long lead-time, the
     size of this grid of embeddings becomes prohibitively large.
-
-.. note::
-    In a given input batch ``x``, the associated lead-times might be not necessarily
+   - In a given input batch ``x``, the associated lead-times might be not necessarily
     consecutive or in order. The do not even need to originate from the same forecast
     trajectory. For example, the lead-time labels might be ``[0, 1, 2]`` instead of ``[2, 0, 1]``,
     or even ``[2, 2, 1]``.
 
 .. _diffusion_application_specific_interfaces:
 
-Application-specific Interfaces
+Application-Specific Interfaces
 -------------------------------
 
 Application-specific interfaces are not true architectures, but rather wrappers
 around the model backbones or specialized architectures that provide a more
-user-friendly interface for specific applications. Note that not all these
-classes are true diffusion models, but can also be used in conjunction with
+user-friendly interface for specific applications. Not all these
+classes are true diffusion models, but can also be used with
 diffusion models. For instance, the CorrDiff example in
 `CorrDiff example <../../examples/weather/corrdiff/README.rst>`_ uses the :class:`~physicsnemo.models.diffusion.unet.UNet`
 class to implement a regression model.
