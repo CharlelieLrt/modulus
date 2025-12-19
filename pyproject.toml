@@ -207,14 +207,14 @@ DistributedAFNO = "physicsnemo.models.afno:DistributedAFNO"
 ModAFNO = "physicsnemo.models.afno:ModAFNO"
 
 # Diffusion UNets
-SongUNet = "physicsnemo.models.diffusion:SongUNet"
-SongUNetPosEmbd = "physicsnemo.models.diffusion:SongUNetPosEmbd"
-SongUNetPosLtEmbd = "physicsnemo.models.diffusion:SongUNetPosLtEmbd"
-DhariwalUNet = "physicsnemo.models.diffusion:DhariwalUNet"
+SongUNet = "physicsnemo.models.diffusion_unets:SongUNet"
+SongUNetPosEmbd = "physicsnemo.models.diffusion_unets:SongUNetPosEmbd"
+SongUNetPosLtEmbd = "physicsnemo.models.diffusion_unets:SongUNetPosLtEmbd"
+DhariwalUNet = "physicsnemo.models.diffusion_unets:DhariwalUNet"
 
 # Diffusion wrappers
-CorrDiffRegressionUNet = "physicsnemo.models.diffusion:CorrDiffRegressionUNet"
-StormCastUNet = "physicsnemo.models.diffusion:StormCastUNet"
+CorrDiffRegressionUNet = "physicsnemo.models.diffusion_unets:CorrDiffRegressionUNet"
+StormCastUNet = "physicsnemo.models.diffusion_unets:StormCastUNet"
 
 # DLWP
 DLWP = "physicsnemo.models.dlwp:DLWP"

@@ -69,7 +69,7 @@ standard practice for diffusion models).
 .. code:: python
 
     import torch
-    from physicsnemo.models.diffusion import SongUNet
+    from physicsnemo.models.diffusion_unets import SongUNet
 
     B, C_x, res = 3, 6, 40   # Batch size, channels, and resolution of the latent state
 
@@ -113,7 +113,7 @@ class label and a 3-channel image.
 .. code:: python
 
     import torch
-    from physicsnemo.models.diffusion import SongUNet
+    from physicsnemo.models.diffusion_unets import SongUNet
 
     B, C_x, res = 3, 10, 40
     C_cond = 3
@@ -181,7 +181,7 @@ show that the model can be used with the entire latent state (full domain).
 .. code:: python
 
     import torch
-    from physicsnemo.models.diffusion import SongUNetPosEmbd
+    from physicsnemo.models.diffusion_unets import SongUNetPosEmbd
 
     B, C_x, res = 3, 10, 40
     C_cond = 3
@@ -300,7 +300,7 @@ outputs.
 .. code:: python
 
     import torch
-    from physicsnemo.models.diffusion import SongUNetPosLtEmbd
+    from physicsnemo.models.diffusion_unets import SongUNetPosLtEmbd
 
     B, C_x, res = 3, 10, 40
     C_cond = 3
