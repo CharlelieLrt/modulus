@@ -105,7 +105,7 @@ class CorrDiffRegressionUNet(Module):  # TODO a lot of redundancy, need to clean
 
     __model_checkpoint_version__ = "0.2.0"
     __supported_model_checkpoint_version__ = {
-        "0.1.0": "Loading UNet checkpoint from older version 0.1.0 (current version is 0.2.0). This version is still supported, but consider re-saving the model to upgrade to version 0.2.0 and remove this warning."
+        "0.1.0": "Loading CorrDiffRegressionUNet checkpoint from older version 0.1.0 (current version is 0.2.0). This version is still supported, but consider re-saving the model to upgrade to version 0.2.0 and remove this warning."
     }
 
     # Classes that can be wrapped by this UNet class.
