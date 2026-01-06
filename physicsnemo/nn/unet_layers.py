@@ -21,7 +21,7 @@ import nvtx
 import torch
 from torch.nn.functional import silu
 
-from physicsnemo.nn.attention_layers import Attention
+from physicsnemo.nn.attention_layers import UNetAttention as Attention
 from physicsnemo.nn.conv_layers import Conv2d
 from physicsnemo.nn.fully_connected_layers import Linear
 from physicsnemo.nn.group_norm import get_group_norm

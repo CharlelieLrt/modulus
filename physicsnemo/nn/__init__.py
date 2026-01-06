@@ -25,7 +25,12 @@ from .activations import (
     Stan,
     get_activation,
 )
-from .attention_layers import Attention, AttentionOp, EarthAttention2D, EarthAttention3D
+from .attention_layers import (
+    AttentionOp,
+    EarthAttention2D,
+    EarthAttention3D,
+    UNetAttention,
+)
 from .ball_query import BQWarp
 from .conv_layers import Conv2d, ConvBlock, CubeEmbedding
 from .dgm_layers import DGMLayer

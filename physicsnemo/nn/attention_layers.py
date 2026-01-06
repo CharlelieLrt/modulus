@@ -66,7 +66,7 @@ class AttentionOp(torch.autograd.Function):
         return dq, dk
 
 
-class Attention(torch.nn.Module):
+class UNetAttention(torch.nn.Module):
     """
     Self-attention block used in U-Net-style architectures, such as DDPM++, NCSN++, and ADM.
     Applies GroupNorm followed by multi-head self-attention and a projection layer.
