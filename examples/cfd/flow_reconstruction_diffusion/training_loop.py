@@ -38,12 +38,6 @@ from misc import (
     print_module_summary,
 )
 
-# # weather related
-# from .YParams import YParams
-# from .dataset import Era5Dataset, CWBDataset, CWBERA5DatasetV2, ZarrDataset
-
-# ----------------------------------------------------------------------------
-
 
 def _format_time(seconds: Union[int, float]) -> str:  # pragma: no cover
     """Convert the seconds to human readable string with days, hours, minutes and seconds."""
