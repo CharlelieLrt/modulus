@@ -14,6 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import math
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Tuple
 
@@ -21,6 +22,13 @@ import torch
 
 from physicsnemo.core.meta import ModelMetaData
 from physicsnemo.core.module import Module
+
+# TODO: once noise schedulers are implemeneted, some of the methods they define
+# can be reused here, e.g. preconditioner.sigma = noise_scheduler.sigma for the
+# noise schedule. This would allow to avoid duplicate code between the
+# preconditioners and the noise schedulers. Particularly for the iDDPM
+# preconditioner, that requires more computations than the other
+# preconditioners.
 
 
 class BasePreconditioner(Module, ABC):
@@ -91,24 +99,32 @@ class BasePreconditioner(Module, ABC):
 
     .. note::
 
+        To implement a new preconditioner, a subclass of
+        :class:`BasePreconditioner` must be defined, and some methods have to
+        be implemented:
+
         - Subclasses must implement the :meth:`compute_coefficients` method to
           define the specific preconditioning scheme.
 
-        - The arguments ``t`` of the preconditioner forward method is always
-          assumed to be the diffusion time. For preconditioning schemes based
-          on noise level (that is :math:`c_{\text{in}}(\sigma)`,
+        - A :meth:`sigma` method can optionally be implemented.
+          If a subclass implements the :meth:`sigma` method, the diffusion time
+          :math:`t` is first transformed to a noise level :math:`\sigma(t)`
+          before being passed to :meth:`compute_coefficients`. This allows
+          implementing preconditioners for different noise schedules while
+          keeping the same preconditioning interface, in particular for
+          preconditioning schemes based on noise level (that is
+          :math:`c_{\text{in}}(\sigma)`,
           :math:`c_{\text{noise}}(\sigma)`, :math:`c_{\text{out}}(\sigma)`,
           :math:`c_{\text{skip}}(\sigma)` instead of :math:`c_{\text{in}}(t)`,
           :math:`c_{\text{noise}}(t)`, :math:`c_{\text{out}}(t)`,
-          :math:`c_{\text{skip}}(t)`), the noise level :math:`\sigma(t)` is
-          computed internally using the :meth:`sigma` method.
+          :math:`c_{\text{skip}}(t)`).
 
-        - If a subclass implements the :meth:`sigma` method, the diffusion
-          time :math:`t` is first transformed to a noise level
-          :math:`\sigma(t)` before being passed to
-          :meth:`compute_coefficients`. This allows implementing
-          preconditioners for different noise schedules while keeping the
-          same preconditioning interface.
+    .. note::
+
+        The arguments ``t`` of the preconditioner forward method is always
+        assumed to be the diffusion time. For preconditioning schemes based
+        on noise level the noise level :math:`\sigma(t)` is computed internally
+        using the :meth:`sigma` method.
 
     Examples
     --------
@@ -194,10 +210,11 @@ class BasePreconditioner(Module, ABC):
 
     @abstractmethod
     def compute_coefficients(
-        self, t: torch.Tensor
+        self, t: torch.Tensor, /
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         r"""
-        Compute the preconditioning coefficients for a given time step.
+        Compute the preconditioning coefficients for a given diffusion time
+        :math:`t` or noise level :math:`\sigma`.
 
         This abstract method must be implemented by subclasses to define
         the specific preconditioning scheme.
@@ -287,3 +304,401 @@ class BasePreconditioner(Module, ABC):
         D_x = c_skip * x + c_out * F_x
 
         return D_x
+
+
+class VPPreconditioner(BasePreconditioner):
+    r"""
+    Variance Preserving (VP) preconditioner.
+
+    Implements the preconditioning scheme from the VP formulation of
+    score-based generative models.
+
+    The noise schedule is:
+
+    .. math::
+
+        \sigma(t) = \sqrt{\exp\left(\frac{\beta_d}{2} t^2
+        + \beta_{\min} t\right) - 1}
+
+    The preconditioning coefficients are:
+
+    .. math::
+
+        c_{\text{skip}} &= 1 \\
+        c_{\text{out}} &= -\sigma \\
+        c_{\text{in}} &= \frac{1}{\sqrt{\sigma^2 + 1}} \\
+        c_{\text{noise}} &= (M - 1) \cdot \sigma^{-1}(\sigma)
+
+    Parameters
+    ----------
+    model : physicsnemo.Module
+        The underlying neural network model to wrap.
+    beta_d : float, optional
+        Extent of the noise level schedule, by default 19.9.
+    beta_min : float, optional
+        Initial slope of the noise level schedule, by default 0.1.
+    M : int, optional
+        Number of discretization steps in the DDPM formulation,
+        by default 1000.
+
+    Forward
+    -------
+    x : torch.Tensor
+        Noisy latent state of shape :math:`(B, *)` where :math:`B` is the
+        batch size and :math:`*` denotes any number of additional dimensions.
+    t : torch.Tensor
+        Diffusion time tensor of shape :math:`(B,)`.
+    condition : Dict[str, torch.Tensor]
+        Dictionary of conditioning tensors. Each tensor must have shape
+        :math:`(B, *)` where the batch size :math:`B` matches that of ``x``.
+        These are passed to the wrapped ``model`` without modification.
+    **model_kwargs : Any
+        Additional keyword arguments passed to the underlying model.
+
+    Outputs
+    -------
+    torch.Tensor
+        Preconditioned model output with the same shape as the original model
+        output.
+
+    Note
+    ----
+    Reference: `Score-Based Generative Modeling through Stochastic
+    Differential Equations <https://arxiv.org/abs/2011.13456>`_
+    """
+
+    def __init__(
+        self,
+        model: Module,
+        beta_d: float = 19.9,
+        beta_min: float = 0.1,
+        M: int = 1000,
+    ) -> None:
+        super().__init__(model)
+        self.beta_d = beta_d
+        self.beta_min = beta_min
+        self.M = M
+
+    def sigma(self, t: torch.Tensor) -> torch.Tensor:
+        r"""
+        Compute :math:`\sigma(t)` for the VP formulation.
+
+        Parameters
+        ----------
+        t : torch.Tensor
+            Diffusion time tensor of shape :math:`(B,)`.
+
+        Returns
+        -------
+        torch.Tensor
+            Noise level :math:`\sigma(t)` of shape :math:`(B,)`.
+        """
+        exponent = 0.5 * self.beta_d * (t**2) + self.beta_min * t
+        return (exponent.exp() - 1).sqrt()
+
+    def compute_coefficients(
+        self, sigma: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        r"""
+        Compute VP preconditioning coefficients.
+
+        Parameters
+        ----------
+        sigma : torch.Tensor
+            Noise level tensor of shape :math:`(B, 1, ..., 1)`.
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+            Preconditioning coefficients (:math:`c_{\text{in}}`,
+            :math:`c_{\text{noise}}`, :math:`c_{\text{out}}`,
+            :math:`c_{\text{skip}}`) of shape :math:`(B, 1, ..., 1)`.
+        """
+        c_skip = torch.ones_like(sigma)
+        c_out = -sigma
+        c_in = 1 / (sigma**2 + 1).sqrt()
+        # Compute t = sigma_inv(sigma)
+        t = (
+            (self.beta_min**2 + 2 * self.beta_d * (1 + sigma**2).log()).sqrt()
+            - self.beta_min
+        ) / self.beta_d
+        c_noise = (self.M - 1) * t
+        return c_in, c_noise, c_out, c_skip
+
+
+class VEPreconditioner(BasePreconditioner):
+    r"""
+    Variance Exploding (VE) preconditioner.
+
+    Implements the preconditioning scheme from the VE formulation of
+    score-based generative models.
+
+    For VE, the noise schedule is identity: :math:`\sigma(t) = t`.
+
+    The preconditioning coefficients are:
+
+    .. math::
+
+        c_{\text{skip}} &= 1 \\
+        c_{\text{out}} &= \sigma \\
+        c_{\text{in}} &= 1 \\
+        c_{\text{noise}} &= \log(0.5 \cdot \sigma)
+
+    Parameters
+    ----------
+    model : physicsnemo.Module
+        The underlying neural network model to wrap.
+
+    Forward
+    -------
+    x : torch.Tensor
+        Noisy latent state of shape :math:`(B, *)` where :math:`B` is the
+        batch size and :math:`*` denotes any number of additional dimensions.
+    t : torch.Tensor
+        Diffusion time tensor of shape :math:`(B,)`.
+    condition : Dict[str, torch.Tensor]
+        Dictionary of conditioning tensors. Each tensor must have shape
+        :math:`(B, *)` where the batch size :math:`B` matches that of ``x``.
+        These are passed to the wrapped ``model`` without modification.
+    **model_kwargs : Any
+        Additional keyword arguments passed to the underlying model.
+
+    Outputs
+    -------
+    torch.Tensor
+        Preconditioned model output with the same shape as the original model
+        output.
+
+    Note
+    ----
+    Reference: `Score-Based Generative Modeling through Stochastic
+    Differential Equations <https://arxiv.org/abs/2011.13456>`_
+    """
+
+    def __init__(self, model: Module) -> None:
+        super().__init__(model)
+
+    def compute_coefficients(
+        self, t: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        r"""
+        Compute VE preconditioning coefficients.
+
+        Parameters
+        ----------
+        t : torch.Tensor
+            Diffusion time tensor of shape :math:`(B, 1, ..., 1)`.
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+            Preconditioning coefficients (:math:`c_{\text{in}}`,
+            :math:`c_{\text{noise}}`, :math:`c_{\text{out}}`,
+            :math:`c_{\text{skip}}`) of shape :math:`(B, 1, ..., 1)`.
+        """
+        c_skip = torch.ones_like(t)
+        c_out = t
+        c_in = torch.ones_like(t)
+        c_noise = (0.5 * t).log()
+        return c_in, c_noise, c_out, c_skip
+
+
+class IDDPMPreconditioner(BasePreconditioner):
+    r"""
+    Improved DDPM (iDDPM) preconditioner.
+
+    Implements the preconditioning scheme from the improved DDPM
+    formulation.
+
+    The preconditioning coefficients are:
+
+    .. math::
+
+        c_{\text{skip}} &= 1 \\
+        c_{\text{out}} &= -\sigma \\
+        c_{\text{in}} &= \frac{1}{\sqrt{\sigma^2 + 1}} \\
+        c_{\text{noise}} &= M - 1 - \text{argmin}|\sigma - u_j|
+
+    where :math:`u_j, j = 0, ..., M` are the precomputed noise levels in the
+    noise schedule.
+
+    Parameters
+    ----------
+    model : physicsnemo.Module
+        The underlying neural network model to wrap.
+    C_1 : float, optional
+        Timestep adjustment at low noise levels, by default 0.001.
+    C_2 : float, optional
+        Timestep adjustment at high noise levels, by default 0.008.
+    M : int, optional
+        Number of discretization steps in the DDPM formulation,
+        by default 1000.
+
+    Forward
+    -------
+    x : torch.Tensor
+        Noisy latent state of shape :math:`(B, *)` where :math:`B` is the
+        batch size and :math:`*` denotes any number of additional dimensions.
+    t : torch.Tensor
+        Diffusion time tensor of shape :math:`(B,)`.
+    condition : Dict[str, torch.Tensor]
+        Dictionary of conditioning tensors. Each tensor must have shape
+        :math:`(B, *)` where the batch size :math:`B` matches that of ``x``.
+        These are passed to the wrapped ``model`` without modification.
+    **model_kwargs : Any
+        Additional keyword arguments passed to the underlying model.
+
+    Outputs
+    -------
+    torch.Tensor
+        Preconditioned model output with the same shape as the original model
+        output.
+
+    Note
+    ----
+    Reference: `Improved Denoising Diffusion Probabilistic Models
+    <https://arxiv.org/abs/2102.09672>`_
+    """
+
+    def __init__(
+        self,
+        model: Module,
+        C_1: float = 0.001,
+        C_2: float = 0.008,
+        M: int = 1000,
+    ) -> None:
+        super().__init__(model)
+        self.C_1 = C_1
+        self.C_2 = C_2
+        self.M = M
+
+        # Precompute the noise level schedule u_j, j = 0, ..., M
+        u = torch.zeros(M + 1)
+        for j in range(M, 0, -1):
+            angle_j = 0.5 * math.pi * j / M / (C_2 + 1)
+            angle_jm1 = 0.5 * math.pi * (j - 1) / M / (C_2 + 1)
+            alpha_bar_j = math.sin(angle_j) ** 2
+            alpha_bar_jm1 = math.sin(angle_jm1) ** 2
+            alpha_ratio = alpha_bar_jm1 / alpha_bar_j
+            u[j - 1] = ((u[j] ** 2 + 1) / max(alpha_ratio, C_1) - 1).sqrt()
+        self.register_buffer("u", u)
+
+    def compute_coefficients(
+        self, t: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        r"""
+        Compute iDDPM preconditioning coefficients.
+
+        Parameters
+        ----------
+        t : torch.Tensor
+            Diffusion time tensor of shape :math:`(B, 1, ..., 1)`.
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+            Preconditioning coefficients (:math:`c_{\text{in}}`,
+            :math:`c_{\text{noise}}`, :math:`c_{\text{out}}`,
+            :math:`c_{\text{skip}}`) of shape :math:`(B, 1, ..., 1)`.
+        """
+        c_skip = torch.ones_like(t)
+        c_out = -t
+        c_in = 1 / (t**2 + 1).sqrt()
+
+        # Round sigma to nearest index in precomputed schedule u
+        u: torch.Tensor = self.u  # type: ignore[assignment]
+        t_flat = t.reshape(1, -1, 1)
+        u_reshaped = u.reshape(1, -1, 1)
+        idx = torch.cdist(t_flat, u_reshaped).argmin(2).reshape(t.shape)
+        c_noise = self.M - 1 - idx
+
+        return c_in, c_noise, c_out, c_skip
+
+
+class EDMPreconditioner(BasePreconditioner):
+    r"""
+    EDM preconditioner.
+
+    Implements the improved preconditioning scheme proposed in the EDM
+    paper.
+
+    For EDM, the noise schedule is identity: :math:`\sigma(t) = t`.
+
+    The preconditioning coefficients are:
+
+    .. math::
+
+        c_{\text{skip}} &= \frac{\sigma_{\text{data}}^2}
+            {\sigma^2 + \sigma_{\text{data}}^2} \\
+        c_{\text{out}} &= \frac{\sigma \cdot \sigma_{\text{data}}}
+            {\sqrt{\sigma^2 + \sigma_{\text{data}}^2}} \\
+        c_{\text{in}} &= \frac{1}
+            {\sqrt{\sigma_{\text{data}}^2 + \sigma^2}} \\
+        c_{\text{noise}} &= \frac{\log(\sigma)}{4}
+
+    Parameters
+    ----------
+    model : physicsnemo.Module
+        The underlying neural network model to wrap.
+    sigma_data : float, optional
+        Expected standard deviation of the training data, by default 0.5.
+
+    Forward
+    -------
+    x : torch.Tensor
+        Noisy latent state of shape :math:`(B, *)` where :math:`B` is the
+        batch size and :math:`*` denotes any number of additional dimensions.
+    t : torch.Tensor
+        Diffusion time tensor of shape :math:`(B,)`.
+    condition : Dict[str, torch.Tensor]
+        Dictionary of conditioning tensors. Each tensor must have shape
+        :math:`(B, *)` where the batch size :math:`B` matches that of ``x``.
+        These are passed to the wrapped ``model`` without modification.
+    **model_kwargs : Any
+        Additional keyword arguments passed to the underlying model.
+
+    Outputs
+    -------
+    torch.Tensor
+        Preconditioned model output with the same shape as the original model
+        output.
+
+    Note
+    ----
+    Reference: `Elucidating the Design Space of Diffusion-Based
+    Generative Models <https://arxiv.org/abs/2206.00364>`_
+    """
+
+    def __init__(
+        self,
+        model: Module,
+        sigma_data: float = 0.5,
+    ) -> None:
+        super().__init__(model)
+        self.sigma_data = sigma_data
+
+    def compute_coefficients(
+        self, t: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        r"""
+        Compute EDM preconditioning coefficients.
+
+        Parameters
+        ----------
+        t : torch.Tensor
+            Diffusion time (or noise level, since they are identical for EDM)
+            of shape :math:`(B, 1, ..., 1)`.
+
+        Returns
+        -------
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+            Preconditioning coefficients (:math:`c_{\text{in}}`,
+            :math:`c_{\text{noise}}`, :math:`c_{\text{out}}`,
+            :math:`c_{\text{skip}}`) of shape :math:`(B, 1, ..., 1)`.
+        """
+        sigma_data = self.sigma_data
+        c_skip = sigma_data**2 / (t**2 + sigma_data**2)
+        c_out = t * sigma_data / (t**2 + sigma_data**2).sqrt()
+        c_in = 1 / (sigma_data**2 + t**2).sqrt()
+        c_noise = t.log() / 4
+        return c_in, c_noise, c_out, c_skip
