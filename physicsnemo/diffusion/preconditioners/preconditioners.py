@@ -205,7 +205,8 @@ class BasePreconditioner(Module, ABC):
         model: Module,
         meta: ModelMetaData | None = None,
     ) -> None:
-        super().__init__(meta=meta)
+        super().__init__()
+        self.meta = meta
         self.model = model
 
     @abstractmethod
