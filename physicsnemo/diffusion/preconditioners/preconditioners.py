@@ -32,7 +32,7 @@ class BasePreconditioner(Module, ABC):
 
     The preconditioner wraps a neural network model :math:`F` and applies
     a preconditioning formula to transform the network output to produce
-    the denoised output :math:`D(\mathbf{x}, t)` according to:
+    the preconditioned output :math:`D(\mathbf{x}, t)` according to:
 
     .. math::
 
@@ -45,6 +45,9 @@ class BasePreconditioner(Module, ABC):
     - :math:`c_{\text{noise}}(t)`: Noise conditioning value
     - :math:`c_{\text{out}}(t)`: Output scaling coefficient
     - :math:`c_{\text{skip}}(t)`: Skip connection scaling coefficient
+
+    and where :math:`\mathbf{x}` is the latent state and :math:`t` is the
+    diffusion time.
 
     The wrapped model :math:`F` must have the following signature:
 
@@ -72,7 +75,7 @@ class BasePreconditioner(Module, ABC):
         Noisy latent state of shape :math:`(B, *)` where :math:`B` is the
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
-        Diffusion time step tensor of shape :math:`(B,)`.
+        Diffusion time tensor of shape :math:`(B,)`.
     condition : Dict[str, torch.Tensor]
         Dictionary of conditioning tensors. Each tensor must have shape
         :math:`(B, *)` where the batch size :math:`B` matches that of ``x``.
@@ -83,16 +86,25 @@ class BasePreconditioner(Module, ABC):
     Outputs
     -------
     torch.Tensor
-        Denoised latent state with the same shape :math:`(B, *)` as the input
-        tensor ``x``.
+        Preconditioned model output with the same shape as the original model
+        output.
 
     .. note::
 
         - Subclasses must implement the :meth:`compute_coefficients` method to
           define the specific preconditioning scheme.
 
+        - The arguments ``t`` of the preconditioner forward method is always
+          assumed to be the diffusion time. For preconditioning schemes based
+          on noise level (that is :math:`c_{\text{in}}(\sigma)`,
+          :math:`c_{\text{noise}}(\sigma)`, :math:`c_{\text{out}}(\sigma)`,
+          :math:`c_{\text{skip}}(\sigma)` instead of :math:`c_{\text{in}}(t)`,
+          :math:`c_{\text{noise}}(t)`, :math:`c_{\text{out}}(t)`,
+          :math:`c_{\text{skip}}(t)`), the noise level :math:`\sigma(t)` is
+          computed internally using the :meth:`sigma` method.
+
         - If a subclass implements the :meth:`sigma` method, the diffusion
-          time step :math:`t` is first transformed to a noise level
+          time :math:`t` is first transformed to a noise level
           :math:`\sigma(t)` before being passed to
           :meth:`compute_coefficients`. This allows implementing
           preconditioners for different noise schedules while keeping the
@@ -101,22 +113,21 @@ class BasePreconditioner(Module, ABC):
     Examples
     --------
     The following example shows how to implement a classical EDM
-    preconditioner. For EDM, there is no need to override the
-    :meth:`sigma` method since :math:`\sigma(t) = t` (noise level and
-    diffusion time step are the same).
+    preconditioner. For EDM, there is no need to implement the :meth:`sigma`
+    method since :math:`\sigma(t) = t` (noise level and diffusion time are the
+    same).
 
-    We first define a simple model to wrap (for illustration purposes):
+    We first define a simple model to wrap:
 
     >>> import torch
     >>> from physicsnemo.nn import Module
     >>> class SimpleModel(Module):
-    ...     '''A simple model for illustration purposes.'''
     ...     def __init__(self, channels: int):
     ...         super().__init__()
     ...         self.channels = channels
     ...         self.net = torch.nn.Conv2d(channels, channels, 1)
     ...
-    ...     def forward(self, x, t, condition, **kwargs):
+    ...     def forward(self, x, t, condition):
     ...         return self.net(x)
 
     Now we define the EDM preconditioner:
@@ -128,6 +139,8 @@ class BasePreconditioner(Module, ABC):
     ...         self.sigma_data = sigma_data
     ...
     ...     def compute_coefficients(self, t: torch.Tensor):
+    ...         # For EDM sigma(t) = t, so the argument passed to
+    ...         # compute_coefficients is already sigma(t)
     ...         sigma_data = self.sigma_data
     ...         c_skip = sigma_data**2 / (t**2 + sigma_data**2)
     ...         c_out = t * sigma_data / (t**2 + sigma_data**2).sqrt()
@@ -156,7 +169,8 @@ class BasePreconditioner(Module, ABC):
     ...         return t.sqrt()
     ...
     ...     def compute_coefficients(self, sigma: torch.Tensor):
-    ...         # Here the argument passed to compute_coefficients is already sigma(t) = sqrt(t)
+    ...         # Here the argument passed to compute_coefficients is
+    ...         # sigma(t) = sqrt(t) due to override of the sigma method
     ...         # due to override of the sigma method
     ...         c_skip = torch.ones_like(sigma)
     ...         c_out = sigma
@@ -191,12 +205,11 @@ class BasePreconditioner(Module, ABC):
         Parameters
         ----------
         t : torch.Tensor
-            Diffusion time step (or noise level if :meth:`sigma` is
-            overridden) tensor of shape :math:`(B, 1, ..., 1)` where
+            Diffusion time (or noise level if :meth:`sigma` is
+            implemented) tensor of shape :math:`(B, 1, ..., 1)` where
             :math:`B` is the batch size and the trailing singleton
             dimensions match the spatial dimensions of the latent state
-            ``x`` for broadcasting. If the subclass defines the
-            :meth:`sigma` method, then ``t`` contains :math:`\sigma(t)`.
+            ``x`` for broadcasting.
 
         Returns
         -------
@@ -214,19 +227,19 @@ class BasePreconditioner(Module, ABC):
 
     def sigma(self, t: torch.Tensor) -> torch.Tensor:
         r"""
-        Map diffusion time step :math:`t` to noise level :math:`\sigma(t)`.
+        Map diffusion time :math:`t` to noise level :math:`\sigma(t)`.
 
         By default, this is the identity function :math:`\sigma(t) = t`.
         Subclasses can override this to implement preconditioners for different
         noise schedules.
 
         When overridden, the output of this method is passed to
-        :meth:`compute_coefficients` instead of the raw time step ``t``.
+        :meth:`compute_coefficients` instead of the raw time ``t``.
 
         Parameters
         ----------
         t : torch.Tensor
-            Diffusion time step tensor of shape :math:`(B,)` where
+            Diffusion time tensor of shape :math:`(B,)` where
             :math:`B` is the batch size.
 
         Returns
