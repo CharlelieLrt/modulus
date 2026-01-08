@@ -59,14 +59,14 @@ class BasePreconditioner(Module, ABC):
 
     The wrapped model :math:`F` must have the following signature:
 
-    .. code-block::
+    .. code-block:: python
 
         model(
-            x: torch.Tensor,
-            t: torch.Tensor,
-            condition: Dict[str, torch.Tensor],
+            x: torch.Tensor,  # Shape: (B, *)
+            t: torch.Tensor,  # Shape: (B,)
+            condition: Dict[str, torch.Tensor],  # Each tensor: (B, *)
             **model_kwargs: Any,
-        ) -> torch.Tensor
+        ) -> torch.Tensor  # Shape: (B, *)
 
     The preconditioner is agnostic to the prediction target of the wrapped
     model :math:`F`. The same preconditioning formula is applied regardless of
