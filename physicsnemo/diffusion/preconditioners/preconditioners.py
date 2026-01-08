@@ -68,6 +68,12 @@ class BasePreconditioner(Module, ABC):
             **model_kwargs: Any,
         ) -> torch.Tensor
 
+    The preconditioner is agnostic to the prediction target of the wrapped
+    model :math:`F`. The same preconditioning formula is applied regardless of
+    whether the model is an :math:`\mathbf{x}_0`-predictor, an
+    :math:`\epsilon`-predictor, a score predictor, or a
+    :math:`\mathbf{v}`-predictor.
+
     Parameters
     ----------
     model : physicsnemo.Module
@@ -118,6 +124,9 @@ class BasePreconditioner(Module, ABC):
           :math:`c_{\text{skip}}(\sigma)` instead of :math:`c_{\text{in}}(t)`,
           :math:`c_{\text{noise}}(t)`, :math:`c_{\text{out}}(t)`,
           :math:`c_{\text{skip}}(t)`).
+
+        - The ``forward`` method of the preconditioner *should not* be
+          overriden.
 
     .. note::
 
