@@ -39,18 +39,19 @@ from .helpers import (
 )
 
 # =============================================================================
-# Test Model Definition
+# Test Model Definitions
 # =============================================================================
 
 
-class SimpleModel(Module):
-    """Simple model for testing preconditioners with deterministic init."""
+class ConvModel(Module):
+    """Convolutional model for testing preconditioners with 4D input."""
 
     def __init__(self, channels: int = 3):
         super().__init__()
         self.channels = channels
-        # Simple convolution that preserves shape
-        self.net = torch.nn.Conv2d(channels, channels, kernel_size=1)
+        # Conv2d takes x concatenated with condition["y"] (same shape as x)
+        in_channels = channels * 2
+        self.net = torch.nn.Conv2d(in_channels, channels, kernel_size=1)
 
     def forward(
         self,
@@ -59,7 +60,32 @@ class SimpleModel(Module):
         condition: Dict[str, torch.Tensor],
         **kwargs: Any,
     ) -> torch.Tensor:
-        return self.net(x)
+        y = condition["y"]
+        x_cond = torch.cat([x, y], dim=1)
+        out = self.net(x_cond)
+        t_scale = t.view(-1, 1, 1, 1)
+        return out + t_scale
+
+
+class LinearModel(Module):
+    """Linear model for testing preconditioners with 2D input."""
+
+    def __init__(self, in_features: int = 64):
+        super().__init__()
+        self.in_features = in_features
+        # Simple linear layer that preserves dimension
+        self.net = torch.nn.Linear(in_features, in_features)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        t: torch.Tensor,
+        condition: Dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        out = self.net(x)
+        t_scale = t.view(-1, 1)
+        return out + t_scale
 
 
 # =============================================================================
@@ -67,8 +93,17 @@ class SimpleModel(Module):
 # =============================================================================
 
 
-# Default test shape: (batch_size, channels, height, width)
-TEST_SHAPE: Tuple[int, ...] = (4, 3, 16, 16)
+# Test shapes for different model types
+# 4D shape for ConvModel: (batch_size, channels, height, width)
+CONV_SHAPE: Tuple[int, ...] = (4, 3, 8, 6)
+# 2D shape for LinearModel: (batch_size, features)
+LINEAR_SHAPE: Tuple[int, ...] = (4, 16)
+
+# Model configurations for parameterized tests: (model_class, shape, arch_name)
+MODEL_CONFIGS = [
+    (ConvModel, CONV_SHAPE, "conv"),
+    (LinearModel, LINEAR_SHAPE, "linear"),
+]
 
 # Preconditioner configurations for parameterized tests
 PRECOND_CONFIGS = [
@@ -100,21 +135,56 @@ PRECOND_CONFIGS = [
 # =============================================================================
 
 
-@pytest.fixture
-def simple_model():
-    """Create a simple model with deterministic parameters."""
-    return instantiate_model_deterministic(SimpleModel, seed=0, channels=TEST_SHAPE[1])
+@pytest.fixture(params=MODEL_CONFIGS, ids=["ConvModel", "LinearModel"])
+def model_config(request):
+    """Parameterized fixture returning (model_class, shape, arch_name)."""
+    return request.param
 
 
 @pytest.fixture
-def batch_data(device):
-    """Create deterministic batch data for testing."""
-    return generate_batch_data(shape=TEST_SHAPE, seed=42, device=device)
+def test_shape(model_config):
+    """Return the test shape for the current model class."""
+    _, shape, _ = model_config
+    return shape
 
 
-def create_preconditioner(precond_cls, precond_kwargs):
+@pytest.fixture
+def arch_name(model_config):
+    """Return the architecture name for reference file naming."""
+    _, _, name = model_config
+    return name
+
+
+@pytest.fixture
+def simple_model(model_config):
+    """Create a model with deterministic parameters."""
+    cls, shape, _ = model_config
+    if cls == LinearModel:
+        return instantiate_model_deterministic(cls, seed=0, in_features=shape[1])
+    return instantiate_model_deterministic(cls, seed=0, channels=shape[1])
+
+
+@pytest.fixture
+def batch_data(model_config, device):
+    """Create deterministic batch data matching the model's expected shape."""
+    model_cls, shape, _ = model_config
+    # ConvModel uses condition, LinearModel does not
+    use_condition = model_cls == ConvModel
+    return generate_batch_data(
+        shape=shape, seed=42, device=device, use_condition=use_condition
+    )
+
+
+def create_model_deterministic(model_cls, shape):
+    """Create a model with deterministic parameters for the given shape."""
+    if model_cls == LinearModel:
+        return instantiate_model_deterministic(model_cls, seed=0, in_features=shape[1])
+    return instantiate_model_deterministic(model_cls, seed=0, channels=shape[1])
+
+
+def create_preconditioner(precond_cls, precond_kwargs, model_cls, shape):
     """Create a preconditioner with deterministic model."""
-    model = instantiate_model_deterministic(SimpleModel, seed=0, channels=TEST_SHAPE[1])
+    model = create_model_deterministic(model_cls, shape)
     return precond_cls(model, **precond_kwargs)
 
 
@@ -153,15 +223,6 @@ class TestVPPreconditioner:
 
         assert precond.model is simple_model
         assert isinstance(precond, BasePreconditioner)
-
-    def test_forward_input_validation(self, simple_model, device):
-        """Test forward validates input shapes."""
-        precond = VPPreconditioner(simple_model).to(device)
-        x = torch.randn(*TEST_SHAPE, device=device)
-        t_wrong = torch.rand(2, device=device)  # Wrong batch size
-
-        with pytest.raises(ValueError, match="Expected t to have shape"):
-            precond(x, t_wrong, {})
 
 
 # =============================================================================
@@ -250,131 +311,197 @@ class TestEDMPreconditioner:
 
 
 # =============================================================================
-# Non-Regression Tests (Parameterized Across All Preconditioners)
+# Non-Regression Tests (Parameterized Across All Preconditioners and Models)
 # =============================================================================
 
 
 @pytest.mark.parametrize(
-    "precond_cls,precond_kwargs,name",
+    "precond_cls,precond_kwargs,precond_name",
     PRECOND_CONFIGS,
     ids=["VP", "VE", "iDDPM", "EDM"],
 )
 class TestNonRegression:
     """Non-regression tests parameterized across all preconditioner types."""
 
-    def test_sigma_non_regression(self, device, precond_cls, precond_kwargs, name):
+    def test_sigma_non_regression(
+        self,
+        model_config,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
+    ):
         """Test sigma(t) against reference data."""
-        precond = create_preconditioner(precond_cls, precond_kwargs).to(device)
+        model_cls, shape, arch_name = model_config
+        precond = create_preconditioner(
+            precond_cls, precond_kwargs, model_cls, shape
+        ).to(device)
 
-        def compute_reference():
-            t = torch.tensor([0.1, 0.25, 0.5, 0.75, 1.0])
-            precond_cpu = create_preconditioner(precond_cls, precond_kwargs)
-            sigma = precond_cpu.sigma(t)
-            return {"t": t, "sigma": sigma}
-
-        ref_data = load_or_create_reference(f"{name}_sigma.pth", compute_reference)
-
-        t = ref_data["t"].to(device)
+        t = batch_data["t"]
         sigma = precond.sigma(t)
+
+        ref_file = f"{precond_name}_{arch_name}_sigma.pth"
+        ref_data = load_or_create_reference(ref_file, lambda: {"sigma": sigma.cpu()})
 
         compare_outputs(sigma, ref_data["sigma"], atol=1e-6, rtol=1e-6)
 
-    def test_sigma_from_checkpoint(self, device, precond_cls, precond_kwargs, name):
+    def test_sigma_from_checkpoint(
+        self,
+        model_config,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
+    ):
         """Test sigma(t) from loaded checkpoint matches reference."""
+        model_cls, shape, arch_name = model_config
 
         def create_fn():
-            return create_preconditioner(precond_cls, precond_kwargs)
+            return create_preconditioner(precond_cls, precond_kwargs, model_cls, shape)
 
-        precond = load_or_create_checkpoint(f"{name}.mdlus", create_fn).to(device)
+        ckpt_file = f"{precond_name}_{arch_name}.mdlus"
+        precond = load_or_create_checkpoint(ckpt_file, create_fn).to(device)
 
-        ref_data = load_or_create_reference(f"{name}_sigma.pth", None)
-
-        t = ref_data["t"].to(device)
+        t = batch_data["t"]
         sigma = precond.sigma(t)
+
+        ref_file = f"{precond_name}_{arch_name}_sigma.pth"
+        ref_data = load_or_create_reference(ref_file, lambda: {"sigma": sigma.cpu()})
 
         compare_outputs(sigma, ref_data["sigma"], atol=1e-6, rtol=1e-6)
 
-    def test_compute_coefficients_non_regression(
-        self, device, precond_cls, precond_kwargs, name
+    def test_coefficients_non_regression(
+        self,
+        model_config,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
     ):
         """Test compute_coefficients against reference data."""
-        precond = create_preconditioner(precond_cls, precond_kwargs).to(device)
+        model_cls, shape, arch_name = model_config
+        precond = create_preconditioner(
+            precond_cls, precond_kwargs, model_cls, shape
+        ).to(device)
 
-        def compute_reference():
-            sigma = torch.tensor([0.5, 1.0, 2.0, 5.0]).reshape(4, 1, 1, 1)
-            precond_cpu = create_preconditioner(precond_cls, precond_kwargs)
-            c_in, c_noise, c_out, c_skip = precond_cpu.compute_coefficients(sigma)
-            return {
-                "sigma": sigma,
-                "c_in": c_in,
-                "c_noise": c_noise,
-                "c_out": c_out,
-                "c_skip": c_skip,
-            }
+        # Reshape t to sigma shape: (B, 1, ..., 1)
+        batch_size = shape[0]
+        sigma_shape = (batch_size,) + (1,) * (len(shape) - 1)
+        sigma = batch_data["t"].view(sigma_shape)
 
+        c_in, c_noise, c_out, c_skip = precond.compute_coefficients(sigma)
+
+        # Load existing reference or save current output as reference
+        ref_file = f"{precond_name}_{arch_name}_coefficients.pth"
         ref_data = load_or_create_reference(
-            f"{name}_coefficients.pth", compute_reference
+            ref_file,
+            lambda: {
+                "c_in": c_in.cpu(),
+                "c_noise": c_noise.cpu(),
+                "c_out": c_out.cpu(),
+                "c_skip": c_skip.cpu(),
+            },
         )
 
-        sigma = ref_data["sigma"].to(device)
-        c_in, c_noise, c_out, c_skip = precond.compute_coefficients(sigma)
-
         compare_outputs(c_in, ref_data["c_in"], atol=1e-5, rtol=1e-5)
         compare_outputs(c_noise, ref_data["c_noise"], atol=1e-5, rtol=1e-5)
         compare_outputs(c_out, ref_data["c_out"], atol=1e-5, rtol=1e-5)
         compare_outputs(c_skip, ref_data["c_skip"], atol=1e-5, rtol=1e-5)
 
-    def test_compute_coefficients_from_checkpoint(
-        self, device, precond_cls, precond_kwargs, name
+    def test_coefficients_from_checkpoint(
+        self,
+        model_config,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
     ):
         """Test compute_coefficients from checkpoint matches reference."""
+        model_cls, shape, arch_name = model_config
 
         def create_fn():
-            return create_preconditioner(precond_cls, precond_kwargs)
+            return create_preconditioner(precond_cls, precond_kwargs, model_cls, shape)
 
-        precond = load_or_create_checkpoint(f"{name}.mdlus", create_fn).to(device)
+        ckpt_file = f"{precond_name}_{arch_name}.mdlus"
+        precond = load_or_create_checkpoint(ckpt_file, create_fn).to(device)
 
-        ref_data = load_or_create_reference(f"{name}_coefficients.pth", None)
+        # Reshape t to sigma shape: (B, 1, ..., 1)
+        batch_size = shape[0]
+        sigma_shape = (batch_size,) + (1,) * (len(shape) - 1)
+        sigma = batch_data["t"].view(sigma_shape)
 
-        sigma = ref_data["sigma"].to(device)
         c_in, c_noise, c_out, c_skip = precond.compute_coefficients(sigma)
+
+        ref_file = f"{precond_name}_{arch_name}_coefficients.pth"
+        ref_data = load_or_create_reference(
+            ref_file,
+            lambda: {
+                "c_in": c_in.cpu(),
+                "c_noise": c_noise.cpu(),
+                "c_out": c_out.cpu(),
+                "c_skip": c_skip.cpu(),
+            },
+        )
 
         compare_outputs(c_in, ref_data["c_in"], atol=1e-5, rtol=1e-5)
         compare_outputs(c_noise, ref_data["c_noise"], atol=1e-5, rtol=1e-5)
         compare_outputs(c_out, ref_data["c_out"], atol=1e-5, rtol=1e-5)
         compare_outputs(c_skip, ref_data["c_skip"], atol=1e-5, rtol=1e-5)
 
-    def test_forward_non_regression(self, device, precond_cls, precond_kwargs, name):
+    def test_forward_non_regression(
+        self,
+        model_config,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
+    ):
         """Test forward pass against reference data."""
-        precond = create_preconditioner(precond_cls, precond_kwargs).to(device)
+        model_cls, shape, arch_name = model_config
+        precond = create_preconditioner(
+            precond_cls, precond_kwargs, model_cls, shape
+        ).to(device)
 
-        def compute_reference():
-            data = generate_batch_data(shape=TEST_SHAPE, seed=42, device="cpu")
-            precond_cpu = create_preconditioner(precond_cls, precond_kwargs)
-            out = precond_cpu(data["x"], data["t"], data["condition"])
-            return {"x": data["x"], "t": data["t"], "out": out}
+        x = batch_data["x"]
+        t = batch_data["t"]
+        condition = batch_data["condition"]
+        out = precond(x, t, condition)
 
-        ref_data = load_or_create_reference(f"{name}_forward.pth", compute_reference)
-
-        x = ref_data["x"].to(device)
-        t = ref_data["t"].to(device)
-        out = precond(x, t, {})
+        ref_file = f"{precond_name}_{arch_name}_forward.pth"
+        ref_data = load_or_create_reference(ref_file, lambda: {"out": out.cpu()})
 
         compare_outputs(out, ref_data["out"], atol=1e-5, rtol=1e-5)
 
-    def test_forward_from_checkpoint(self, device, precond_cls, precond_kwargs, name):
+    def test_forward_from_checkpoint(
+        self,
+        model_config,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
+    ):
         """Test forward pass from loaded checkpoint matches reference."""
+        model_cls, shape, arch_name = model_config
 
         def create_fn():
-            return create_preconditioner(precond_cls, precond_kwargs)
+            return create_preconditioner(precond_cls, precond_kwargs, model_cls, shape)
 
-        precond = load_or_create_checkpoint(f"{name}.mdlus", create_fn).to(device)
+        ckpt_file = f"{precond_name}_{arch_name}.mdlus"
+        precond = load_or_create_checkpoint(ckpt_file, create_fn).to(device)
 
-        ref_data = load_or_create_reference(f"{name}_forward.pth", None)
+        x = batch_data["x"]
+        t = batch_data["t"]
+        condition = batch_data["condition"]
+        out = precond(x, t, condition)
 
-        x = ref_data["x"].to(device)
-        t = ref_data["t"].to(device)
-        out = precond(x, t, {})
+        ref_file = f"{precond_name}_{arch_name}_forward.pth"
+        ref_data = load_or_create_reference(ref_file, lambda: {"out": out.cpu()})
 
         compare_outputs(out, ref_data["out"], atol=1e-5, rtol=1e-5)
 
@@ -385,15 +512,39 @@ class TestNonRegression:
 
 
 @pytest.mark.parametrize(
-    "precond_cls,precond_kwargs,name",
+    "precond_cls,precond_kwargs,precond_name",
     PRECOND_CONFIGS,
     ids=["VP", "VE", "iDDPM", "EDM"],
 )
 class TestAllPreconditioners:
     """Tests that apply to all preconditioner types."""
 
+    def test_forward_input_validation(
+        self,
+        simple_model,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
+    ):
+        """Test forward validates input shapes."""
+        precond = precond_cls(simple_model, **precond_kwargs).to(device)
+        x = batch_data["x"]
+        t_wrong = torch.rand(2, device=device)  # Wrong batch size
+        condition = batch_data["condition"]
+
+        with pytest.raises(ValueError, match="Expected t to have shape"):
+            precond(x, t_wrong, condition)
+
     def test_forward_dtype_preservation(
-        self, simple_model, batch_data, device, precond_cls, precond_kwargs, name
+        self,
+        simple_model,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
     ):
         """Test forward preserves input dtype."""
         precond = precond_cls(simple_model, **precond_kwargs).to(device)
@@ -406,12 +557,18 @@ class TestAllPreconditioners:
         assert output.dtype == x.dtype
 
     def test_condition_batch_validation(
-        self, simple_model, device, precond_cls, precond_kwargs, name
+        self,
+        simple_model,
+        test_shape,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
     ):
         """Test condition tensor batch size validation."""
         precond = precond_cls(simple_model, **precond_kwargs).to(device)
-        x = torch.randn(*TEST_SHAPE, device=device)
-        t = torch.rand(TEST_SHAPE[0], device=device)
+        x = torch.randn(*test_shape, device=device)
+        t = torch.rand(test_shape[0], device=device)
         # Wrong batch size in condition
         condition = {"cond": torch.randn(2, 10, device=device)}
 
@@ -419,7 +576,13 @@ class TestAllPreconditioners:
             precond(x, t, condition)
 
     def test_gradient_flow(
-        self, simple_model, batch_data, device, precond_cls, precond_kwargs, name
+        self,
+        simple_model,
+        batch_data,
+        device,
+        precond_cls,
+        precond_kwargs,
+        precond_name,
     ):
         """Test gradients flow through the preconditioner."""
         precond = precond_cls(simple_model, **precond_kwargs).to(device)

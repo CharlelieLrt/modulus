@@ -54,9 +54,21 @@ def generate_batch_data(
     shape: Tuple[int, ...] = (4, 3, 16, 16),
     seed: int = 42,
     device: str = "cpu",
+    use_condition: bool = False,
 ) -> Dict[str, torch.Tensor | Dict[str, torch.Tensor]]:
     """
     Generate deterministic batch data for testing.
+
+    Parameters
+    ----------
+    shape : Tuple[int, ...]
+        Shape of the input tensor x.
+    seed : int
+        Random seed for deterministic generation.
+    device : str
+        Device to place tensors on.
+    use_condition : bool
+        If True, generates condition["y"] with the same shape as x.
     """
     gen = torch.Generator(device="cpu")
     gen.manual_seed(seed)
@@ -64,12 +76,17 @@ def generate_batch_data(
     batch_size = shape[0]
     x = torch.randn(*shape, generator=gen)
     # Use positive t values away from 0 to avoid log(0) issues
-    t = torch.rand(batch_size, generator=gen) * 10 + 0.1
+    t = torch.rand(batch_size, generator=gen) * 0.5 + 0.4
+
+    # Generate condition tensor with same shape as x
+    condition: Dict[str, torch.Tensor] = {}
+    if use_condition:
+        condition["y"] = torch.randn(*shape, generator=gen).to(device)
 
     return {
         "x": x.to(device),
         "t": t.to(device),
-        "condition": {},
+        "condition": condition,
     }
 
 
