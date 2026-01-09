@@ -23,7 +23,7 @@ import torch
 
 from physicsnemo.core import Module
 from physicsnemo.diffusion.preconditioners import (
-    BasePreconditioner,
+    BaseAffinePreconditioner,
     EDMPreconditioner,
     IDDPMPreconditioner,
     VEPreconditioner,
@@ -222,7 +222,7 @@ class TestVPPreconditioner:
             assert precond.M == M
 
         assert precond.model is simple_model
-        assert isinstance(precond, BasePreconditioner)
+        assert isinstance(precond, BaseAffinePreconditioner)
 
 
 # =============================================================================
@@ -238,7 +238,7 @@ class TestVEPreconditioner:
         precond = VEPreconditioner(simple_model)
 
         assert precond.model is simple_model
-        assert isinstance(precond, BasePreconditioner)
+        assert isinstance(precond, BaseAffinePreconditioner)
 
 
 # =============================================================================
@@ -276,7 +276,7 @@ class TestIDDPMPreconditioner:
 
         assert hasattr(precond, "u")
         assert precond.u.shape == (expected_M + 1,)
-        assert isinstance(precond, BasePreconditioner)
+        assert isinstance(precond, BaseAffinePreconditioner)
 
 
 # =============================================================================
@@ -307,7 +307,7 @@ class TestEDMPreconditioner:
             assert precond.sigma_data == sigma_data
 
         assert precond.model is simple_model
-        assert isinstance(precond, BasePreconditioner)
+        assert isinstance(precond, BaseAffinePreconditioner)
 
 
 # =============================================================================

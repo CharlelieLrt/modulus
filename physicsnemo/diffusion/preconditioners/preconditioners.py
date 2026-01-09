@@ -31,12 +31,14 @@ from physicsnemo.core.module import Module
 # preconditioners.
 
 
-class BasePreconditioner(Module, ABC):
+class BaseAffinePreconditioner(Module, ABC):
     r"""
-    Abstract base class for diffusion model preconditioners.
+    Abstract base class for diffusion model preconditioners using an affine
+    transformation.
 
     This class provides a standardized interface for implementing
-    preconditioners used in diffusion models.
+    preconditioners that use affine transformations of the model
+    input and output.
 
     The preconditioner wraps a neural network model :math:`F` and applies
     a preconditioning formula to transform the network output to produce
@@ -106,8 +108,8 @@ class BasePreconditioner(Module, ABC):
     .. note::
 
         To implement a new preconditioner, a subclass of
-        :class:`BasePreconditioner` must be defined, and some methods have to
-        be implemented:
+        :class:`BaseAffinePreconditioner` must be defined, and some methods
+        have to be implemented:
 
         - Subclasses must implement the :meth:`compute_coefficients` method to
           define the specific preconditioning scheme.
@@ -157,8 +159,10 @@ class BasePreconditioner(Module, ABC):
 
     Now we define the EDM preconditioner:
 
-    >>> from physicsnemo.diffusion.preconditioners import BasePreconditioner
-    >>> class EDMPreconditioner(BasePreconditioner):
+    >>> from physicsnemo.diffusion.preconditioners import (
+    ...     BaseAffinePreconditioner,
+    ... )
+    >>> class EDMPreconditioner(BaseAffinePreconditioner):
     ...     def __init__(self, model, sigma_data: float = 0.5):
     ...         super().__init__(model)
     ...         self.sigma_data = sigma_data
@@ -185,7 +189,7 @@ class BasePreconditioner(Module, ABC):
     implement a Variance Exploding (VE) preconditioner where
     :math:`\sigma(t) = \sqrt{t}`.
 
-    >>> class VEPreconditioner(BasePreconditioner):
+    >>> class VEPreconditioner(BaseAffinePreconditioner):
     ...     def __init__(self, model):
     ...         super().__init__(model)
     ...
@@ -316,7 +320,7 @@ class BasePreconditioner(Module, ABC):
         return D_x
 
 
-class VPPreconditioner(BasePreconditioner):
+class VPPreconditioner(BaseAffinePreconditioner):
     r"""
     Variance Preserving (VP) preconditioner.
 
@@ -436,7 +440,7 @@ class VPPreconditioner(BasePreconditioner):
         return c_in, c_noise, c_out, c_skip
 
 
-class VEPreconditioner(BasePreconditioner):
+class VEPreconditioner(BaseAffinePreconditioner):
     r"""
     Variance Exploding (VE) preconditioner.
 
@@ -513,7 +517,7 @@ class VEPreconditioner(BasePreconditioner):
         return c_in, c_noise, c_out, c_skip
 
 
-class IDDPMPreconditioner(BasePreconditioner):
+class IDDPMPreconditioner(BaseAffinePreconditioner):
     r"""
     Improved DDPM (iDDPM) preconditioner.
 
@@ -625,7 +629,7 @@ class IDDPMPreconditioner(BasePreconditioner):
         return c_in, c_noise, c_out, c_skip
 
 
-class EDMPreconditioner(BasePreconditioner):
+class EDMPreconditioner(BaseAffinePreconditioner):
     r"""
     EDM preconditioner.
 

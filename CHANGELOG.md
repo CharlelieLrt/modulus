@@ -11,10 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Refactored diffusion preconditioners in
-  `physicsnemo.diffusion.preconditioners` relying on on a new abstract base
-  class with a standardized interface. Existing preconditioners (`VPPrecond`,
-  `VEPrecond`, `iDDPMPrecond`, `EDMPrecond`) reimplemented based on this new
-  interface.
+  `physicsnemo.diffusion.preconditioners` relying on a new abstract base class
+  `BaseAffinePreconditioner` for preconditioning schemes using affine
+  transformations. Existing preconditioners (`VPPrecond`, `VEPrecond`,
+  `iDDPMPrecond`, `EDMPrecond`) reimplemented based on this new interface.
 
 ### Changed
 

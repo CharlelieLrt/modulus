@@ -25,7 +25,7 @@ from .legacy import (  # noqa: F401
     iDDPMPrecond,
 )
 from .preconditioners import (  # noqa: F401
-    BasePreconditioner,
+    BaseAffinePreconditioner,
     EDMPreconditioner,
     IDDPMPreconditioner,
     VEPreconditioner,
