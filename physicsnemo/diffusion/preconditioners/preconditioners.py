@@ -59,7 +59,10 @@ class BaseAffinePreconditioner(Module, ABC):
     and where :math:`\mathbf{x}` is the latent state and :math:`t` is the
     diffusion time.
 
-    The wrapped model :math:`F` must have the following signature:
+    The wrapped model :math:`F` must be an instance of
+    :class:`~physicsnemo.core.Module` that satisfies the
+    :class:`~physicsnemo.diffusion.DiffusionModel` interface, with the
+    following signature:
 
     .. code-block:: python
 
@@ -75,6 +78,13 @@ class BaseAffinePreconditioner(Module, ABC):
     whether the model is an :math:`\mathbf{x}_0`-predictor, an
     :math:`\epsilon`-predictor, a score predictor, or a
     :math:`\mathbf{v}`-predictor.
+
+    .. note::
+
+        The preconditioner itself also satisfies the
+        :class:`~physicsnemo.diffusion.DiffusionModel` interface, meaning it
+        does not change the signature of the wrapped model :math:`F`, and it
+        can be used anywhere a diffusion model is expected.
 
     Parameters
     ----------
@@ -346,7 +356,8 @@ class VPPreconditioner(BaseAffinePreconditioner):
     Parameters
     ----------
     model : physicsnemo.Module
-        The underlying neural network model to wrap.
+        The underlying neural network model to wrap with signature described in
+        :class:`BaseAffinePreconditioner`.
     beta_d : float, optional
         Extent of the noise level schedule, by default 19.9.
     beta_min : float, optional
@@ -461,7 +472,8 @@ class VEPreconditioner(BaseAffinePreconditioner):
     Parameters
     ----------
     model : physicsnemo.Module
-        The underlying neural network model to wrap.
+        The underlying neural network model to wrap with signature described in
+        :class:`BaseAffinePreconditioner`.
 
     Forward
     -------
@@ -539,7 +551,8 @@ class IDDPMPreconditioner(BaseAffinePreconditioner):
     Parameters
     ----------
     model : physicsnemo.Module
-        The underlying neural network model to wrap.
+        The underlying neural network model to wrap with signature described in
+        :class:`BaseAffinePreconditioner`.
     C_1 : float, optional
         Timestep adjustment at low noise levels, by default 0.001.
     C_2 : float, optional
@@ -653,7 +666,8 @@ class EDMPreconditioner(BaseAffinePreconditioner):
     Parameters
     ----------
     model : physicsnemo.Module
-        The underlying neural network model to wrap.
+        The underlying neural network model to wrap with signature described in
+        :class:`BaseAffinePreconditioner`.
     sigma_data : float, optional
         Expected standard deviation of the training data, by default 0.5.
 
