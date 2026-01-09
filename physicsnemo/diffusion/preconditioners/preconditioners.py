@@ -16,9 +16,10 @@
 
 import math
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Tuple
+from typing import Any, Tuple
 
 import torch
+from tensordict import TensorDict
 
 from physicsnemo.core.meta import ModelMetaData
 from physicsnemo.core.module import Module
@@ -69,7 +70,7 @@ class BaseAffinePreconditioner(Module, ABC):
         model(
             x: torch.Tensor,  # Shape: (B, *)
             t: torch.Tensor,  # Shape: (B,)
-            condition: Dict[str, torch.Tensor],  # Each tensor: (B, *)
+            condition: TensorDict,
             **model_kwargs: Any,
         ) -> torch.Tensor  # Shape: (B, *)
 
@@ -102,10 +103,9 @@ class BaseAffinePreconditioner(Module, ABC):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : Dict[str, torch.Tensor]
-        Dictionary of conditioning tensors. Each tensor must have shape
-        :math:`(B, *)` where the batch size :math:`B` matches that of ``x``.
-        These are passed to the wrapped ``model`` without modification.
+    condition : TensorDict
+        TensorDict containing conditioning tensors with batch size :math:`B`
+        matching that of ``x``. Passed to the wrapped ``model`` unchanged.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -294,7 +294,7 @@ class BaseAffinePreconditioner(Module, ABC):
         self,
         x: torch.Tensor,
         t: torch.Tensor,
-        condition: Dict[str, torch.Tensor],
+        condition: TensorDict,
         **model_kwargs: Any,
     ) -> torch.Tensor:
         if not torch.compiler.is_compiling():
@@ -304,12 +304,12 @@ class BaseAffinePreconditioner(Module, ABC):
                     f"Expected t to have shape ({B},) matching batch size of "
                     f"x, but got {t.shape}."
                 )
-            for k, v in condition.items():
-                if v.shape[0] != B:
-                    raise ValueError(
-                        f"Condition tensor '{k}' has batch size {v.shape[0]} "
-                        f"but expected {B} to match x."
-                    )
+            if condition.batch_size and condition.batch_size[0] != B:
+                cond_B = condition.batch_size[0]
+                raise ValueError(
+                    f"Condition TensorDict has batch size {cond_B} "
+                    f"but expected {B} to match x."
+                )
 
         # Map time step to noise level via sigma method
         sigma_t = self.sigma(t).reshape(-1, *([1] * (x.ndim - 1)))
@@ -373,10 +373,9 @@ class VPPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : Dict[str, torch.Tensor]
-        Dictionary of conditioning tensors. Each tensor must have shape
-        :math:`(B, *)` where the batch size :math:`B` matches that of ``x``.
-        These are passed to the wrapped ``model`` without modification.
+    condition : TensorDict
+        TensorDict containing conditioning tensors with batch size :math:`B`
+        matching that of ``x``. Passed to the wrapped ``model`` unchanged.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -482,10 +481,9 @@ class VEPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : Dict[str, torch.Tensor]
-        Dictionary of conditioning tensors. Each tensor must have shape
-        :math:`(B, *)` where the batch size :math:`B` matches that of ``x``.
-        These are passed to the wrapped ``model`` without modification.
+    condition : TensorDict
+        TensorDict containing conditioning tensors with batch size :math:`B`
+        matching that of ``x``. Passed to the wrapped ``model`` unchanged.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -568,10 +566,9 @@ class IDDPMPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : Dict[str, torch.Tensor]
-        Dictionary of conditioning tensors. Each tensor must have shape
-        :math:`(B, *)` where the batch size :math:`B` matches that of ``x``.
-        These are passed to the wrapped ``model`` without modification.
+    condition : TensorDict
+        TensorDict containing conditioning tensors with batch size :math:`B`
+        matching that of ``x``. Passed to the wrapped ``model`` unchanged.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -678,10 +675,9 @@ class EDMPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : Dict[str, torch.Tensor]
-        Dictionary of conditioning tensors. Each tensor must have shape
-        :math:`(B, *)` where the batch size :math:`B` matches that of ``x``.
-        These are passed to the wrapped ``model`` without modification.
+    condition : TensorDict
+        TensorDict containing conditioning tensors with batch size :math:`B`
+        matching that of ``x``. Passed to the wrapped ``model`` unchanged.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 

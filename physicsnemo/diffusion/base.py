@@ -16,10 +16,11 @@
 
 """Protocols and type hints for diffusion model interfaces."""
 
-from typing import Any, Dict, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import torch
 from jaxtyping import Float
+from tensordict import TensorDict
 
 
 @runtime_checkable
@@ -43,18 +44,14 @@ class DiffusionModel(Protocol):
     Examples
     --------
     >>> import torch
-    >>> from physicsnemo.core import Module
-    >>> from physicsnemo.diffusion import DiffusionModule
+    >>> import torch.nn.functional as F
+    >>> from physicsnemo.diffusion import DiffusionModel
     >>>
-    >>> def Denoiser:
-    ...     def __init__(self, dim: int):
-    ...         super().__init__()
-    ...         self.net = torch.nn.Linear(dim, dim)
-    ...
+    >>> class Denoiser:
     ...     def __call__(self, x, t, condition, **kwargs):
-    ...         return self.net(x)
+    ...         return F.relu(x)
     ...
-    >>> isinstance(Denoiser(64), DiffusionModule)
+    >>> isinstance(Denoiser(64), DiffusionModel)
     True
     """
 
@@ -62,7 +59,7 @@ class DiffusionModel(Protocol):
         self,
         x: Float[torch.Tensor, "B *dims"],  # noqa: F821
         t: Float[torch.Tensor, "B"],  # noqa: F821
-        condition: Dict[str, Float[torch.Tensor, "B *cond_dims"]],  # noqa: F821
+        condition: TensorDict,
         **model_kwargs: Any,
     ) -> Float[torch.Tensor, "B *dims"]:  # noqa: F821
         r"""
@@ -76,9 +73,10 @@ class DiffusionModel(Protocol):
             dimensions (e.g., channels and spatial dimensions).
         t : torch.Tensor
             Diffusion time or noise level tensor of shape :math:`(B,)`.
-        condition : Dict[str, torch.Tensor]
-            Dictionary of conditioning tensors. Each tensor must have batch
-            size :math:`B` matching that of ``x``.
+        condition : TensorDict
+            TensorDict containing conditioning tensors. The TensorDict should
+            have batch size :math:`B` matching that of ``x``. If the model is
+            unconditional, the condition should be the empty ``TensorDict()``.
         **model_kwargs : Any
             Additional keyword arguments specific to the model implementation.
 

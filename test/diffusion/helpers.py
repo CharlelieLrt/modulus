@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
+from tensordict import TensorDict
 
 import physicsnemo.core
 
@@ -55,7 +56,7 @@ def generate_batch_data(
     seed: int = 42,
     device: str = "cpu",
     use_condition: bool = False,
-) -> Dict[str, torch.Tensor | Dict[str, torch.Tensor]]:
+) -> Dict[str, torch.Tensor | TensorDict]:
     """
     Generate deterministic batch data for testing.
 
@@ -69,6 +70,13 @@ def generate_batch_data(
         Device to place tensors on.
     use_condition : bool
         If True, generates condition["y"] with the same shape as x.
+
+    Returns
+    -------
+    Dict containing:
+        - "x": Input tensor of given shape
+        - "t": Time tensor of shape (batch_size,)
+        - "condition": TensorDict with batch_size matching x
     """
     gen = torch.Generator(device="cpu")
     gen.manual_seed(seed)
@@ -78,15 +86,19 @@ def generate_batch_data(
     # Use positive t values away from 0 to avoid log(0) issues
     t = torch.rand(batch_size, generator=gen) * 0.5 + 0.4
 
-    # Generate condition tensor with same shape as x
-    condition: Dict[str, torch.Tensor] = {}
+    # Generate condition as TensorDict with batch_size
     if use_condition:
-        condition["y"] = torch.randn(*shape, generator=gen).to(device)
+        condition = TensorDict(
+            {"y": torch.randn(*shape, generator=gen).to(device)},
+            batch_size=[batch_size],
+        )
+    else:
+        condition = TensorDict({}, batch_size=[batch_size])
 
     return {
         "x": x.to(device),
         "t": t.to(device),
-        "condition": condition,
+        "condition": condition.to(device),
     }
 
 

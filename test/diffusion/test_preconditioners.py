@@ -16,10 +16,11 @@
 
 """Tests for diffusion preconditioners."""
 
-from typing import Any, Dict, Tuple
+from typing import Any, Tuple
 
 import pytest
 import torch
+from tensordict import TensorDict
 
 from physicsnemo.core import Module
 from physicsnemo.diffusion.preconditioners import (
@@ -57,7 +58,7 @@ class ConvModel(Module):
         self,
         x: torch.Tensor,
         t: torch.Tensor,
-        condition: Dict[str, torch.Tensor],
+        condition: TensorDict,
         **kwargs: Any,
     ) -> torch.Tensor:
         y = condition["y"]
@@ -80,7 +81,7 @@ class LinearModel(Module):
         self,
         x: torch.Tensor,
         t: torch.Tensor,
-        condition: Dict[str, torch.Tensor],
+        condition: TensorDict,
         **kwargs: Any,
     ) -> torch.Tensor:
         out = self.net(x)
@@ -565,12 +566,15 @@ class TestAllPreconditioners:
         precond_kwargs,
         precond_name,
     ):
-        """Test condition tensor batch size validation."""
+        """Test condition batch size validation."""
         precond = precond_cls(simple_model, **precond_kwargs).to(device)
         x = torch.randn(*test_shape, device=device)
         t = torch.rand(test_shape[0], device=device)
-        # Wrong batch size in condition
-        condition = {"cond": torch.randn(2, 10, device=device)}
+        # Wrong batch size in condition TensorDict
+        condition = TensorDict(
+            {"cond": torch.randn(2, 10, device=device)},
+            batch_size=[2],
+        )
 
         with pytest.raises(ValueError, match="batch size"):
             precond(x, t, condition)
