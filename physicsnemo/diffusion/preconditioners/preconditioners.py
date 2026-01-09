@@ -399,9 +399,9 @@ class VPPreconditioner(BaseAffinePreconditioner):
         M: int = 1000,
     ) -> None:
         super().__init__(model)
-        self.beta_d = beta_d
-        self.beta_min = beta_min
-        self.M = M
+        self.register_buffer("beta_d", torch.tensor(beta_d))
+        self.register_buffer("beta_min", torch.tensor(beta_min))
+        self.register_buffer("M", torch.tensor(M))
 
     def sigma(self, t: torch.Tensor) -> torch.Tensor:
         r"""
@@ -592,9 +592,9 @@ class IDDPMPreconditioner(BaseAffinePreconditioner):
         M: int = 1000,
     ) -> None:
         super().__init__(model)
-        self.C_1 = C_1
-        self.C_2 = C_2
-        self.M = M
+        self.register_buffer("C_1", torch.tensor(C_1))
+        self.register_buffer("C_2", torch.tensor(C_2))
+        self.register_buffer("M", torch.tensor(M))
 
         # Precompute the noise level schedule u_j, j = 0, ..., M
         u = torch.zeros(M + 1)
@@ -699,7 +699,7 @@ class EDMPreconditioner(BaseAffinePreconditioner):
         sigma_data: float = 0.5,
     ) -> None:
         super().__init__(model)
-        self.sigma_data = sigma_data
+        self.register_buffer("sigma_data", torch.tensor(sigma_data))
 
     def compute_coefficients(
         self, t: torch.Tensor
@@ -720,9 +720,9 @@ class EDMPreconditioner(BaseAffinePreconditioner):
             :math:`c_{\text{noise}}`, :math:`c_{\text{out}}`,
             :math:`c_{\text{skip}}`) of shape :math:`(B, 1, ..., 1)`.
         """
-        sigma_data = self.sigma_data
-        c_skip = sigma_data**2 / (t**2 + sigma_data**2)
-        c_out = t * sigma_data / (t**2 + sigma_data**2).sqrt()
-        c_in = 1 / (sigma_data**2 + t**2).sqrt()
+        sd = self.sigma_data
+        c_skip = sd**2 / (t**2 + sd**2)
+        c_out = t * sd / (t**2 + sd**2).sqrt()
+        c_in = 1 / (sd**2 + t**2).sqrt()
         c_noise = t.log() / 4
         return c_in, c_noise, c_out, c_skip

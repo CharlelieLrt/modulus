@@ -210,17 +210,17 @@ class TestVPPreconditioner:
         if config == "default":
             # Test with default values - verify against known defaults
             precond = VPPreconditioner(simple_model)
-            assert precond.beta_d == 19.9
-            assert precond.beta_min == 0.1
-            assert precond.M == 1000
+            assert precond.beta_d.item() == pytest.approx(19.9)
+            assert precond.beta_min.item() == pytest.approx(0.1)
+            assert precond.M.item() == 1000
         else:
             # Test with custom values - verify against passed arguments
             precond = VPPreconditioner(
                 simple_model, beta_d=beta_d, beta_min=beta_min, M=M
             )
-            assert precond.beta_d == beta_d
-            assert precond.beta_min == beta_min
-            assert precond.M == M
+            assert precond.beta_d.item() == pytest.approx(beta_d)
+            assert precond.beta_min.item() == pytest.approx(beta_min)
+            assert precond.M.item() == M
 
         assert precond.model is simple_model
         assert isinstance(precond, BaseAffinePreconditioner)
@@ -263,16 +263,16 @@ class TestIDDPMPreconditioner:
         if config == "default":
             # Test with default values - verify against known defaults
             precond = IDDPMPreconditioner(simple_model)
-            assert precond.C_1 == 0.001
-            assert precond.C_2 == 0.008
-            assert precond.M == 1000
+            assert precond.C_1.item() == pytest.approx(0.001)
+            assert precond.C_2.item() == pytest.approx(0.008)
+            assert precond.M.item() == 1000
             expected_M = 1000
         else:
             # Test with custom values - verify against passed arguments
             precond = IDDPMPreconditioner(simple_model, C_1=C_1, C_2=C_2, M=M)
-            assert precond.C_1 == C_1
-            assert precond.C_2 == C_2
-            assert precond.M == M
+            assert precond.C_1.item() == pytest.approx(C_1)
+            assert precond.C_2.item() == pytest.approx(C_2)
+            assert precond.M.item() == M
             expected_M = M
 
         assert hasattr(precond, "u")
@@ -301,11 +301,11 @@ class TestEDMPreconditioner:
         if config == "default":
             # Test with default values - verify against known defaults
             precond = EDMPreconditioner(simple_model)
-            assert precond.sigma_data == 0.5
+            assert precond.sigma_data.item() == pytest.approx(0.5)
         else:
             # Test with custom values - verify against passed arguments
             precond = EDMPreconditioner(simple_model, sigma_data=sigma_data)
-            assert precond.sigma_data == sigma_data
+            assert precond.sigma_data.item() == pytest.approx(sigma_data)
 
         assert precond.model is simple_model
         assert isinstance(precond, BaseAffinePreconditioner)
