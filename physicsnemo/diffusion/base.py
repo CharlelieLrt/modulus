@@ -86,3 +86,75 @@ class DiffusionModel(Protocol):
             Model output with the same shape as ``x``.
         """
         ...
+
+
+@runtime_checkable
+class DiffusionDenoiser(Protocol):
+    r"""
+    Protocol defining a denoiser interface for diffusion model inference.
+
+    A denoiser is a callable that takes a noisy state ``x`` and a noise level
+    (or diffusion time) ``t``, and returns a denoised prediction. This is the
+    minimal interface required for sampling from a diffusion model.
+
+    This protocol is typically used during inference with the
+    :func:`~physicsnemo.diffusion.samplers.sample` function. For training,
+    which often requires additional inputs like conditioning, use the more
+    general :class:`DiffusionModel` protocol instead.
+
+    .. note::
+
+        A :class:`DiffusionDenoiser` can be obtained from a
+        :class:`DiffusionModel` by partially applying the ``condition`` and
+        any other keyword arguments. For example:
+
+        .. code-block:: python
+
+            from functools import partial
+            denoiser = partial(model, condition=my_condition)
+
+    See Also
+    --------
+    :func:`~physicsnemo.diffusion.samplers.sample` : The sampling function
+        that uses this denoiser interface.
+    :class:`DiffusionModel` : The full diffusion model interface with
+        conditioning support.
+
+    Examples
+    --------
+    >>> import torch
+    >>> from physicsnemo.diffusion import DiffusionDenoiser
+    >>>
+    >>> class SimpleDenoiser:
+    ...     def __call__(self, x, t):
+    ...         # A trivial denoiser that returns the input unchanged
+    ...         return x
+    ...
+    >>> denoiser = SimpleDenoiser()
+    >>> isinstance(denoiser, DiffusionDenoiser)
+    True
+    """
+
+    def __call__(
+        self,
+        x: Float[torch.Tensor, "B *dims"],  # noqa: F821
+        t: Float[torch.Tensor, "B"],  # noqa: F821
+    ) -> Float[torch.Tensor, "B *dims"]:  # noqa: F821
+        r"""
+        Denoise the input at the given noise level.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Noisy latent state of shape :math:`(B, *)` where :math:`B` is the
+            batch size and :math:`*` denotes any number of additional
+            dimensions (e.g., channels and spatial dimensions).
+        t : torch.Tensor
+            Diffusion time or noise level tensor of shape :math:`(B,)`.
+
+        Returns
+        -------
+        torch.Tensor
+            Denoised prediction with the same shape as ``x``.
+        """
+        ...
