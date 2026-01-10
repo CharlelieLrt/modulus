@@ -187,11 +187,12 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         c_noise = t.log() / 4
     ...         return c_in, c_noise, c_out, c_skip
     ...
+    >>> from tensordict import TensorDict
     >>> model = SimpleModel(channels=3)
     >>> precond = EDMPreconditioner(model, sigma_data=0.5)
     >>> x = torch.randn(2, 3, 16, 16)
     >>> t = torch.rand(2)
-    >>> out = precond(x, t, {})
+    >>> out = precond(x, t, TensorDict())
     >>> out.shape
     torch.Size([2, 3, 16, 16])
 
@@ -218,7 +219,7 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         return c_in, c_noise, c_out, c_skip
     ...
     >>> precond_ve = VEPreconditioner(model)
-    >>> out_ve = precond_ve(x, t, condition={})
+    >>> out_ve = precond_ve(x, t, TensorDict())
     >>> out_ve.shape
     torch.Size([2, 3, 16, 16])
     """

@@ -51,7 +51,7 @@ class DiffusionModel(Protocol):
     ...     def __call__(self, x, t, condition, **kwargs):
     ...         return F.relu(x)
     ...
-    >>> isinstance(Denoiser(64), DiffusionModel)
+    >>> isinstance(Denoiser(), DiffusionModel)
     True
     """
 
