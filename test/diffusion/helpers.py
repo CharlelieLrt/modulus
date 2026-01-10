@@ -211,13 +211,8 @@ def compare_outputs(
             f"Shape mismatch: actual {actual.shape} vs expected {expected.shape}"
         )
 
-    # Move to same device for comparison
-    expected = expected.to(actual.device)
+    # Move to same device and convert to float64 for comparison
+    actual_f64 = actual.to(torch.float64)
+    expected_f64 = expected.to(device=actual.device, dtype=torch.float64)
 
-    if not torch.allclose(actual, expected, atol=atol, rtol=rtol):
-        abs_err = torch.amax(torch.abs(actual - expected))
-        denom = torch.abs(expected) + 1e-8
-        rel_err = torch.amax(torch.abs(actual - expected) / denom)
-        raise AssertionError(
-            f"Tensor mismatch: max_abs_err={abs_err:.6e}, max_rel_err={rel_err:.6e}"
-        )
+    torch.testing.assert_close(actual_f64, expected_f64, atol=atol, rtol=rtol)

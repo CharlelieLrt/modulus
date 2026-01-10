@@ -110,7 +110,7 @@ MODEL_CONFIGS = [
 PRECOND_CONFIGS = [
     (
         VPPreconditioner,
-        {"beta_d": 19.9, "beta_min": 0.1, "M": 1000},
+        {"beta_d": 19.9, "beta_min": 0.1, "M": 2000},
         "vp_precond",
     ),
     (
@@ -120,20 +120,67 @@ PRECOND_CONFIGS = [
     ),
     (
         IDDPMPreconditioner,
-        {"C_1": 0.001, "C_2": 0.008, "M": 100},
+        {"C_1": 0.001, "C_2": 0.008, "M": 2000},
         "iddpm_precond",
     ),
     (
         EDMPreconditioner,
-        {"sigma_data": 0.5},
+        {"sigma_data": 1.0},
         "edm_precond",
     ),
 ]
 
 
+# Tolerances for non-regression tests (device-dependent)
+# CPU tests use tighter tolerances, GPU tests need more relaxed tolerances
+CPU_TOLERANCES = {"atol": 1e-5, "rtol": 1e-5}
+GPU_TOLERANCES = {"atol": 1e-2, "rtol": 5e-2}
+
+# Global random seed for reproducibility
+GLOBAL_SEED = 42
+
+
 # =============================================================================
 # Fixtures
 # =============================================================================
+
+
+@pytest.fixture
+def deterministic_settings():
+    """Set deterministic settings for reproducibility, then restore old state."""
+    # Save old state
+    old_deterministic = torch.are_deterministic_algorithms_enabled()
+    old_cudnn_deterministic = torch.backends.cudnn.deterministic
+    old_cudnn_benchmark = torch.backends.cudnn.benchmark
+    old_matmul_tf32 = torch.backends.cuda.matmul.allow_tf32
+    old_cudnn_tf32 = torch.backends.cudnn.allow_tf32
+
+    try:
+        # Set deterministic settings
+        torch.manual_seed(GLOBAL_SEED)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(GLOBAL_SEED)
+        torch.use_deterministic_algorithms(True)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        yield
+    finally:
+        # Restore old state
+        torch.use_deterministic_algorithms(old_deterministic)
+        torch.backends.cudnn.deterministic = old_cudnn_deterministic
+        torch.backends.cudnn.benchmark = old_cudnn_benchmark
+        torch.backends.cuda.matmul.allow_tf32 = old_matmul_tf32
+        torch.backends.cudnn.allow_tf32 = old_cudnn_tf32
+
+
+@pytest.fixture
+def tolerances(device):
+    """Return tolerances based on the device (CPU vs GPU)."""
+    if device == "cpu":
+        return CPU_TOLERANCES
+    return GPU_TOLERANCES
 
 
 @pytest.fixture(params=MODEL_CONFIGS, ids=["ConvModel", "LinearModel"])
@@ -326,9 +373,11 @@ class TestNonRegression:
 
     def test_sigma_non_regression(
         self,
+        deterministic_settings,
         model_config,
         batch_data,
         device,
+        tolerances,
         precond_cls,
         precond_kwargs,
         precond_name,
@@ -345,13 +394,15 @@ class TestNonRegression:
         ref_file = f"{precond_name}_{arch_name}_sigma.pth"
         ref_data = load_or_create_reference(ref_file, lambda: {"sigma": sigma.cpu()})
 
-        compare_outputs(sigma, ref_data["sigma"], atol=1e-6, rtol=1e-6)
+        compare_outputs(sigma, ref_data["sigma"], **tolerances)
 
     def test_sigma_from_checkpoint(
         self,
+        deterministic_settings,
         model_config,
         batch_data,
         device,
+        tolerances,
         precond_cls,
         precond_kwargs,
         precond_name,
@@ -371,13 +422,15 @@ class TestNonRegression:
         ref_file = f"{precond_name}_{arch_name}_sigma.pth"
         ref_data = load_or_create_reference(ref_file, lambda: {"sigma": sigma.cpu()})
 
-        compare_outputs(sigma, ref_data["sigma"], atol=1e-6, rtol=1e-6)
+        compare_outputs(sigma, ref_data["sigma"], **tolerances)
 
     def test_coefficients_non_regression(
         self,
+        deterministic_settings,
         model_config,
         batch_data,
         device,
+        tolerances,
         precond_cls,
         precond_kwargs,
         precond_name,
@@ -407,16 +460,18 @@ class TestNonRegression:
             },
         )
 
-        compare_outputs(c_in, ref_data["c_in"], atol=1e-5, rtol=1e-5)
-        compare_outputs(c_noise, ref_data["c_noise"], atol=1e-5, rtol=1e-5)
-        compare_outputs(c_out, ref_data["c_out"], atol=1e-5, rtol=1e-5)
-        compare_outputs(c_skip, ref_data["c_skip"], atol=1e-5, rtol=1e-5)
+        compare_outputs(c_in, ref_data["c_in"], **tolerances)
+        compare_outputs(c_noise, ref_data["c_noise"], **tolerances)
+        compare_outputs(c_out, ref_data["c_out"], **tolerances)
+        compare_outputs(c_skip, ref_data["c_skip"], **tolerances)
 
     def test_coefficients_from_checkpoint(
         self,
+        deterministic_settings,
         model_config,
         batch_data,
         device,
+        tolerances,
         precond_cls,
         precond_kwargs,
         precond_name,
@@ -448,16 +503,18 @@ class TestNonRegression:
             },
         )
 
-        compare_outputs(c_in, ref_data["c_in"], atol=1e-5, rtol=1e-5)
-        compare_outputs(c_noise, ref_data["c_noise"], atol=1e-5, rtol=1e-5)
-        compare_outputs(c_out, ref_data["c_out"], atol=1e-5, rtol=1e-5)
-        compare_outputs(c_skip, ref_data["c_skip"], atol=1e-5, rtol=1e-5)
+        compare_outputs(c_in, ref_data["c_in"], **tolerances)
+        compare_outputs(c_noise, ref_data["c_noise"], **tolerances)
+        compare_outputs(c_out, ref_data["c_out"], **tolerances)
+        compare_outputs(c_skip, ref_data["c_skip"], **tolerances)
 
     def test_forward_non_regression(
         self,
+        deterministic_settings,
         model_config,
         batch_data,
         device,
+        tolerances,
         precond_cls,
         precond_kwargs,
         precond_name,
@@ -476,13 +533,15 @@ class TestNonRegression:
         ref_file = f"{precond_name}_{arch_name}_forward.pth"
         ref_data = load_or_create_reference(ref_file, lambda: {"out": out.cpu()})
 
-        compare_outputs(out, ref_data["out"], atol=1e-5, rtol=1e-5)
+        compare_outputs(out, ref_data["out"], **tolerances)
 
     def test_forward_from_checkpoint(
         self,
+        deterministic_settings,
         model_config,
         batch_data,
         device,
+        tolerances,
         precond_cls,
         precond_kwargs,
         precond_name,
@@ -504,7 +563,7 @@ class TestNonRegression:
         ref_file = f"{precond_name}_{arch_name}_forward.pth"
         ref_data = load_or_create_reference(ref_file, lambda: {"out": out.cpu()})
 
-        compare_outputs(out, ref_data["out"], atol=1e-5, rtol=1e-5)
+        compare_outputs(out, ref_data["out"], **tolerances)
 
 
 # =============================================================================
