@@ -389,6 +389,27 @@ class VPPreconditioner(BaseAffinePreconditioner):
     ----
     Reference: `Score-Based Generative Modeling through Stochastic
     Differential Equations <https://arxiv.org/abs/2011.13456>`_
+
+    Examples
+    --------
+    >>> import torch
+    >>> from tensordict import TensorDict
+    >>> from physicsnemo.core import Module
+    >>> # Define a simple model satisfying the diffusion model interface
+    >>> class SimpleModel(Module):
+    ...     def __init__(self, channels: int):
+    ...         super().__init__()
+    ...         self.net = torch.nn.Conv2d(channels, channels, 1)
+    ...     def forward(self, x, t, condition):
+    ...         return self.net(x)
+    >>> model = SimpleModel(channels=3)
+    >>> precond = VPPreconditioner(model, beta_d=19.9, beta_min=0.1, M=1000)
+    >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
+    >>> t = torch.rand(2)              # diffusion time for each sample
+    >>> condition = TensorDict({}, batch_size=[2])
+    >>> out = precond(x, t, condition)
+    >>> out.shape
+    torch.Size([2, 3, 16, 16])
     """
 
     def __init__(
@@ -497,6 +518,27 @@ class VEPreconditioner(BaseAffinePreconditioner):
     ----
     Reference: `Score-Based Generative Modeling through Stochastic
     Differential Equations <https://arxiv.org/abs/2011.13456>`_
+
+    Examples
+    --------
+    >>> import torch
+    >>> from tensordict import TensorDict
+    >>> from physicsnemo.core import Module
+    >>> # Define a simple model satisfying the diffusion model interface
+    >>> class SimpleModel(Module):
+    ...     def __init__(self, channels: int):
+    ...         super().__init__()
+    ...         self.net = torch.nn.Conv2d(channels, channels, 1)
+    ...     def forward(self, x, t, condition):
+    ...         return self.net(x)
+    >>> model = SimpleModel(channels=3)
+    >>> precond = VEPreconditioner(model)
+    >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
+    >>> t = torch.rand(2)              # diffusion time for each sample
+    >>> condition = TensorDict({}, batch_size=[2])
+    >>> out = precond(x, t, condition)
+    >>> out.shape
+    torch.Size([2, 3, 16, 16])
     """
 
     def __init__(self, model: Module) -> None:
@@ -582,6 +624,27 @@ class IDDPMPreconditioner(BaseAffinePreconditioner):
     ----
     Reference: `Improved Denoising Diffusion Probabilistic Models
     <https://arxiv.org/abs/2102.09672>`_
+
+    Examples
+    --------
+    >>> import torch
+    >>> from tensordict import TensorDict
+    >>> from physicsnemo.core import Module
+    >>> # Define a simple model satisfying the diffusion model interface
+    >>> class SimpleModel(Module):
+    ...     def __init__(self, channels: int):
+    ...         super().__init__()
+    ...         self.net = torch.nn.Conv2d(channels, channels, 1)
+    ...     def forward(self, x, t, condition):
+    ...         return self.net(x)
+    >>> model = SimpleModel(channels=3)
+    >>> precond = IDDPMPreconditioner(model, C_1=0.001, C_2=0.008, M=1000)
+    >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
+    >>> t = torch.rand(2)              # diffusion time for each sample
+    >>> condition = TensorDict({}, batch_size=[2])
+    >>> out = precond(x, t, condition)
+    >>> out.shape
+    torch.Size([2, 3, 16, 16])
     """
 
     def __init__(
@@ -691,6 +754,27 @@ class EDMPreconditioner(BaseAffinePreconditioner):
     ----
     Reference: `Elucidating the Design Space of Diffusion-Based
     Generative Models <https://arxiv.org/abs/2206.00364>`_
+
+    Examples
+    --------
+    >>> import torch
+    >>> from tensordict import TensorDict
+    >>> from physicsnemo.core import Module
+    >>> # Define a simple model satisfying the diffusion model interface
+    >>> class SimpleModel(Module):
+    ...     def __init__(self, channels: int):
+    ...         super().__init__()
+    ...         self.net = torch.nn.Conv2d(channels, channels, 1)
+    ...     def forward(self, x, t, condition):
+    ...         return self.net(x)
+    >>> model = SimpleModel(channels=3)
+    >>> precond = EDMPreconditioner(model, sigma_data=0.5)
+    >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
+    >>> t = torch.rand(2)              # diffusion time for each sample
+    >>> condition = TensorDict({}, batch_size=[2])
+    >>> out = precond(x, t, condition)
+    >>> out.shape
+    torch.Size([2, 3, 16, 16])
     """
 
     def __init__(
