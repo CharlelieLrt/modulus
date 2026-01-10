@@ -149,7 +149,6 @@ GLOBAL_SEED = 42
 def deterministic_settings():
     """Set deterministic settings for reproducibility, then restore old state."""
     # Save old state
-    old_deterministic = torch.are_deterministic_algorithms_enabled()
     old_cudnn_deterministic = torch.backends.cudnn.deterministic
     old_cudnn_benchmark = torch.backends.cudnn.benchmark
     old_matmul_tf32 = torch.backends.cuda.matmul.allow_tf32
@@ -160,7 +159,6 @@ def deterministic_settings():
         torch.manual_seed(GLOBAL_SEED)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(GLOBAL_SEED)
-        torch.use_deterministic_algorithms(True)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
@@ -168,7 +166,6 @@ def deterministic_settings():
         yield
     finally:
         # Restore old state
-        torch.use_deterministic_algorithms(old_deterministic)
         torch.backends.cudnn.deterministic = old_cudnn_deterministic
         torch.backends.cudnn.benchmark = old_cudnn_benchmark
         torch.backends.cuda.matmul.allow_tf32 = old_matmul_tf32
