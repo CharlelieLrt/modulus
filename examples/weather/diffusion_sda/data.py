@@ -165,8 +165,8 @@ class HRRRSurfaceDataset(Dataset):
         data_arrays[0] = cos_zenith_angle(
             datetime.datetime.utcfromtimestamp(ts), self.grid_lat, self.grid_lon
         )
-        data_arrays[1][:] = (
-            int(
+        data_arrays[1][:] = np.sin(
+            2 * np.pi *int(
                 (
                     time_stamp.astype("datetime64[D]")
                     - time_stamp.astype("datetime64[Y]")
