@@ -49,14 +49,13 @@ class HRRRSurfaceDiffusionNet(Module):
     IMG_CHANNELS = 16
     CONDITION_CHANNELS = 4
 
-    def __init__(self, patching: BasePatching2D, use_apex: bool = False):
+    def __init__(self, use_apex: bool = False):
         super().__init__(meta=ModelMetaData())
 
         # Multi-diffusion paramters, defines how large a single diffusion patch is
         patch_shape = (448, 448)
         patch_num = 4
 
-        self.patching = patching
         self.sigma_data = 1
 
         # Create model
@@ -80,8 +79,7 @@ class HRRRSurfaceDiffusionNet(Module):
         _, c = next(iter(condition.items()))
 
         x = torch.cat([x, c], dim=1)
-        global_index = self.patching.global_index(x.shape[0], x.device)
 
-        out = self.model(x, sigma, None, global_index=global_index, **model_kwargs)
+        out = self.model(x, sigma, None, **model_kwargs)
         # Final affine transformation
         return out

@@ -139,6 +139,9 @@ class EDMLoss:
             for cond_name, y_cond in condition.items():
                 condition[cond_name] = self.patching.apply(input=y_cond)
         
+        global_index = self.patching.global_index(x.shape[0], x.device)
+
+
         # Compute noise parameters
         n, sigma, weight = self.get_noise_params(x)
 
@@ -146,6 +149,7 @@ class EDMLoss:
             x + n,
             sigma,
             condition,
+            global_index=global_index,
             **model_kwargs,
         )
         return weight.view(x.shape[0], *((1,) * (x.ndim - 1))) * ((x_0 - x) ** 2)

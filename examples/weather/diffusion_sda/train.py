@@ -52,7 +52,7 @@ def main():
     batch_size_per_gpu = 1
     load_checkpoint_from_file = False
     checkpoint_dir = "./checkpoints"
-    max_training_samples = 365*24*10
+    max_training_samples = 10*(365*24*10)
     checkpoint_frequency = 1000
     validation_frequency = 1000
     num_validation_samples = 100
@@ -77,7 +77,7 @@ def main():
         patch_num=4,
     )
     model = HRRRSurfaceDiffusionNet(
-        patching, use_apex=use_apex
+        use_apex=use_apex
     )
     model = (
         EDMPreconditioner(
@@ -115,11 +115,11 @@ def main():
     dataset = HRRRSurfaceDataset("s3://hrrr-surface-sda/zarr-v2", time_idx, storage_options={'endpoint_url': 'https://pdx.s8k.io'})
     train_iter = DataLoader(dataset, batch_size=batch_size_per_gpu,
             sampler=InfiniteSampler(dataset=dataset, shuffle=True),
-            num_workers=4,
+            num_workers=8,
             pin_memory=False,
             drop_last=False,
             timeout=0,
-            prefetch_factor=2,
+            prefetch_factor=4,
             persistent_workers=False)
     num_training_samples = len(dataset)
 
@@ -140,7 +140,7 @@ def main():
     loss_fn = EDMLoss(
         model=model,
         P_mean=0.0,
-        P_std=1.2,
+        P_std=1.0,
         sigma_data=1.0,
         patching=patching,
     )
@@ -260,19 +260,18 @@ def main():
             current_validation_samples = 0
             with torch.no_grad():
                 while current_validation_samples < num_validation_samples:
-                    x_val = next(val_iter)
-                    x_val = x_val.to(dist.device, non_blocking=True).to(
-                        memory_format=torch.channels_last
-                    )
-                    val_batch_size = x_val.shape[0]
-                    val_loss = loss_fn(x_val, {}).mean()
+                    _, (c, x) = next(enumerate(val_iter))
+                    c = c.to(dist.device, non_blocking=True).to(memory_format=torch.channels_last)
+                    x = x.to(dist.device, non_blocking=True).to(memory_format=torch.channels_last)
+                    batch_size = x.shape[0]
+                    
+                    val_loss = loss_fn(x, {"c": c}).mean()
                     mean_val_loss = (
-                        reduce_loss(val_loss.item() * val_batch_size, dst_rank=0)
-                        / total_batch_size
+                        reduce_loss(val_loss.item() * batch_size, dst_rank=0)
                     )
                     if dist.rank == 0:
                         val_loss_running_mean += (
-                            mean_val_loss - val_loss_running_mean
+                            mean_val_loss / total_batch_size - val_loss_running_mean
                         ) / n_val_loss_running_mean
                         n_val_loss_running_mean += 1
                     current_validation_samples += total_batch_size
