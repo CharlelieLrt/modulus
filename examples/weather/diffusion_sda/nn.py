@@ -14,72 +14,78 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Dict, List, Literal, Union, Any
 
 import torch
 from torch import Tensor
 
-from physicsnemo import Module
-from physicsnemo.core import ModelMetaData
+from physicsnemo.core import ModelMetaData, Module
 from physicsnemo.models.diffusion_unets import SongUNetPosEmbd
-
-from physicsnemo.diffusion.multi_diffusion import BasePatching2D
-
-
-from typing import Any, Callable, Dict, Optional, Tuple
-
-import torch
-from torch import Tensor
-
-from physicsnemo import Module
-from physicsnemo.core import ModelMetaData
-from physicsnemo.models.diffusion_unets import SongUNetPosEmbd
-
-from physicsnemo.diffusion.multi_diffusion import BasePatching2D
+from physicsnemo.nn import PositionalEmbedding
 
 
 class HRRRSurfaceDiffusionNet(Module):
     """
-    Adapter to make a model callable with the correct
-    signature ``forward(x, t, condition, **model_kwargs) -> torch.Tensor``.
+    HRRR Surface diffusion network.
     """
 
-    # HRRR grid, 16 variables with 4 conditions
-    IMG_RESOLUTION = [1059, 1799]
-    IMG_CHANNELS = 16
-    CONDITION_CHANNELS = 4
-
-    def __init__(self, use_apex: bool = False):
+    def __init__(
+        self,
+        img_resolution: Union[List[int], int],
+        in_channels: int,
+        out_channels: int,
+        condition_channels: int,
+        time_embed_channels: int,
+        model_channels: int = 128,
+        channel_mult: List[int] = [1, 2, 2, 2, 2],
+        attn_resolutions: List[int] = [28],
+        gridtype: Literal["sinusoidal", "learnable", "linear", "test"] = "sinusoidal",
+        N_grid_channels: int = 4,
+        use_apex_gn: bool = False,
+    ):
         super().__init__(meta=ModelMetaData())
 
-        # Multi-diffusion paramters, defines how large a single diffusion patch is
-        patch_shape = (448, 448)
-        patch_num = 4
+        self.time_embed_channels = time_embed_channels
 
-        self.sigma_data = 1
+        # Create the time embedding layer
+        self.time_embedding = PositionalEmbedding(
+            num_channels=time_embed_channels,
+            max_positions=365,
+            endpoint=True,
+            learnable=True,
+        )
 
-        # Create model
-        channel_mult = [1, 2, 2, 2, 2]
-        num_grid_channels = 8
-        self.model = SongUNetPosEmbd(
-            img_resolution=self.IMG_RESOLUTION,
-            in_channels=self.IMG_CHANNELS + self.CONDITION_CHANNELS + num_grid_channels,
-            out_channels=self.IMG_CHANNELS,
-            N_grid_channels=num_grid_channels,
-            gridtype="learnable",
-            model_channels=128,
+        self.unet = SongUNetPosEmbd(
+            img_resolution=img_resolution,
+            in_channels=in_channels,
+            out_channels=out_channels,
+            model_channels=model_channels,
             channel_mult=channel_mult,
-            attn_resolutions=[self.IMG_RESOLUTION[0] >> len(channel_mult)],
-            use_apex_gn=use_apex,
+            attn_resolutions=attn_resolutions,
+            gridtype=gridtype,
+            N_grid_channels=N_grid_channels,
+            use_apex_gn=use_apex_gn,
         )
 
     def forward(
-        self, x: Tensor, sigma: Tensor, condition: Dict[str, Tensor], **model_kwargs
-    ):
-        _, c = next(iter(condition.items()))
+        self,
+        x: Tensor,
+        t: Tensor,
+        condition: Dict[str, Tensor],
+        **model_kwargs: Any,
+    ) -> Tensor:
+        B, C, H, W = x.shape
 
-        x = torch.cat([x, c], dim=1)
+        # Get space and time conditionings
+        cs = condition["cond_spatial"]  # (B, C, H, W)
+        ct = condition["cond_time"]  # (B, 1)
 
-        out = self.model(x, sigma, None, **model_kwargs)
-        # Final affine transformation
-        return out
+        # Embed time conditioning
+        ct_embed = self.time_embedding(ct.squeeze(1))  # (B, time_embed_channels)
+        ct_embed = ct_embed[:, :, None, None].expand(
+            B, -1, H, W
+        )  # (B, time_embed_channels, H, W)
+
+        x_concat = torch.cat([x, cs, ct_embed], dim=1)
+
+        return self.unet(x_concat, t, None, **model_kwargs)

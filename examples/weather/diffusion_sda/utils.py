@@ -18,6 +18,7 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
 from torch import Tensor
+from einops import repeat
 
 from physicsnemo import Module
 from physicsnemo.core import ModelMetaData
@@ -68,7 +69,6 @@ class EDMPreconditioner(Module):
         )
 
 
-
 # TODO: use version from diffusion package once refactor is complete
 class EDMLoss:
     """
@@ -88,7 +88,7 @@ class EDMLoss:
 
     def __init__(
         self,
-        model: Callable[[Tensor, Tensor, Dict[str, Tensor], Any], Tensor],
+        model: Callable[[Tensor, Tensor, Dict[str, Tensor]], Tensor],
         P_mean: float = 0.0,
         P_std: float = 1.2,
         sigma_data: float = 0.5,
@@ -135,12 +135,17 @@ class EDMLoss:
         Calculate and return the loss corresponding to the EDM formulation.
         """
         if self.patching:
+            self.patching.reset_patch_indices()
             x = self.patching.apply(x)
             for cond_name, y_cond in condition.items():
-                condition[cond_name] = self.patching.apply(input=y_cond)
-        
-        global_index = self.patching.global_index(x.shape[0], x.device)
+                if y_cond.ndim == 4:
+                    condition[cond_name] = self.patching.apply(input=y_cond)
+                else:
+                    condition[cond_name] = repeat(
+                        y_cond, "b h-> (p b) h", p=self.patching.patch_num
+                    )
 
+        global_index = self.patching.global_index(x.shape[0], x.device)
 
         # Compute noise parameters
         n, sigma, weight = self.get_noise_params(x)

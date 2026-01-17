@@ -157,7 +157,7 @@ class HRRRSurfaceDataset(Dataset):
         target = (target - self.target_means) / self.target_stds
         # Conditional encoding
         data_arrays = np.empty(
-            (4, self.grid_lat.shape[0], self.grid_lat.shape[1]), dtype=np.float32
+            (3, self.grid_lat.shape[0], self.grid_lat.shape[1]), dtype=np.float32
         )
         ts = (time_stamp - np.datetime64("1970-01-01T00:00:00Z")) / np.timedelta64(
             1, "s"
@@ -165,21 +165,21 @@ class HRRRSurfaceDataset(Dataset):
         data_arrays[0] = cos_zenith_angle(
             datetime.datetime.utcfromtimestamp(ts), self.grid_lat, self.grid_lon
         )
-        data_arrays[1][:] = np.sin(
-            2 * np.pi *int(
+        data_arrays[1] = self.grid_lat / 90.0
+        data_arrays[2] = self.grid_lon / 360.0
+        condition_time = np.array(
+            [
                 (
                     time_stamp.astype("datetime64[D]")
                     - time_stamp.astype("datetime64[Y]")
+                    + 1
                 ).astype(int)
-                + 1
-            )
-            / 365.0
+            ],
+            dtype=np.int32,
         )
-        data_arrays[2] = self.grid_lat / 90.0
-        data_arrays[3] = self.grid_lon / 360.0
 
-        condition = torch.Tensor(data_arrays)
-        return condition, target
+        condition_spatial = torch.Tensor(data_arrays)
+        return target, condition_spatial, condition_time
 
 
 if __name__ == "__main__":

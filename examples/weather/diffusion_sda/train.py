@@ -16,13 +16,14 @@
 
 import time
 import importlib
+import logging
 
 import zarr
 import torch
 import numpy as np
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim.lr_scheduler import CosineAnnealingLR
-from  torch.utils.data import DataLoader
+from torch.utils.data import DataLoader
 
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.utils.logging import PythonLogger, RankZeroLoggingWrapper
@@ -30,6 +31,7 @@ from physicsnemo.utils import load_checkpoint, save_checkpoint
 from physicsnemo.distributed.utils import reduce_loss
 
 # TODO: update with base DiffusionUNet once refactor is complete
+from physicsnemo.models.diffusion_unets import SongUNetPosEmbd
 from physicsnemo.diffusion.multi_diffusion import RandomPatching2D
 from physicsnemo.diffusion.utils.utils import InfiniteSampler
 
@@ -49,15 +51,19 @@ torch._logging.set_logs(recompiles=True, graph_breaks=True)
 
 def main():
     # Configuration
+    img_resolution = [1059, 1799]
+    img_channels = 16
+    num_condition_channels = 3
     batch_size_per_gpu = 1
+    num_patches_per_sample = 4
     load_checkpoint_from_file = False
     checkpoint_dir = "./checkpoints"
-    max_training_samples = 10*(365*24*10)
+    max_training_samples = 10000000
     checkpoint_frequency = 1000
     validation_frequency = 1000
     num_validation_samples = 100
-    logging_frequency = 1
-    use_apex = False
+    logging_frequency = 1000
+    use_apex = True
 
     # Initialize distributed environment
     DistributedManager.initialize()
@@ -66,25 +72,45 @@ def main():
     # Setup logging
     logger = PythonLogger("main")
     logger.logger.setLevel("INFO")
-    import logging
     logger.logger.addHandler(logging.StreamHandler())
     rank_zero_logger = RankZeroLoggingWrapper(logger, dist)
 
-
+    # Setup patching
     patching = RandomPatching2D(
-        img_shape=HRRRSurfaceDiffusionNet.IMG_RESOLUTION,
+        img_shape=img_resolution,
         patch_shape=(448, 448),
-        patch_num=4,
+        patch_num=num_patches_per_sample,
     )
-    model = HRRRSurfaceDiffusionNet(
-        use_apex=use_apex
+
+    # Setup model
+    channel_mult = [1, 2, 2, 2, 2]
+    num_grid_channels, time_embed_channels = 20, 8
+    model_backbone = HRRRSurfaceDiffusionNet(
+        img_resolution=img_resolution,
+        in_channels=img_channels
+        + num_condition_channels
+        + num_grid_channels
+        + time_embed_channels,
+        out_channels=img_channels,
+        condition_channels=num_condition_channels,
+        time_embed_channels=time_embed_channels,
+        N_grid_channels=num_grid_channels,
+        gridtype="learnable",
+        model_channels=128,
+        channel_mult=channel_mult,
+        attn_resolutions=[img_resolution[0] >> len(channel_mult)],
+        use_apex_gn=use_apex,
     )
     model = (
-        EDMPreconditioner(
-            model=model,
-            sigma_data=1.0,
+        (
+            EDMPreconditioner(
+                model=model_backbone,
+                sigma_data=1.0,
+            )
         )
-    ).to(dist.device).to(memory_format=torch.channels_last)
+        .to(dist.device)
+        .to(memory_format=torch.channels_last)
+    )
     rank_zero_logger.info(f"Training model with {model.num_parameters()} parameters.")
 
     # Setup DDP for multi-GPU training
@@ -107,40 +133,67 @@ def main():
 
     # Create data loaders
     # Needs zarr 3.0
-    root = zarr.open_group(store='s3://hrrr-surface-sda/zarr-v2', mode='r', storage_options={'endpoint_url': 'https://pdx.s8k.io'})
-    time_coord = root['time'][:]
+    root = zarr.open_group(
+        store="s3://hrrr-surface-sda/zarr-v2",
+        mode="r",
+        storage_options={
+            "endpoint_url": "https://pdx.s8k.io",
+            "profile": "physicsnemo",
+        },
+    )
+    time_coord = root["time"][:]
     sidx = np.where(time_coord == np.datetime64("2023-01-01T00:00:00"))[0][0]
     eidx = np.where(time_coord == np.datetime64("2024-12-31T23:00:00"))[0][0]
     time_idx = np.arange(sidx, eidx)
-    dataset = HRRRSurfaceDataset("s3://hrrr-surface-sda/zarr-v2", time_idx, storage_options={'endpoint_url': 'https://pdx.s8k.io'})
-    train_iter = DataLoader(dataset, batch_size=batch_size_per_gpu,
-            sampler=InfiniteSampler(dataset=dataset, shuffle=True),
-            num_workers=8,
-            pin_memory=False,
-            drop_last=False,
-            timeout=0,
-            prefetch_factor=4,
-            persistent_workers=False)
+    dataset = HRRRSurfaceDataset(
+        "s3://hrrr-surface-sda/zarr-v2",
+        time_idx,
+        storage_options={
+            "endpoint_url": "https://pdx.s8k.io",
+            "profile": "physicsnemo",
+        },
+    )
+    train_iter = DataLoader(
+        dataset,
+        batch_size=batch_size_per_gpu,
+        sampler=InfiniteSampler(dataset=dataset, shuffle=True),
+        num_workers=8,
+        pin_memory=False,
+        drop_last=False,
+        timeout=0,
+        prefetch_factor=4,
+        persistent_workers=False,
+    )
     num_training_samples = len(dataset)
 
     sidx = np.where(time_coord == np.datetime64("2025-01-01T00:00:00"))[0][0]
     eidx = np.where(time_coord == np.datetime64("2025-06-01T00:00:00"))[0][0]
     time_idx = np.arange(sidx, eidx, 25)
-    dataset = HRRRSurfaceDataset("s3://hrrr-surface-sda/zarr-v2", time_idx, storage_options={'endpoint_url': 'https://pdx.s8k.io'})
-    val_iter = DataLoader(dataset, batch_size=batch_size_per_gpu,
-            sampler=InfiniteSampler(dataset=dataset, shuffle=False),
-            num_workers=2,
-            pin_memory=False,
-            drop_last=False,
-            timeout=0,
-            prefetch_factor=2,
-            persistent_workers=False)
+    dataset = HRRRSurfaceDataset(
+        "s3://hrrr-surface-sda/zarr-v2",
+        time_idx,
+        storage_options={
+            "endpoint_url": "https://pdx.s8k.io",
+            "profile": "physicsnemo",
+        },
+    )
+    val_iter = DataLoader(
+        dataset,
+        batch_size=batch_size_per_gpu,
+        sampler=InfiniteSampler(dataset=dataset, shuffle=False),
+        num_workers=2,
+        pin_memory=False,
+        drop_last=False,
+        timeout=0,
+        prefetch_factor=2,
+        persistent_workers=False,
+    )
 
     # Create loss function with multi-diffusion support
     loss_fn = EDMLoss(
         model=model,
-        P_mean=0.0,
-        P_std=1.0,
+        P_mean=-0.8,
+        P_std=1.6,
         sigma_data=1.0,
         patching=patching,
     )
@@ -192,7 +245,7 @@ def main():
     loss_running_mean = 0.0
     n_loss_running_mean = 1
 
-    total_batch_size = batch_size_per_gpu * dist.world_size
+    total_batch_size = batch_size_per_gpu * dist.world_size * num_patches_per_sample
 
     # Counters for periodic tasks
     samples_since_scheduler_update = 0
@@ -206,26 +259,31 @@ def main():
         model.train()
 
         # Get next batch from infinite sampler
-        # c = torch.Size([4, 1059, 1799])
-        # x = torch.Size([16, 1059, 1799])
-        _, (c, x) = next(enumerate(train_iter))
-        c = c.to(dist.device, non_blocking=True).to(memory_format=torch.channels_last)
+        x, cond_spatial, cond_time = next(train_iter)
         x = x.to(dist.device, non_blocking=True).to(memory_format=torch.channels_last)
+        cond_spatial = cond_spatial.to(dist.device, non_blocking=True).to(
+            memory_format=torch.channels_last
+        )
         batch_size = x.shape[0]
 
         # Forward pass
         optimizer.zero_grad(**({} if use_apex else {"set_to_none": True}))
-        loss = loss_fn(x, {"c": c}).mean()
+        loss = loss_fn(
+            x,
+            {"cond_spatial": cond_spatial, "cond_time": cond_time},
+        ).mean()
 
         # Backward pass and optimize
         loss.backward()
         optimizer.step()
 
-        mean_loss = reduce_loss(loss.item() * batch_size, dst_rank=0) 
+        mean_loss = reduce_loss(loss.item() * batch_size, dst_rank=0)
 
         # Update running mean of loss
         if dist.rank == 0:
-            loss_running_mean += (mean_loss / total_batch_size - loss_running_mean) / n_loss_running_mean
+            loss_running_mean += (
+                mean_loss / total_batch_size - loss_running_mean
+            ) / n_loss_running_mean
             n_loss_running_mean += 1
             current_samples_trained += total_batch_size
 
@@ -260,14 +318,21 @@ def main():
             current_validation_samples = 0
             with torch.no_grad():
                 while current_validation_samples < num_validation_samples:
-                    _, (c, x) = next(enumerate(val_iter))
-                    c = c.to(dist.device, non_blocking=True).to(memory_format=torch.channels_last)
-                    x = x.to(dist.device, non_blocking=True).to(memory_format=torch.channels_last)
+                    x, cs, ct = next(val_iter)
+                    x = x.to(dist.device, non_blocking=True).to(
+                        memory_format=torch.channels_last
+                    )
+                    cs = cs.to(dist.device, non_blocking=True).to(
+                        memory_format=torch.channels_last
+                    )
                     batch_size = x.shape[0]
-                    
-                    val_loss = loss_fn(x, {"c": c}).mean()
-                    mean_val_loss = (
-                        reduce_loss(val_loss.item() * batch_size, dst_rank=0)
+
+                    val_loss = loss_fn(
+                        x,
+                        {"cond_spatial": cs, "cond_time": ct},
+                    ).mean()
+                    mean_val_loss = reduce_loss(
+                        val_loss.item() * batch_size, dst_rank=0
                     )
                     if dist.rank == 0:
                         val_loss_running_mean += (
