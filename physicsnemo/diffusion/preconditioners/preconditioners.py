@@ -223,6 +223,50 @@ class BaseAffinePreconditioner(Module, ABC):
     >>> out_ve = precond_ve(x, t, condition=None)
     >>> out_ve.shape
     torch.Size([2, 3, 16, 16])
+
+    The following example shows how to use the ``condition`` argument with a
+    conditional model. The model receives a TensorDict with keys ``"y"`` and
+    ``"z"`` as conditioning information.
+
+    >>> from tensordict import TensorDict
+    >>> class ConditionalModel(Module):
+    ...     def __init__(self, channels: int):
+    ...         super().__init__()
+    ...         self.channels = channels
+    ...         self.net = torch.nn.Conv2d(channels, channels, 1)
+    ...
+    ...     def forward(self, x, t, condition=None):
+    ...         # Use conditioning tensors from TensorDict
+    ...         if condition is not None:
+    ...             y = condition["y"]  # shape: (B, C, H, W)
+    ...             z = condition["z"]  # shape: (B, C, H, W)
+    ...             x = x + y + z
+    ...         return self.net(x)
+    ...
+    >>> class EDMPreconditionerCond(BaseAffinePreconditioner):
+    ...     def __init__(self, model, sigma_data: float = 0.5):
+    ...         super().__init__(model)
+    ...         self.sigma_data = sigma_data
+    ...
+    ...     def compute_coefficients(self, t: torch.Tensor):
+    ...         sigma_data = self.sigma_data
+    ...         c_skip = sigma_data**2 / (t**2 + sigma_data**2)
+    ...         c_out = t * sigma_data / (t**2 + sigma_data**2).sqrt()
+    ...         c_in = 1 / (sigma_data**2 + t**2).sqrt()
+    ...         c_noise = t.log() / 4
+    ...         return c_in, c_noise, c_out, c_skip
+    ...
+    >>> cond_model = ConditionalModel(channels=3)
+    >>> precond_cond = EDMPreconditionerCond(cond_model, sigma_data=0.5)
+    >>> x = torch.randn(2, 3, 16, 16)
+    >>> t = torch.rand(2)
+    >>> condition = TensorDict({
+    ...     "y": torch.randn(2, 3, 16, 16),
+    ...     "z": torch.randn(2, 3, 16, 16),
+    ... }, batch_size=[2])
+    >>> out_cond = precond_cond(x, t, condition)
+    >>> out_cond.shape
+    torch.Size([2, 3, 16, 16])
     """
 
     def __init__(
