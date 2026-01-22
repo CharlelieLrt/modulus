@@ -41,6 +41,12 @@ class DiffusionModel(Protocol):
     (:math:`\nabla \log p`), or velocity (:math:`\mathbf{v}`), the signature
     remains the same.
 
+    The interface supports both conditional and unconditional diffusion models.
+    For unconditional models, the ``condition`` argument should be ``None``.
+    For conditional models, the ``condition`` argument should be a TensorDict
+    containing conditioning tensors (class labels, text embeddings, etc.), or
+    ``None`` in rare specific cases (e.g. classifier-free guidance).
+
     Examples
     --------
     >>> import torch
@@ -48,7 +54,7 @@ class DiffusionModel(Protocol):
     >>> from physicsnemo.diffusion import DiffusionModel
     >>>
     >>> class Denoiser:
-    ...     def __call__(self, x, t, condition, **kwargs):
+    ...     def __call__(self, x, t, *, condition=None, **kwargs):
     ...         return F.relu(x)
     ...
     >>> isinstance(Denoiser(), DiffusionModel)
@@ -59,7 +65,7 @@ class DiffusionModel(Protocol):
         self,
         x: Float[torch.Tensor, "B *dims"],  # noqa: F821
         t: Float[torch.Tensor, "B"],  # noqa: F821
-        condition: TensorDict,
+        condition: TensorDict | None = None,
         **model_kwargs: Any,
     ) -> Float[torch.Tensor, "B *dims"]:  # noqa: F821
         r"""
@@ -73,10 +79,10 @@ class DiffusionModel(Protocol):
             dimensions (e.g., channels and spatial dimensions).
         t : torch.Tensor
             Diffusion time or noise level tensor of shape :math:`(B,)`.
-        condition : TensorDict
-            TensorDict containing conditioning tensors. The TensorDict should
-            have batch size :math:`B` matching that of ``x``. If the model is
-            unconditional, the condition should be the empty ``TensorDict()``.
+        condition : TensorDict or None, optional, default=None
+            TensorDict containing conditioning tensors with batch size
+            :math:`B` matching that of ``x``. Pass ``None`` for unconditional
+            generation.
         **model_kwargs : Any
             Additional keyword arguments specific to the model implementation.
 
