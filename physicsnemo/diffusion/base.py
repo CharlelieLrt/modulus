@@ -150,7 +150,10 @@ class DiffusionDenoiser(Protocol):
             batch size and :math:`*` denotes any number of additional
             dimensions (e.g., channels and spatial dimensions).
         t : torch.Tensor
-            Diffusion time or noise level tensor of shape :math:`(B,)`.
+            Batched diffusion time or noise level tensor of shape :math:`(B,)`.
+            All batch elements in the latent state ``x`` typically share the
+            same diffusion time values, but ``t`` is still required to be a
+            batched tensor.
 
         Returns
         -------
