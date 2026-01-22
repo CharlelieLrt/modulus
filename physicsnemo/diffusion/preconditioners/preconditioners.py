@@ -70,7 +70,7 @@ class BaseAffinePreconditioner(Module, ABC):
         model(
             x: torch.Tensor,  # Shape: (B, *)
             t: torch.Tensor,  # Shape: (B,)
-            condition: TensorDict | None = None,
+            condition: torch.Tensor | TensorDict | None = None,
             **model_kwargs: Any,
         ) -> torch.Tensor  # Shape: (B, *)
 
@@ -103,11 +103,11 @@ class BaseAffinePreconditioner(Module, ABC):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : TensorDict or None, optional, default=None
-        TensorDict containing conditioning tensors with batch size :math:`B`
-        matching that of ``x``, or ``None`` for unconditional generation.
-        This is a **keyword-only** argument. Passed to the wrapped ``model``
-        unchanged.
+    condition : torch.Tensor, TensorDict, or None, optional, default=None
+        Single Tensor or a TensorDict containing conditioning tensors with
+        batch size :math:`B` matching that of ``x``. Pass ``None`` for an
+        unconditional model.
+
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -166,7 +166,7 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         self.channels = channels
     ...         self.net = torch.nn.Conv2d(channels, channels, 1)
     ...
-    ...     def forward(self, x, t, *, condition=None):
+    ...     def forward(self, x, t, condition=None):
     ...         return self.net(x)
 
     Now we define the EDM preconditioner:
@@ -189,12 +189,11 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         c_noise = t.log() / 4
     ...         return c_in, c_noise, c_out, c_skip
     ...
-    >>> from tensordict import TensorDict
     >>> model = SimpleModel(channels=3)
     >>> precond = EDMPreconditioner(model, sigma_data=0.5)
     >>> x = torch.randn(2, 3, 16, 16)
     >>> t = torch.rand(2)
-    >>> out = precond(x, t, TensorDict())
+    >>> out = precond(x, t, condition=None)
     >>> out.shape
     torch.Size([2, 3, 16, 16])
 
@@ -221,7 +220,7 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         return c_in, c_noise, c_out, c_skip
     ...
     >>> precond_ve = VEPreconditioner(model)
-    >>> out_ve = precond_ve(x, t, TensorDict())
+    >>> out_ve = precond_ve(x, t, condition=None)
     >>> out_ve.shape
     torch.Size([2, 3, 16, 16])
     """
@@ -297,7 +296,7 @@ class BaseAffinePreconditioner(Module, ABC):
         self,
         x: torch.Tensor,
         t: torch.Tensor,
-        condition: TensorDict | None = None,
+        condition: torch.Tensor | TensorDict | None = None,
         **model_kwargs: Any,
     ) -> torch.Tensor:
         if not torch.compiler.is_compiling():
@@ -307,11 +306,16 @@ class BaseAffinePreconditioner(Module, ABC):
                     f"Expected t to have shape ({B},) matching batch size of "
                     f"x, but got {t.shape}."
                 )
-            if condition is not None:
+            if isinstance(condition, TensorDict):
                 if condition.batch_size and condition.batch_size[0] != B:
-                    cond_B = condition.batch_size[0]
                     raise ValueError(
-                        f"Condition TensorDict has batch size {cond_B} "
+                        f"Condition TensorDict has batch size {condition.batch_size[0]} "
+                        f"but expected {B} to match x."
+                    )
+            elif isinstance(condition, torch.Tensor):
+                if condition.shape[0] != B:
+                    raise ValueError(
+                        f"Condition tensor has batch size {condition.shape[0]} "
                         f"but expected {B} to match x."
                     )
 
@@ -384,9 +388,10 @@ class VPPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : TensorDict or None, optional, default=None
-        TensorDict containing conditioning tensors with batch size :math:`B`
-        matching that of ``x``, or ``None`` for unconditional generation.
+    condition : torch.Tensor, TensorDict, or None, optional, default=None
+        Single Tensor or a TensorDict containing conditioning tensors with
+        batch size :math:`B` matching that of ``x``. Pass ``None`` for an
+        unconditional model.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -404,21 +409,19 @@ class VPPreconditioner(BaseAffinePreconditioner):
     Examples
     --------
     >>> import torch
-    >>> from tensordict import TensorDict
     >>> from physicsnemo.core import Module
     >>> # Define a simple model satisfying the diffusion model interface
     >>> class SimpleModel(Module):
     ...     def __init__(self, channels: int):
     ...         super().__init__()
     ...         self.net = torch.nn.Conv2d(channels, channels, 1)
-    ...     def forward(self, x, t, *, condition=None):
+    ...     def forward(self, x, t, condition=None):
     ...         return self.net(x)
     >>> model = SimpleModel(channels=3)
     >>> precond = VPPreconditioner(model, beta_d=19.9, beta_min=0.1, M=1000)
     >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
     >>> t = torch.rand(2)              # diffusion time for each sample
-    >>> condition = TensorDict({}, batch_size=[2])
-    >>> out = precond(x, t, condition=condition)
+    >>> out = precond(x, t, condition=None)
     >>> out.shape
     torch.Size([2, 3, 16, 16])
     """
@@ -513,9 +516,10 @@ class VEPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : TensorDict or None, optional, default=None
-        TensorDict containing conditioning tensors with batch size :math:`B`
-        matching that of ``x``, or ``None`` for unconditional generation.
+    condition : torch.Tensor, TensorDict, or None, optional, default=None
+        Single Tensor or a TensorDict containing conditioning tensors with
+        batch size :math:`B` matching that of ``x``. Pass ``None`` for an
+        unconditional model.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -533,21 +537,19 @@ class VEPreconditioner(BaseAffinePreconditioner):
     Examples
     --------
     >>> import torch
-    >>> from tensordict import TensorDict
     >>> from physicsnemo.core import Module
     >>> # Define a simple model satisfying the diffusion model interface
     >>> class SimpleModel(Module):
     ...     def __init__(self, channels: int):
     ...         super().__init__()
     ...         self.net = torch.nn.Conv2d(channels, channels, 1)
-    ...     def forward(self, x, t, *, condition=None):
+    ...     def forward(self, x, t, condition=None):
     ...         return self.net(x)
     >>> model = SimpleModel(channels=3)
     >>> precond = VEPreconditioner(model)
     >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
     >>> t = torch.rand(2)              # diffusion time for each sample
-    >>> condition = TensorDict({}, batch_size=[2])
-    >>> out = precond(x, t, condition=condition)
+    >>> out = precond(x, t, condition=None)
     >>> out.shape
     torch.Size([2, 3, 16, 16])
     """
@@ -619,9 +621,10 @@ class IDDPMPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : TensorDict or None, optional, default=None
-        TensorDict containing conditioning tensors with batch size :math:`B`
-        matching that of ``x``, or ``None`` for unconditional generation.
+    condition : torch.Tensor, TensorDict, or None, optional, default=None
+        Single Tensor or a TensorDict containing conditioning tensors with
+        batch size :math:`B` matching that of ``x``. Pass ``None`` for an
+        unconditional model.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -639,21 +642,19 @@ class IDDPMPreconditioner(BaseAffinePreconditioner):
     Examples
     --------
     >>> import torch
-    >>> from tensordict import TensorDict
     >>> from physicsnemo.core import Module
     >>> # Define a simple model satisfying the diffusion model interface
     >>> class SimpleModel(Module):
     ...     def __init__(self, channels: int):
     ...         super().__init__()
     ...         self.net = torch.nn.Conv2d(channels, channels, 1)
-    ...     def forward(self, x, t, *, condition=None):
+    ...     def forward(self, x, t, condition=None):
     ...         return self.net(x)
     >>> model = SimpleModel(channels=3)
     >>> precond = IDDPMPreconditioner(model, C_1=0.001, C_2=0.008, M=1000)
     >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
     >>> t = torch.rand(2)              # diffusion time for each sample
-    >>> condition = TensorDict({}, batch_size=[2])
-    >>> out = precond(x, t, condition=condition)
+    >>> out = precond(x, t, condition=None)
     >>> out.shape
     torch.Size([2, 3, 16, 16])
     """
@@ -749,9 +750,10 @@ class EDMPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : TensorDict or None, optional, default=None
-        TensorDict containing conditioning tensors with batch size :math:`B`
-        matching that of ``x``, or ``None`` for unconditional generation.
+    condition : torch.Tensor, TensorDict, or None, optional, default=None
+        Single Tensor or a TensorDict containing conditioning tensors with
+        batch size :math:`B` matching that of ``x``. Pass ``None`` for an
+        unconditional model.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -769,21 +771,19 @@ class EDMPreconditioner(BaseAffinePreconditioner):
     Examples
     --------
     >>> import torch
-    >>> from tensordict import TensorDict
     >>> from physicsnemo.core import Module
     >>> # Define a simple model satisfying the diffusion model interface
     >>> class SimpleModel(Module):
     ...     def __init__(self, channels: int):
     ...         super().__init__()
     ...         self.net = torch.nn.Conv2d(channels, channels, 1)
-    ...     def forward(self, x, t, *, condition=None):
+    ...     def forward(self, x, t, condition=None):
     ...         return self.net(x)
     >>> model = SimpleModel(channels=3)
     >>> precond = EDMPreconditioner(model, sigma_data=0.5)
     >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
     >>> t = torch.rand(2)              # diffusion time for each sample
-    >>> condition = TensorDict({}, batch_size=[2])
-    >>> out = precond(x, t, condition=condition)
+    >>> out = precond(x, t, condition=None)
     >>> out.shape
     torch.Size([2, 3, 16, 16])
     """

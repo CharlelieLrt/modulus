@@ -42,10 +42,15 @@ class DiffusionModel(Protocol):
     remains the same.
 
     The interface supports both conditional and unconditional diffusion models.
-    For unconditional models, the ``condition`` argument should be ``None``.
-    For conditional models, the ``condition`` argument should be a TensorDict
-    containing conditioning tensors (class labels, text embeddings, etc.), or
-    ``None`` in rare specific cases (e.g. classifier-free guidance).
+    The ``condition`` argument supports different conditioning scenarios:
+
+    - **torch.Tensor**: Use when there is a single conditioning tensor
+      (e.g., a class embedding or a single image).
+    - **TensorDict**: Use when multiple conditioning tensors are needed,
+      possibly with different shapes. The string keys can be used to provide
+      semantic information about each conditioning tensor.
+    - **None**: Use for unconditional generation or specific scenarios like
+      classifier-free guidance where the model should ignore conditioning.
 
     Examples
     --------
@@ -54,7 +59,7 @@ class DiffusionModel(Protocol):
     >>> from physicsnemo.diffusion import DiffusionModel
     >>>
     >>> class Denoiser:
-    ...     def __call__(self, x, t, *, condition=None, **kwargs):
+    ...     def __call__(self, x, t, condition=None, **kwargs):
     ...         return F.relu(x)
     ...
     >>> isinstance(Denoiser(), DiffusionModel)
@@ -65,7 +70,7 @@ class DiffusionModel(Protocol):
         self,
         x: Float[torch.Tensor, "B *dims"],  # noqa: F821
         t: Float[torch.Tensor, "B"],  # noqa: F821
-        condition: TensorDict | None = None,
+        condition: Float[torch.Tensor, "B *cond_dims"] | TensorDict | None = None,  # noqa: F821
         **model_kwargs: Any,
     ) -> Float[torch.Tensor, "B *dims"]:  # noqa: F821
         r"""
@@ -79,10 +84,11 @@ class DiffusionModel(Protocol):
             dimensions (e.g., channels and spatial dimensions).
         t : torch.Tensor
             Diffusion time or noise level tensor of shape :math:`(B,)`.
-        condition : TensorDict or None, optional, default=None
-            TensorDict containing conditioning tensors with batch size
-            :math:`B` matching that of ``x``. Pass ``None`` for unconditional
-            generation.
+        condition : torch.Tensor, TensorDict, or None, optional, default=None
+            Conditioning information for the model. If a Tensor or a TensorDict
+            is passed, it should have batch size :math:`B` matching that of
+            ``x``. Pass ``None`` for an unconditional model.
+
         **model_kwargs : Any
             Additional keyword arguments specific to the model implementation.
 
