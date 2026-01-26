@@ -102,16 +102,27 @@ class DiffusionDenoiser(Protocol):
     which often requires additional inputs like conditioning, use the more
     general :class:`DiffusionModel` protocol instead.
 
-    .. note::
+    A :class:`DiffusionDenoiser` can be obtained from a
+    :class:`DiffusionModel` by partially applying the ``condition`` and
+    any other keyword arguments. For example:
 
-        A :class:`DiffusionDenoiser` can be obtained from a
-        :class:`DiffusionModel` by partially applying the ``condition`` and
-        any other keyword arguments. For example:
+    .. code-block:: python
 
-        .. code-block:: python
+        from functools import partial
+        from tensordict import TensorDict
 
-            from functools import partial
-            denoiser = partial(model, condition=my_condition)
+        class MyDiffusionModel:
+            def __call__(self, x, t, condition):
+                # Model forward pass using x, t, and condition
+                return x * 0.9 + condition["y"]
+
+        model = MyDiffusionModel()
+        my_condition = TensorDict({"y": torch.randn(batch_size, 10)})
+
+        # Create denoiser by partially applying the condition
+        denoiser = partial(model, condition=my_condition)
+
+        # Now denoiser(x, t) implements the DiffusionDenoiser interface.
 
     See Also
     --------
@@ -138,7 +149,7 @@ class DiffusionDenoiser(Protocol):
     def __call__(
         self,
         x: Float[torch.Tensor, "B *dims"],  # noqa: F821
-        t: Float[torch.Tensor, "B"],  # noqa: F821
+        t: Float[torch.Tensor, "B "],  # noqa: F821
     ) -> Float[torch.Tensor, "B *dims"]:  # noqa: F821
         r"""
         Denoise the input at the given noise level.

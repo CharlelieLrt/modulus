@@ -25,20 +25,22 @@ from torch import Tensor
 from physicsnemo.diffusion.base import DiffusionDenoiser
 
 
+# TODO-CURSOR: for all Tensor type hints in these Solver classes,
+# you will move to jaxtyping, the
+# same way as it is done in base.py
 class Solver(ABC):
     r"""
     Abstract base class for diffusion ODE/SDE solvers.
 
     A solver implements a numerical method to integrate the diffusion process
     from a noisy state to a less noisy (or clean) state. Each call to
-    :meth:`step` advances the state from time ``t_cur`` to ``t_next``.
+    :meth:`step` advances the state from time ``t_cur`` (:math:`t_n`) to
+    ``t_next`` (:math:`t_{n-1}`).
 
     To create a custom solver, subclass :class:`Solver` and implement the
     :meth:`step` method. The solver can then be used with the
     :func:`~physicsnemo.diffusion.samplers.sample` function.
 
-    Parameters
-    ----------
     The denoiser must implement the
     :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface with the
     following signature:
@@ -47,6 +49,11 @@ class Solver(ABC):
 
         def denoiser(x: Tensor, t: Tensor) -> Tensor: ...
 
+    The denoiser is expected to be an :math:`x_0`-predictor or clean data
+    predictor.
+
+    Parameters
+    ----------
     denoiser : DiffusionDenoiser
         A callable that takes ``(x, t)`` and returns the denoised prediction.
         See :class:`~physicsnemo.diffusion.DiffusionDenoiser` for the expected
@@ -94,20 +101,20 @@ class Solver(ABC):
         Parameters
         ----------
         x : Tensor
-            Current noisy latent state :math:`\mathbf{x}_t` of shape
+            Current noisy latent state :math:`\mathbf{x}_{n}` of shape
             :math:`(B, *)` where :math:`B` is the batch size.
         t_cur : Tensor
-            Current diffusion time (or noise level) :math:`t` of shape
+            Current diffusion time :math:`t_n` of shape
             :math:`(B,)`.
         t_next : Tensor
-            Target diffusion time (or noise level) :math:`t - 1` of shape
+            Target diffusion time :math:`t_{n-1}` of shape
             :math:`(B,)`.
 
         Returns
         -------
         Tensor
-            Updated latent state :math:`\mathbf{x}_{t-1}` at time ``t_next``,
-            same shape as ``x``.
+            Updated latent state :math:`\mathbf{x}_{n-1}` at time
+            ``t_next``, same shape as ``x``.
         """
         ...
 
@@ -116,8 +123,8 @@ class EulerSolver(Solver):
     r"""
     First-order Euler solver for diffusion ODEs.
 
-    This is the fastest solver but typically produces lower quality samples
-    compared to higher-order methods like :class:`HeunSolver`.
+    This is a fast solver with one denoiser evaluation per step, but typically
+    produces lower quality samples compared to higher-order methods.
 
     Parameters
     ----------
@@ -153,20 +160,20 @@ class EulerSolver(Solver):
         Parameters
         ----------
         x : Tensor
-            Current noisy latent state :math:`\mathbf{x}_t` of shape
+            Current noisy latent state :math:`\mathbf{x}_{n}` of shape
             :math:`(B, *)` where :math:`B` is the batch size.
         t_cur : Tensor
-            Current diffusion time (or noise level) :math:`t` of shape
+            Current diffusion time :math:`t_n` of shape
             :math:`(B,)`.
         t_next : Tensor
-            Target diffusion time (or noise level) :math:`t - 1` of shape
+            Target diffusion time :math:`t_{n-1}` of shape
             :math:`(B,)`.
 
         Returns
         -------
         Tensor
-            Updated latent state :math:`\mathbf{x}_{t-1}` at time ``t_next``,
-            same shape as ``x``.
+            Updated latent state :math:`\mathbf{x}_{n-1}` at time
+            ``t_next``, same shape as ``x``.
         """
         # Reshape t for broadcasting: (B,) -> (B, 1, ..., 1)
         t_cur_bc = t_cur.reshape(-1, *([1] * (x.ndim - 1)))
@@ -183,7 +190,6 @@ class HeunSolver(Solver):
     r"""
     Second-order Heun solver for diffusion ODEs.
 
-    Also known as the improved Euler method or explicit trapezoidal rule.
     This method requires two denoiser evaluations per step but produces
     higher quality samples than :class:`EulerSolver`.
 
@@ -193,6 +199,10 @@ class HeunSolver(Solver):
         A callable implementing the
         :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface. See
         :class:`Solver` for details.
+    alpha : float, optional
+        Interpolation parameter for the corrector step, must be in (0, 1].
+        ``alpha=1`` gives the standard Heun method (trapezoidal rule),
+        ``alpha=0.5`` gives the midpoint method. By default 1.
 
     Examples
     --------
@@ -209,6 +219,16 @@ class HeunSolver(Solver):
     torch.Size([1, 3, 8, 8])
     """
 
+    def __init__(
+        self,
+        denoiser: DiffusionDenoiser,
+        alpha: float = 1.0,
+    ) -> None:
+        super().__init__(denoiser)
+        if not 0 < alpha <= 1:
+            raise ValueError(f"alpha must be in (0, 1], got {alpha}")
+        self.alpha = alpha
+
     def step(
         self,
         x: Tensor,
@@ -221,20 +241,20 @@ class HeunSolver(Solver):
         Parameters
         ----------
         x : Tensor
-            Current noisy latent state :math:`\mathbf{x}_t` of shape
+            Current noisy latent state :math:`\mathbf{x}_n` of shape
             :math:`(B, *)` where :math:`B` is the batch size.
         t_cur : Tensor
-            Current diffusion time (or noise level) :math:`t` of shape
+            Current diffusion time :math:`t_n` of shape
             :math:`(B,)`.
         t_next : Tensor
-            Target diffusion time (or noise level) :math:`t - 1` of shape
+            Target diffusion time :math:`t_{n-1}` of shape
             :math:`(B,)`.
 
         Returns
         -------
         Tensor
-            Updated latent state :math:`\mathbf{x}_{t-1}` at time ``t_next``,
-            same shape as ``x``.
+            Updated latent state :math:`\mathbf{x}_{n-1}` at time
+            ``t_next``, same shape as ``x``.
         """
         # Reshape t for broadcasting: (B,) -> (B, 1, ..., 1)
         t_cur_bc = t_cur.reshape(-1, *([1] * (x.ndim - 1)))
@@ -246,20 +266,24 @@ class HeunSolver(Solver):
         denoised = self.denoiser(x, t_cur)
         d_cur = (x - denoised) / t_cur_bc
 
-        # Predictor step
-        x_prime = x + h * d_cur
+        # Predictor step to intermediate point
+        t_prime_bc = t_cur_bc + self.alpha * h
+        x_prime = x + self.alpha * h * d_cur
 
         # Check if this is the last step (t_next == 0)
         # If so, skip the correction step to avoid division by zero
         if (t_next == 0).all():
-            return x_prime
+            return x + h * d_cur
 
         # Second denoiser evaluation for correction
-        denoised_prime = self.denoiser(x_prime, t_next)
-        d_prime = (x_prime - denoised_prime) / t_next_bc
+        t_prime = t_prime_bc.reshape(x.shape[0])
+        denoised_prime = self.denoiser(x_prime, t_prime)
+        d_prime = (x_prime - denoised_prime) / t_prime_bc
 
-        # Corrector step (trapezoidal rule)
-        x_next = x + h * (0.5 * d_cur + 0.5 * d_prime)
+        # Corrector step
+        w_cur = 1 - 1 / (2 * self.alpha)
+        w_prime = 1 / (2 * self.alpha)
+        x_next = x + h * (w_cur * d_cur + w_prime * d_prime)
 
         return x_next
 
@@ -344,20 +368,20 @@ class EDMStochasticEulerSolver(Solver):
         Parameters
         ----------
         x : Tensor
-            Current noisy latent state :math:`\mathbf{x}_t` of shape
+            Current noisy latent state :math:`\mathbf{x}_n` of shape
             :math:`(B, *)` where :math:`B` is the batch size.
         t_cur : Tensor
-            Current diffusion time (or noise level) :math:`t` of shape
+            Current diffusion time :math:`t_n` of shape
             :math:`(B,)`.
         t_next : Tensor
-            Target diffusion time (or noise level) :math:`t - 1` of shape
+            Target diffusion time :math:`t_{n-1}` of shape
             :math:`(B,)`.
 
         Returns
         -------
         Tensor
-            Updated latent state :math:`\mathbf{x}_{t-1}` at time ``t_next``,
-            same shape as ``x``.
+            Updated latent state :math:`\mathbf{x}_{n-1}` at time
+            ``t_next``, same shape as ``x``.
         """
         # Reshape t for broadcasting: (B,) -> (B, 1, ..., 1)
         t_cur_bc = t_cur.reshape(-1, *([1] * (x.ndim - 1)))
@@ -401,6 +425,10 @@ class EDMStochasticHeunSolver(Solver):
         A callable implementing the
         :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface. See
         :class:`Solver` for details.
+    alpha : float, optional
+        Interpolation parameter for the corrector step, must be in (0, 1].
+        ``alpha=1`` gives the standard Heun method (trapezoidal rule),
+        ``alpha=0.5`` gives the midpoint method. By default 1.
     S_churn : float, optional
         Controls the amount of noise added at each step. Higher values add
         more stochasticity. By default 0 (deterministic).
@@ -440,6 +468,7 @@ class EDMStochasticHeunSolver(Solver):
     def __init__(
         self,
         denoiser: DiffusionDenoiser,
+        alpha: float = 1.0,
         S_churn: float = 0,
         S_min: float = 0,
         S_max: float = float("inf"),
@@ -448,6 +477,9 @@ class EDMStochasticHeunSolver(Solver):
         num_steps: int = 18,
     ) -> None:
         super().__init__(denoiser)
+        if not 0 < alpha <= 1:
+            raise ValueError(f"alpha must be in (0, 1], got {alpha}")
+        self.alpha = alpha
         self.S_churn = S_churn
         self.S_min = S_min
         self.S_max = S_max
@@ -467,20 +499,20 @@ class EDMStochasticHeunSolver(Solver):
         Parameters
         ----------
         x : Tensor
-            Current noisy latent state :math:`\mathbf{x}_t` of shape
+            Current noisy latent state :math:`\mathbf{x}_n` of shape
             :math:`(B, *)` where :math:`B` is the batch size.
         t_cur : Tensor
-            Current diffusion time (or noise level) :math:`t` of shape
+            Current diffusion time :math:`t_n` of shape
             :math:`(B,)`.
         t_next : Tensor
-            Target diffusion time (or noise level) :math:`t - 1` of shape
+            Target diffusion time :math:`t_{n-1}` of shape
             :math:`(B,)`.
 
         Returns
         -------
         Tensor
-            Updated latent state :math:`\mathbf{x}_{t-1}` at time ``t_next``,
-            same shape as ``x``.
+            Updated latent state :math:`\mathbf{x}_{n-1}` at time
+            ``t_next``, same shape as ``x``.
         """
         # Reshape t for broadcasting: (B,) -> (B, 1, ..., 1)
         t_cur_bc = t_cur.reshape(-1, *([1] * (x.ndim - 1)))
@@ -494,23 +526,33 @@ class EDMStochasticHeunSolver(Solver):
             gamma = 0
 
         # Increase noise temporarily
-        t_hat = t_cur_bc + gamma * t_cur_bc
-        noise_scale = (t_hat**2 - t_cur_bc**2).sqrt() * self.S_noise
+        t_hat_bc = t_cur_bc + gamma * t_cur_bc
+        noise_scale = (t_hat_bc**2 - t_cur_bc**2).sqrt() * self.S_noise
         x_hat = x + noise_scale * self.randn_like(x)
 
         # Compute denoised prediction at increased noise level
-        t_hat_flat = t_hat.reshape(x.shape[0])
-        denoised = self.denoiser(x_hat, t_hat_flat)
+        t_hat = t_hat_bc.reshape(x.shape[0])
+        denoised = self.denoiser(x_hat, t_hat)
 
-        # Euler step from t_hat to t_next (predictor)
-        d_cur = (x_hat - denoised) / t_hat
-        x_next = x_hat + (t_next_bc - t_hat) * d_cur
+        h = t_next_bc - t_hat_bc
+
+        # Euler step from t_hat to intermediate point (predictor)
+        d_cur = (x_hat - denoised) / t_hat_bc
+        t_prime_bc = t_hat_bc + self.alpha * h
+        x_prime = x_hat + self.alpha * h * d_cur
 
         # Apply 2nd order correction if not at last step
-        if not (t_next == 0).all():
-            denoised_next = self.denoiser(x_next, t_next)
-            d_prime = (x_next - denoised_next) / t_next_bc
-            d_avg = 0.5 * d_cur + 0.5 * d_prime
-            x_next = x_hat + (t_next_bc - t_hat) * d_avg
+        if (t_next == 0).all():
+            return x_hat + h * d_cur
+
+        # Second denoiser evaluation for correction
+        t_prime = t_prime_bc.reshape(x.shape[0])
+        denoised_prime = self.denoiser(x_prime, t_prime)
+        d_prime = (x_prime - denoised_prime) / t_prime_bc
+
+        # Corrector step
+        w_cur = 1 - 1 / (2 * self.alpha)
+        w_prime = 1 / (2 * self.alpha)
+        x_next = x_hat + h * (w_cur * d_cur + w_prime * d_prime)
 
         return x_next
