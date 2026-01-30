@@ -267,6 +267,72 @@ class BaseAffinePreconditioner(Module, ABC):
     >>> out_cond = precond_cond(x, t, condition)
     >>> out_cond.shape
     torch.Size([2, 3, 16, 16])
+
+    **Wrapping existing models to satisfy the DiffusionModel interface**
+
+    Some models in PhysicsNeMo have signatures that differ from the
+    :class:`~physicsnemo.diffusion.DiffusionModel` interface. Below are
+    examples showing how to write thin wrappers to make them compatible
+    with preconditioners (and other diffusion utilities).
+
+    **Example: Wrapping a diffusion UNet model**
+
+    The :class:`~physicsnemo.models.diffusion_unets.SongUNet` model has
+    the signature ``forward(x, noise_labels, class_labels, augment_labels)``.
+    We wrap it to match ``forward(x, t, condition)``:
+
+    >>> from physicsnemo.models.diffusion_unets import SongUNet
+    >>> from physicsnemo.diffusion import DiffusionModel
+    >>> class SongUNetWrapper(Module):
+    ...     def __init__(self, **song_unet_kwargs):
+    ...         super().__init__()
+    ...         self.net = SongUNet(**song_unet_kwargs)
+    ...
+    ...     def forward(self, x, t, condition=None):
+    ...         # t -> noise_labels (diffusion time/noise level)
+    ...         # condition["class_labels"] -> class_labels
+    ...         class_labels = condition["class_labels"] if condition else None
+    ...         return self.net(x, noise_labels=t, class_labels=class_labels)
+    ...
+    >>> wrapped = SongUNetWrapper(img_resolution=8, in_channels=2, out_channels=2)
+    >>> isinstance(wrapped, DiffusionModel)
+    True
+    >>> x = torch.rand(1, 2, 8, 8)
+    >>> t = torch.rand(1)
+    >>> out = wrapped(x, t, condition=None)
+    >>> out.shape
+    torch.Size([1, 2, 8, 8])
+
+    **Example: Wrapping DiT**
+
+    The :class:`~physicsnemo.experimental.models.dit.DiT` model has
+    the signature ``forward(x, t, condition, p_dropout, attn_kwargs)``.
+    Its ``condition`` expects a Tensor, not a TensorDict. We wrap it
+    to extract the tensor from a TensorDict if needed:
+
+    >>> from physicsnemo.experimental.models.dit import DiT
+    >>> class DiTWrapper(Module):
+    ...     def __init__(self, **dit_kwargs):
+    ...         super().__init__()
+    ...         self.net = DiT(**dit_kwargs)
+    ...
+    ...     def forward(self, x, t, condition=None. **dit_kwargs):
+    ...         # Extract tensor from TensorDict if provided
+    ...         if isinstance(condition, TensorDict):
+    ...             cond_tensor = condition["embedding"]  # or relevant key
+    ...         else:
+    ...             cond_tensor = condition  # already a Tensor or None
+    ...         return self.net(x, t, condition=cond_tensor, **dit_kwargs)
+    ...
+    >>> wrapped_dit = DiTWrapper(input_size=8, patch_size=4, in_channels=2)
+    >>> isinstance(wrapped_dit, DiffusionModel)
+    True
+    >>> x = torch.rand(1, 2, 8, 8)
+    >>> t = torch.rand(1)
+    >>> out = wrapped_dit(x, t, condition=None)
+    >>> out.shape
+    torch.Size([1, 2, 8, 8])
+
     """
 
     def __init__(

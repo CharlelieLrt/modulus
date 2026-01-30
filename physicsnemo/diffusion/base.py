@@ -68,11 +68,11 @@ class DiffusionModel(Protocol):
 
     def __call__(
         self,
-        x: Float[torch.Tensor, "B *dims"],  # noqa: F821
-        t: Float[torch.Tensor, "B"],  # noqa: F821
-        condition: Float[torch.Tensor, "B *cond_dims"] | TensorDict | None = None,  # noqa: F821
+        x: Float[torch.Tensor, " B *dims"],
+        t: Float[torch.Tensor, " B"],
+        condition: Float[torch.Tensor, " B *cond_dims"] | TensorDict | None = None,
         **model_kwargs: Any,
-    ) -> Float[torch.Tensor, "B *dims"]:  # noqa: F821
+    ) -> Float[torch.Tensor, " B *dims"]:
         r"""
         Forward pass of the diffusion model.
 
