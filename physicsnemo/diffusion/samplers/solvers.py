@@ -75,10 +75,10 @@ class Solver(Protocol):
 
     def step(
         self,
-        x: Float[Tensor, "B *dims"],  # noqa: F821
-        t_cur: Float[Tensor, "B"],  # noqa: F821
-        t_next: Float[Tensor, "B"],  # noqa: F821
-    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        x: Float[Tensor, " B *dims"],
+        t_cur: Float[Tensor, " B"],
+        t_next: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
         r"""
         Perform one integration step from ``t_cur`` to ``t_next``.
 
@@ -140,10 +140,10 @@ class EulerSolver(Solver):
 
     def step(
         self,
-        x: Float[Tensor, "B *dims"],  # noqa: F821
-        t_cur: Float[Tensor, "B"],  # noqa: F821
-        t_next: Float[Tensor, "B"],  # noqa: F821
-    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        x: Float[Tensor, " B *dims"],
+        t_cur: Float[Tensor, " B"],
+        t_next: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
         r"""
         Perform one Euler integration step.
 
@@ -222,10 +222,10 @@ class HeunSolver(Solver):
 
     def step(
         self,
-        x: Float[Tensor, "B *dims"],  # noqa: F821
-        t_cur: Float[Tensor, "B"],  # noqa: F821
-        t_next: Float[Tensor, "B"],  # noqa: F821
-    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        x: Float[Tensor, " B *dims"],
+        t_cur: Float[Tensor, " B"],
+        t_next: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
         r"""
         Perform one Heun integration step.
 
@@ -420,10 +420,10 @@ class EDMStochasticEulerSolver(Solver):
 
     def step(
         self,
-        x: Float[Tensor, "B *dims"],  # noqa: F821
-        t_cur: Float[Tensor, "B"],  # noqa: F821
-        t_next: Float[Tensor, "B"],  # noqa: F821
-    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        x: Float[Tensor, " B *dims"],
+        t_cur: Float[Tensor, " B"],
+        t_next: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
         r"""
         Perform one stochastic Euler sampling step.
 
@@ -644,10 +644,10 @@ class EDMStochasticHeunSolver(Solver):
 
     def step(
         self,
-        x: Float[Tensor, "B *dims"],  # noqa: F821
-        t_cur: Float[Tensor, "B"],  # noqa: F821
-        t_next: Float[Tensor, "B"],  # noqa: F821
-    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        x: Float[Tensor, " B *dims"],
+        t_cur: Float[Tensor, " B"],
+        t_next: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
         r"""
         Perform one stochastic Heun sampling step.
 

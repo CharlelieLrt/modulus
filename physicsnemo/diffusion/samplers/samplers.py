@@ -40,34 +40,16 @@ SOLVERS: Dict[str, type[Solver]] = {
 }
 
 
-# TODO-CURSOR: I changed my mind about the xN argument, we will keep it as it
-# is now. Just double check the entire sample function below, including this
-# documentation and make sure that:
-# - its docstring has maximal alignment with the noise_schedulers.py in terms
-#   of explanation and examples. In particular, we will revise the examples and
-#   have 3 examples in the docstring.
-#   The first example should be as simple as possible, and the two other
-#   examples should have incremental complexity, but still remain as crisp as
-#   possible. The second example should show a little more customization in the
-#  argument passed to the sample function. The last examples should show that
-#  it's not necessary to actually import anything from noise_schedulers.py. It
-#  should just define a scheduler from scratch using the base NoiseScheduler
-#  protocol (kinda bare bone maximal flexibility approach).
-# - You will double check the signatures of all methods from the
-#   noise_schedulers to make sure that they are consistent with the base NoiseScheduler
-#   protocol.
-
-
 def sample(
     denoiser: DiffusionDenoiser,
-    xN: Float[Tensor, "B *dims"],  # noqa: F821
+    xN: Float[Tensor, " B *dims"],
     noise_scheduler: NoiseScheduler,
     num_steps: int,
     solver: str | Solver = "heun",
-    time_steps: Float[Tensor, "N"] | None = None,  # noqa: F821
+    time_steps: Float[Tensor, " N"] | None = None,
     solver_options: Dict[str, Any] | None = None,
     time_eval: list[int] | None = None,
-) -> Float[Tensor, "B *dims"] | List[Float[Tensor, "B *dims"]]:  # noqa: F821
+) -> Float[Tensor, " B *dims"] | List[Float[Tensor, " B *dims"]]:
     r"""
     Generate batched samples from a diffusion model.
 
@@ -215,51 +197,81 @@ def sample(
 
     Examples
     --------
-
-    # TODO-CURSOR: these exxamples are okay-ish, but that's mot really what I
-    was thinking of.
-    - In examples 1 and 2 the denoiser should be coming from the
-    noise scheduler itself, not from the user. That's the normal usage pattern.
-    In the example 3 it can be created by the user from scratch.
-    **Example 1:** Minimal usage with built-in noise scheduler.
-    - Same thing for the xN which should be coming from the noise scheduler
-    itself, with the init_latents method.
+    **Example 1:** Minimal usage. Just provide a denoiser, initial noise, a
+    scheduler, and the number of steps.
 
     >>> import torch
     >>> from physicsnemo.diffusion.samplers import sample
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
     >>>
+    >>> # Toy denoiser (in practice, this would be a trained neural network)
     >>> denoiser = lambda x, t: x * 0.9
     >>> scheduler = EDMNoiseScheduler()
-    >>> xN = torch.randn(2, 3, 8, 8) * 80
+    >>> xN = torch.randn(2, 3, 8, 8) * 80  # Initial noise scaled by sigma_max
     >>> x0 = sample(denoiser, xN, scheduler, num_steps=10)
     >>> x0.shape
     torch.Size([2, 3, 8, 8])
 
-    **Example 2:** Using custom time-steps and the Euler solver for faster
-    sampling.
+    **Example 2:** Standard pattern using scheduler methods. Use
+    ``init_latents`` to generate initial noise and ``get_denoiser`` to convert
+    an x0-predictor to a proper denoiser for sampling.
 
     >>> import torch
     >>> from physicsnemo.diffusion.samplers import sample
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
     >>>
-    >>> denoiser = lambda x, t: x * 0.9
     >>> scheduler = EDMNoiseScheduler()
-    >>> xN = torch.randn(2, 3, 8, 8) * 80
+    >>> t_steps = scheduler.timesteps(10)
+    >>> tN = t_steps[0].expand(2)  # Initial time for batch of 2
+    >>>
+    >>> # Use scheduler to generate initial latents at time tN
+    >>> xN = scheduler.init_latents((3, 8, 8), tN)
+    >>>
+    >>> # Convert x0-predictor to score predictor, then to ODE denoiser
+    >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
+    >>> def score_predictor(x, t):
+    ...     x0_pred = x0_predictor(x, t)
+    ...     return scheduler.x0_to_score(x0_pred, x, t)
+    >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+    >>>
+    >>> x0 = sample(denoiser, xN, scheduler, num_steps=10)
+    >>> x0.shape
+    torch.Size([2, 3, 8, 8])
+
+    **Example 3:** Custom time-steps and solver. Same as Example 2, but using
+    explicit time-steps and the faster (but lower quality) Euler solver.
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.samplers import sample
+    >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+    >>>
+    >>> scheduler = EDMNoiseScheduler()
+    >>>
+    >>> # Custom time-steps (fewer steps for faster sampling)
     >>> custom_t = torch.tensor([80.0, 40.0, 20.0, 10.0, 5.0, 0.0])
+    >>> tN = custom_t[0].expand(2)
+    >>> xN = scheduler.init_latents((3, 8, 8), tN)
+    >>>
+    >>> # Same denoiser setup as Example 2
+    >>> x0_predictor = lambda x, t: x * 0.9
+    >>> def score_predictor(x, t):
+    ...     return scheduler.x0_to_score(x0_predictor(x, t), x, t)
+    >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+    >>>
+    >>> # Use custom time-steps and Euler solver (num_steps ignored)
     >>> x0 = sample(denoiser, xN, scheduler, num_steps=0, time_steps=custom_t,
     ...             solver="euler")
     >>> x0.shape
     torch.Size([2, 3, 8, 8])
 
-    **Example 3:** Bare-bone approach defining a custom scheduler from scratch
-    without importing any noise scheduler class. Any object implementing the
-    :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler` protocol
-    can be used:
+    **Example 4:** Bare-bone custom scheduler. Define a scheduler from scratch
+    implementing the :class:`NoiseScheduler` protocol, without importing any
+    built-in scheduler class.
 
     >>> import torch
     >>> from physicsnemo.diffusion.samplers import sample
     >>>
+    >>> # Define a minimal scheduler implementing the NoiseScheduler protocol
     >>> class MinimalScheduler:
     ...     def timesteps(self, num_steps, *, device=None, dtype=None):
     ...         return torch.linspace(1.0, 0.0, num_steps + 1,
@@ -270,14 +282,17 @@ def sample(
     ...         return x0 + time.view(-1, 1, 1, 1) * torch.randn_like(x0)
     ...     def init_latents(self, spatial_shape, tN, *, device=None,
     ...                      dtype=None):
-    ...         return torch.randn(tN.shape[0], *spatial_shape,
-    ...                            device=device, dtype=dtype)
+    ...         return tN.view(-1, 1, 1, 1) * torch.randn(
+    ...             tN.shape[0], *spatial_shape, device=device, dtype=dtype)
     ...     def get_denoiser(self, denoiser_in, **kwargs):
-    ...         return denoiser_in
+    ...         return denoiser_in  # Pass-through for ODE RHS
     >>>
-    >>> denoiser = lambda x, t: x * 0.9
     >>> scheduler = MinimalScheduler()
-    >>> xN = torch.randn(2, 3, 8, 8)
+    >>> tN = torch.tensor([1.0, 1.0])
+    >>> xN = scheduler.init_latents((3, 8, 8), tN)
+    >>>
+    >>> # For this minimal scheduler, denoiser is used directly as ODE RHS
+    >>> denoiser = lambda x, t: -x  # Simple mean-reverting ODE: dx/dt = -x
     >>> x0 = sample(denoiser, xN, scheduler, num_steps=10, solver="euler")
     >>> x0.shape
     torch.Size([2, 3, 8, 8])

@@ -86,7 +86,7 @@ class NoiseScheduler(Protocol):
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "N"]:  # noqa: F821
+    ) -> Float[Tensor, " N"]:
         r"""
         Sample N diffusion time values for training.
 
@@ -111,9 +111,9 @@ class NoiseScheduler(Protocol):
 
     def add_noise(
         self,
-        x0: Float[Tensor, "B *dims"],  # noqa: F821
-        time: Float[Tensor, "B"],  # noqa: F821
-    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        x0: Float[Tensor, " B *dims"],
+        time: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
         r"""
         Add noise to clean data at the given diffusion times.
 
@@ -139,7 +139,7 @@ class NoiseScheduler(Protocol):
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "N+1"]:  # noqa: F821
+    ) -> Float[Tensor, " N+1"]:
         r"""
         Generate discrete time-steps for sampling.
 
@@ -165,11 +165,11 @@ class NoiseScheduler(Protocol):
     def init_latents(
         self,
         spatial_shape: Tuple[int, ...],
-        tN: Float[Tensor, "B"],  # noqa: F821
+        tN: Float[Tensor, " B"],
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "B *spatial_shape"]:  # noqa: F821
+    ) -> Float[Tensor, " B *spatial_shape"]:
         r"""
         Initialize the noisy latent state :math:`\mathbf{x}_N` for sampling.
 
@@ -332,18 +332,23 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     ...         return -0.5 * x
     ...
     >>> custom = CustomDriftScheduler()
-
-    # TODO-CURSOR: the second example is great. Just add a few lines at the end
-    of the test to actually test the drift method (through the get_denoiser
-    method actually, since drift is usually not supposed to be directly called).
+    >>>
+    >>> # The custom drift is used internally by get_denoiser
+    >>> score_pred = lambda x, t: -x / t.view(-1, 1)**2  # Toy score predictor
+    >>> denoiser = custom.get_denoiser(score_pred, "ode")
+    >>> x = torch.randn(2, 4)
+    >>> t = torch.tensor([1.0, 1.0])
+    >>> out = denoiser(x, t)  # Uses custom drift in ODE RHS computation
+    >>> out.shape
+    torch.Size([2, 4])
 
     """
 
     @abstractmethod
     def sigma(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""
         Map diffusion time to noise level :math:`\sigma(t)`.
 
@@ -364,8 +369,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     @abstractmethod
     def sigma_inv(
         self,
-        sigma: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        sigma: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""
         Map noise level back to diffusion time.
 
@@ -386,8 +391,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     @abstractmethod
     def sigma_dot(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""
         Compute time derivative of noise level :math:`\dot{\sigma}(t)`.
 
@@ -408,8 +413,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     @abstractmethod
     def alpha(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""
         Compute the signal coefficient :math:`\alpha(t)`.
 
@@ -430,8 +435,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     @abstractmethod
     def alpha_dot(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""
         Compute time derivative of signal coefficient :math:`\dot{\alpha}(t)`.
 
@@ -456,7 +461,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "N+1"]:  # noqa: F821
+    ) -> Float[Tensor, " N+1"]:
         r"""
         Generate discrete time-steps for sampling.
 
@@ -487,7 +492,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "N"]:  # noqa: F821
+    ) -> Float[Tensor, " N"]:
         r"""
         Sample N diffusion time values for training.
 
@@ -512,9 +517,9 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
     def drift(
         self,
-        x: Float[Tensor, "B *dims"],  # noqa: F821
-        t: Float[Tensor, "B"],  # noqa: F821
-    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        x: Float[Tensor, " B *dims"],
+        t: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
         r"""
         Compute drift term :math:`f(\mathbf{x}, t)` for ODE/SDE sampling.
 
@@ -544,9 +549,9 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
     def diffusion(
         self,
-        x: Float[Tensor, "B *dims"],  # noqa: F821
-        t: Float[Tensor, "B"],  # noqa: F821
-    ) -> Float[Tensor, "B #*dims"]:  # noqa: F821
+        x: Float[Tensor, " B *dims"],
+        t: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *_"]:
         r"""
         Compute squared diffusion term :math:`g^2(\mathbf{x}, t)`.
 
@@ -581,10 +586,10 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
     def x0_to_score(
         self,
-        x0: Float[Tensor, "B *dims"],  # noqa: F821
-        x_t: Float[Tensor, "B *dims"],  # noqa: F821
-        t: Float[Tensor, "B"],  # noqa: F821
-    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        x0: Float[Tensor, " B *dims"],
+        x_t: Float[Tensor, " B *dims"],
+        t: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
         r"""
         Convert x0-predictor output to score.
 
@@ -679,15 +684,22 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
         Examples
         --------
-
-        # TODO-CURSOR: this example is good, but maybe better if you actually
-        do the x0_to_score conversion to score predictor in the example for
-        completeness.
-
+        >>> import torch
         >>> scheduler = EDMNoiseScheduler()
-        >>> # Create a score predictor (or convert x0-predictor first)
-        >>> score_predictor = lambda x, t: -x / t.view(-1, 1, 1, 1)**2
+        >>>
+        >>> # Convert x0-predictor to score predictor, then to ODE denoiser
+        >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
+        >>> def score_predictor(x, t):
+        ...     x0_pred = x0_predictor(x, t)
+        ...     return scheduler.x0_to_score(x0_pred, x, t)
+        >>>
+        >>> # Then use get_denoiser to create the ODE right-hand side
         >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+        >>> x = torch.randn(2, 3, 8, 8)
+        >>> t = torch.tensor([1.0, 1.0])
+        >>> dx_dt = denoiser(x, t)  # Returns ODE RHS for sampling
+        >>> dx_dt.shape
+        torch.Size([2, 3, 8, 8])
         """
         # Capture methods as local variables to avoid referencing self
         drift = self.drift
@@ -698,7 +710,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
             def ode_denoiser(
                 x: Float[Tensor, "B *dims"],  # noqa: F821
                 t: Float[Tensor, "B"],  # noqa: F821
-            ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+            ) -> Float[Tensor, " B *dims"]:
                 score = denoiser_in(x, t)
                 f = drift(x, t)
                 g_sq = diffusion(x, t)
@@ -712,7 +724,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
             def sde_denoiser(
                 x: Float[Tensor, "B *dims"],  # noqa: F821
                 t: Float[Tensor, "B"],  # noqa: F821
-            ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+            ) -> Float[Tensor, " B *dims"]:
                 score = denoiser_in(x, t)
                 f = drift(x, t)
                 g_sq = diffusion(x, t)
@@ -730,9 +742,9 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
     def add_noise(
         self,
-        x0: Float[Tensor, "B *dims"],  # noqa: F821
-        time: Float[Tensor, "B"],  # noqa: F821
-    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        x0: Float[Tensor, " B *dims"],
+        time: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
         r"""
         Add noise to clean data at the given diffusion times.
 
@@ -768,11 +780,11 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     def init_latents(
         self,
         spatial_shape: Tuple[int, ...],
-        tN: Float[Tensor, "B"],  # noqa: F821
+        tN: Float[Tensor, " B"],
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "B *spatial_shape"]:  # noqa: F821
+    ) -> Float[Tensor, " B *spatial_shape"]:
         r"""
         Initialize the noisy latent state :math:`\mathbf{x}_N` for sampling.
 
@@ -847,14 +859,6 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
     --------
     Basic training and sampling workflow using the EDM noise scheduler:
 
-    # TODO-CURSOR: this example is great, I really like it! Just one deatil: to
-    illustrate a complete workflow we would also like to show the usage of the
-    get_denoiser method (from an x0-predictor to a score predictor), in order
-    to generate a denoiser that can be used for sampling. Just add a few lines
-    in the #sampling part of this example to illustrate the usage of the
-    get_denoiser method. Also do that for the VENoiseScheduler and the
-    IDDPMNoiseScheduler.
-
     >>> import torch
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
     >>>
@@ -873,6 +877,14 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
     >>> xN = scheduler.init_latents((3, 8, 8), tN)  # Initial noise
     >>> xN.shape
     torch.Size([4, 3, 8, 8])
+    >>>
+    >>> # Convert x0-predictor to denoiser for sampling
+    >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
+    >>> def score_predictor(x, t):
+    ...     return scheduler.x0_to_score(x0_predictor(x, t), x, t)
+    >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+    >>> denoiser(xN, tN).shape  # ODE RHS for sampling
+    torch.Size([4, 3, 8, 8])
     """
 
     def __init__(
@@ -887,36 +899,36 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
 
     def sigma(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Identity mapping: :math:`\sigma(t) = t`."""
         return t
 
     def sigma_inv(
         self,
-        sigma: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        sigma: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Identity mapping: :math:`t = \sigma`."""
         return sigma
 
     def sigma_dot(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Constant derivative: :math:`\dot{\sigma}(t) = 1`."""
         return torch.ones_like(t)
 
     def alpha(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Constant signal coefficient: :math:`\alpha(t) = 1`."""
         return torch.ones_like(t)
 
     def alpha_dot(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Zero derivative: :math:`\dot{\alpha}(t) = 0`."""
         return torch.zeros_like(t)
 
@@ -926,7 +938,7 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "N+1"]:  # noqa: F821
+    ) -> Float[Tensor, " N+1"]:
         r"""
         Generate EDM time-steps with polynomial spacing.
 
@@ -960,7 +972,7 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "N"]:  # noqa: F821
+    ) -> Float[Tensor, " N"]:
         r"""
         Sample N diffusion times log-uniformly in :math:`[\sigma_{min},
         \sigma_{max}]`.
@@ -1034,6 +1046,14 @@ class VENoiseScheduler(LinearGaussianNoiseScheduler):
     >>> xN = scheduler.init_latents((3, 8, 8), tN)  # Initial noise
     >>> xN.shape
     torch.Size([4, 3, 8, 8])
+    >>>
+    >>> # Convert x0-predictor to denoiser for sampling
+    >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
+    >>> def score_predictor(x, t):
+    ...     return scheduler.x0_to_score(x0_predictor(x, t), x, t)
+    >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+    >>> denoiser(xN, tN).shape  # ODE RHS for sampling
+    torch.Size([4, 3, 8, 8])
     """
 
     def __init__(
@@ -1046,36 +1066,36 @@ class VENoiseScheduler(LinearGaussianNoiseScheduler):
 
     def sigma(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""VE noise coefficient: :math:`\sigma(t) = \sqrt{t}`."""
         return t.sqrt()
 
     def sigma_inv(
         self,
-        sigma: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        sigma: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Inverse VE mapping: :math:`t = \sigma^2`."""
         return sigma**2
 
     def sigma_dot(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Time derivative: :math:`\dot{\sigma}(t) = 1/(2\sqrt{t})`."""
         return 0.5 / t.sqrt()
 
     def alpha(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Constant signal coefficient: :math:`\alpha(t) = 1`."""
         return torch.ones_like(t)
 
     def alpha_dot(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Zero derivative: :math:`\dot{\alpha}(t) = 0`."""
         return torch.zeros_like(t)
 
@@ -1085,7 +1105,7 @@ class VENoiseScheduler(LinearGaussianNoiseScheduler):
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "N+1"]:  # noqa: F821
+    ) -> Float[Tensor, " N+1"]:
         r"""
         Generate VE time-steps with geometric spacing in :math:`\sigma^2`.
 
@@ -1116,7 +1136,7 @@ class VENoiseScheduler(LinearGaussianNoiseScheduler):
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "N"]:  # noqa: F821
+    ) -> Float[Tensor, " N"]:
         r"""
         Sample N diffusion times log-uniformly in sigma space, mapped to time.
 
@@ -1194,6 +1214,14 @@ class IDDPMNoiseScheduler(LinearGaussianNoiseScheduler):
     >>> xN = scheduler.init_latents((3, 8, 8), tN)  # Initial noise
     >>> xN.shape
     torch.Size([4, 3, 8, 8])
+    >>>
+    >>> # Convert x0-predictor to denoiser for sampling
+    >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
+    >>> def score_predictor(x, t):
+    ...     return scheduler.x0_to_score(x0_predictor(x, t), x, t)
+    >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+    >>> denoiser(xN, tN).shape  # ODE RHS for sampling
+    torch.Size([4, 3, 8, 8])
     """
 
     def __init__(
@@ -1228,36 +1256,36 @@ class IDDPMNoiseScheduler(LinearGaussianNoiseScheduler):
 
     def sigma(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""For iDDPM, :math:`\sigma(t) = t` (identity mapping)."""
         return t
 
     def sigma_inv(
         self,
-        sigma: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        sigma: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""For iDDPM, :math:`t = \sigma` (identity mapping)."""
         return sigma
 
     def sigma_dot(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Constant derivative: :math:`\dot{\sigma}(t) = 1`."""
         return torch.ones_like(t)
 
     def alpha(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Constant signal coefficient: :math:`\alpha(t) = 1`."""
         return torch.ones_like(t)
 
     def alpha_dot(
         self,
-        t: Float[Tensor, "*shape"],  # noqa: F821
-    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
         r"""Zero derivative: :math:`\dot{\alpha}(t) = 0`."""
         return torch.zeros_like(t)
 
@@ -1267,7 +1295,7 @@ class IDDPMNoiseScheduler(LinearGaussianNoiseScheduler):
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "N+1"]:  # noqa: F821
+    ) -> Float[Tensor, " N+1"]:
         r"""
         Generate iDDPM time-steps from precomputed schedule.
 
@@ -1307,7 +1335,7 @@ class IDDPMNoiseScheduler(LinearGaussianNoiseScheduler):
         *,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
-    ) -> Float[Tensor, "N"]:  # noqa: F821
+    ) -> Float[Tensor, " N"]:
         r"""
         Sample N diffusion times uniformly from precomputed schedule.
 
@@ -1331,3 +1359,385 @@ class IDDPMNoiseScheduler(LinearGaussianNoiseScheduler):
         # Sample random indices
         indices = torch.randint(0, len(u_filtered), (N,), device=device)
         return u_filtered[indices]
+
+
+class VPNoiseScheduler(LinearGaussianNoiseScheduler):
+    r"""
+    Variance Preserving (VP) noise scheduler.
+
+    Implements the VP formulation where the total variance is preserved:
+    :math:`\alpha(t)^2 + \sigma(t)^2 = 1`. This is based on a linear beta
+    schedule: :math:`\beta(t) = \beta_{\min} + t \cdot \beta_d`.
+
+    The noise and signal coefficients are:
+
+    .. math::
+        \alpha(t) = \exp\left(-\frac{1}{2}
+        \left(\frac{\beta_d}{2} t^2 + \beta_{\min} t\right)\right)
+
+    .. math::
+        \sigma(t) = \sqrt{1 - \alpha(t)^2}
+        = \sqrt{1 - \exp\left(-\frac{\beta_d}{2} t^2
+        - \beta_{\min} t\right)}
+
+    **Sampling time-steps** are linearly spaced from ``t_max`` (usually 1) to
+    ``epsilon_s`` (small positive value to avoid singularities).
+
+    **Training times** are sampled uniformly between ``epsilon_s`` and
+    ``t_max``.
+
+    Parameters
+    ----------
+    beta_min : float, optional
+        Minimum beta value for the linear schedule, by default 0.1.
+    beta_d : float, optional
+        Beta slope (delta) for the linear schedule, by default 19.1.
+    epsilon_s : float, optional
+        Small positive value for minimum time, by default 1e-3.
+    t_max : float, optional
+        Maximum diffusion time, by default 1.0.
+
+    Note
+    ----
+    Reference: `Score-Based Generative Modeling through Stochastic
+    Differential Equations <https://arxiv.org/abs/2011.13456>`_
+
+    Examples
+    --------
+    Basic training and sampling workflow using the VP noise scheduler:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.noise_schedulers import VPNoiseScheduler
+    >>>
+    >>> scheduler = VPNoiseScheduler(beta_min=0.1, beta_d=19.1)
+    >>>
+    >>> # Training: sample times and add noise
+    >>> x0 = torch.randn(4, 3, 8, 8)  # Clean data
+    >>> t = scheduler.sample_time(4)    # Sample diffusion times
+    >>> x_t = scheduler.add_noise(x0, t)  # Create noisy samples
+    >>> x_t.shape
+    torch.Size([4, 3, 8, 8])
+    >>>
+    >>> # Sampling: generate timesteps and initial latents
+    >>> t_steps = scheduler.timesteps(10)
+    >>> tN = t_steps[0].expand(4)  # Initial time for batch of 4
+    >>> xN = scheduler.init_latents((3, 8, 8), tN)  # Initial noise
+    >>> xN.shape
+    torch.Size([4, 3, 8, 8])
+    >>>
+    >>> # Convert x0-predictor to denoiser for sampling
+    >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
+    >>> def score_predictor(x, t):
+    ...     return scheduler.x0_to_score(x0_predictor(x, t), x, t)
+    >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+    >>> denoiser(xN, tN).shape  # ODE RHS for sampling
+    torch.Size([4, 3, 8, 8])
+    """
+
+    def __init__(
+        self,
+        beta_min: float = 0.1,
+        beta_d: float = 19.1,
+        epsilon_s: float = 1e-3,
+        t_max: float = 1.0,
+    ) -> None:
+        self.beta_min = beta_min
+        self.beta_d = beta_d
+        self.epsilon_s = epsilon_s
+        self.t_max = t_max
+
+    def _exponent(
+        self,
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""Compute exponent: :math:`a(t) = \frac{\beta_d}{2} t^2 + \beta_{\min} t`."""
+        return 0.5 * self.beta_d * t**2 + self.beta_min * t
+
+    def alpha(
+        self,
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""Signal coefficient: :math:`\alpha(t) = \exp(-a(t)/2)`."""
+        return torch.exp(-0.5 * self._exponent(t))
+
+    def alpha_dot(
+        self,
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""Derivative: :math:`\dot{\alpha}(t) = -\frac{\beta(t)}{2} \alpha(t)`."""
+        beta_t = self.beta_min + self.beta_d * t
+        return -0.5 * beta_t * self.alpha(t)
+
+    def sigma(
+        self,
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""Noise level: :math:`\sigma(t) = \sqrt{1 - \alpha(t)^2}`."""
+        alpha_sq = self.alpha(t) ** 2
+        return torch.sqrt(1 - alpha_sq)
+
+    def sigma_dot(
+        self,
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""Derivative: :math:`\dot{\sigma}(t) = -\alpha(t) \dot{\alpha}(t) / \sigma(t)`."""  # noqa: E501
+        alpha_t = self.alpha(t)
+        sigma_t = self.sigma(t)
+        alpha_dot_t = self.alpha_dot(t)
+        # d/dt sqrt(1 - alpha^2) = -alpha * alpha_dot / sqrt(1 - alpha^2)
+        return -alpha_t * alpha_dot_t / sigma_t
+
+    def sigma_inv(
+        self,
+        sigma: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""
+        Inverse mapping from sigma to time.
+
+        Solves: :math:`\sigma^2 = 1 - \exp(-a(t))` for :math:`t`.
+        """
+        # sigma^2 = 1 - exp(-a) => a = -log(1 - sigma^2)
+        # a = beta_d/2 * t^2 + beta_min * t
+        # Quadratic: beta_d * t^2 + 2*beta_min * t + 2*log(1-sigma^2) = 0
+        log_term = torch.log(1 - sigma**2 + 1e-8)  # small eps for stability
+        discriminant = self.beta_min**2 - 2 * self.beta_d * log_term
+        return (-self.beta_min + torch.sqrt(discriminant.clamp(min=0))) / self.beta_d
+
+    def timesteps(
+        self,
+        num_steps: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, " N+1"]:
+        r"""
+        Generate VP time-steps with linear spacing.
+
+        Parameters
+        ----------
+        num_steps : int
+            Number of sampling steps.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Time-steps tensor of shape :math:`(N + 1,)`.
+        """
+        # Linear spacing from t_max to epsilon_s
+        step_indices = torch.arange(num_steps, dtype=dtype, device=device)
+        frac = step_indices / (num_steps - 1)
+        t_steps = self.t_max + frac * (self.epsilon_s - self.t_max)
+        zero = torch.zeros(1, dtype=dtype, device=device)
+        return torch.cat([t_steps, zero])
+
+    def sample_time(
+        self,
+        N: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, " N"]:
+        r"""
+        Sample N diffusion times uniformly in :math:`[\epsilon_s, t_{max}]`.
+
+        Parameters
+        ----------
+        N : int
+            Number of time values to sample.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Sampled diffusion times of shape :math:`(N,)`.
+        """
+        u = torch.rand(N, device=device, dtype=dtype)
+        return self.epsilon_s + u * (self.t_max - self.epsilon_s)
+
+
+class StudentTEDMNoiseScheduler(EDMNoiseScheduler):
+    r"""
+    Student-t EDM noise scheduler for heavy-tailed diffusion models.
+
+    Extends :class:`EDMNoiseScheduler` to use Student-t noise instead of
+    Gaussian noise. This is useful for modeling heavy-tailed distributions
+    and can improve sample quality for certain data types.
+
+    The main differences from standard EDM are:
+
+    - **Training**: Noise is sampled from a Student-t distribution
+    - **Sampling**: Initial latents are Student-t distributed
+
+    The Student-t distribution is parameterized by degrees of freedom ``nu``.
+    As ``nu`` increases, the distribution approaches Gaussian. Lower values of
+    ``nu`` produce heavier tails.
+
+    Parameters
+    ----------
+    sigma_min : float, optional
+        Minimum noise level, by default 0.002.
+    sigma_max : float, optional
+        Maximum noise level, by default 80.
+    rho : float, optional
+        Exponent controlling time-step spacing, by default 7.
+    nu : int, optional
+        Degrees of freedom for Student-t distribution. Must be > 2.
+        By default 10.
+
+    Note
+    ----
+    Reference: `Heavy-Tailed Diffusion Models
+    <https://arxiv.org/abs/2410.14171>`_
+
+    Examples
+    --------
+    Basic training and sampling workflow with Student-t noise:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.noise_schedulers import (
+    ...     StudentTEDMNoiseScheduler,
+    ... )
+    >>>
+    >>> scheduler = StudentTEDMNoiseScheduler(nu=10)
+    >>>
+    >>> # Training: sample times and add Student-t noise
+    >>> x0 = torch.randn(4, 3, 8, 8)  # Clean data
+    >>> t = scheduler.sample_time(4)    # Sample diffusion times
+    >>> x_t = scheduler.add_noise(x0, t)  # Adds Student-t noise
+    >>> x_t.shape
+    torch.Size([4, 3, 8, 8])
+    >>>
+    >>> # Sampling: generate timesteps and Student-t initial latents
+    >>> t_steps = scheduler.timesteps(10)
+    >>> tN = t_steps[0].expand(4)
+    >>> xN = scheduler.init_latents((3, 8, 8), tN)  # Student-t latents
+    >>> xN.shape
+    torch.Size([4, 3, 8, 8])
+    """
+
+    def __init__(
+        self,
+        sigma_min: float = 0.002,
+        sigma_max: float = 80.0,
+        rho: float = 7.0,
+        nu: int = 10,
+    ) -> None:
+        if nu <= 2:
+            raise ValueError(f"nu must be > 2, got {nu}")
+        super().__init__(sigma_min=sigma_min, sigma_max=sigma_max, rho=rho)
+        self.nu = nu
+
+    def _sample_student_t(
+        self,
+        shape: Tuple[int, ...],
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Tensor:
+        r"""
+        Sample from standard Student-t distribution.
+
+        Student-t samples are generated as: :math:`X / \sqrt{V / \nu}` where
+        :math:`X \sim \mathcal{N}(0, 1)` and :math:`V \sim \chi^2(\nu)`.
+
+        Parameters
+        ----------
+        shape : Tuple[int, ...]
+            Shape of the output tensor.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Student-t samples of the specified shape.
+        """
+        # Sample standard normal
+        normal = torch.randn(shape, device=device, dtype=dtype)
+
+        # Sample chi-squared and compute scaling
+        chi2_dist = torch.distributions.Chi2(df=self.nu)
+        chi2_samples = chi2_dist.sample((shape[0],))
+        if device is not None:
+            chi2_samples = chi2_samples.to(device)
+        if dtype is not None:
+            chi2_samples = chi2_samples.to(dtype)
+
+        # kappa = chi2 / nu, reshape for broadcasting
+        kappa = chi2_samples / self.nu
+        kappa = kappa.view(-1, *([1] * (len(shape) - 1)))
+
+        # Student-t = normal / sqrt(kappa)
+        return normal / torch.sqrt(kappa)
+
+    def add_noise(
+        self,
+        x0: Float[Tensor, " B *dims"],
+        time: Float[Tensor, " B"],
+    ) -> Float[Tensor, " B *dims"]:
+        r"""
+        Add Student-t noise to clean data at the given diffusion times.
+
+        Implements: :math:`\mathbf{x}(t) = \mathbf{x}_0 + \sigma(t) \mathbf{n}`
+        where :math:`\mathbf{n}` is Student-t noise.
+
+        Parameters
+        ----------
+        x0 : Tensor
+            Clean latent state of shape :math:`(B, *)`.
+        time : Tensor
+            Diffusion time values of shape :math:`(B,)`.
+
+        Returns
+        -------
+        Tensor
+            Noisy latent state of shape :math:`(B, *)`.
+        """
+        t_bc = time.reshape(-1, *([1] * (x0.ndim - 1)))
+        sigma_t_bc = self.sigma(t_bc)
+        noise = self._sample_student_t(x0.shape, device=x0.device, dtype=x0.dtype)
+        return x0 + sigma_t_bc * noise
+
+    def init_latents(
+        self,
+        spatial_shape: Tuple[int, ...],
+        tN: Float[Tensor, " B"],
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, " B *spatial_shape"]:
+        r"""
+        Initialize noisy latent state with Student-t noise.
+
+        Generates: :math:`\mathbf{x}_N = \sigma(t_N) \cdot \mathbf{n}`
+        where :math:`\mathbf{n}` is Student-t noise.
+
+        Parameters
+        ----------
+        spatial_shape : Tuple[int, ...]
+            Spatial shape of the latent state, e.g., ``(C, H, W)``.
+        tN : Tensor
+            Initial diffusion time of shape :math:`(B,)`.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Initial noisy latent of shape :math:`(B, *spatial\_shape)`.
+        """
+        B = tN.shape[0]
+        noise = self._sample_student_t((B, *spatial_shape), device=device, dtype=dtype)
+        tN_bc = tN.reshape(-1, *([1] * len(spatial_shape)))
+        sigma_tN_bc = self.sigma(tN_bc)
+        return sigma_tN_bc * noise
