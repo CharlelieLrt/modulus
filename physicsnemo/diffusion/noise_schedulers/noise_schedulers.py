@@ -18,114 +18,132 @@
 
 import math
 from abc import ABC, abstractmethod
+from typing import Any, Literal, Protocol, Tuple, runtime_checkable
 
 import torch
+from jaxtyping import Float
 from torch import Tensor
 
+from physicsnemo.diffusion.base import DiffusionDenoiser
 
-class NoiseScheduler(ABC):
+
+@runtime_checkable
+class NoiseScheduler(Protocol):
     r"""
-    Abstract base class for noise schedulers.
+    Protocol defining the minimal interface for noise schedulers.
 
-    A noise scheduler defines the relationship between diffusion time
-    :math:`t` and noise level :math:`\sigma`, as well as methods for
-    generating discrete time-steps for sampling.
+    A noise scheduler defines methods for training (adding noise, sampling
+    diffusion time) and for sampling (generating diffusion time-steps,
+    initializing latent state, obtaining a denoiser). This interface is generic
+    and does not assume any specific form of noise schedule.
 
-    Subclasses must implement:
+    Any object that implements this interface can be used with the diffusion
+    training and sampling utilities.
 
-    - :meth:`sigma`: Map diffusion time to noise level
-    - :meth:`sigma_inv`: Map noise level back to diffusion time
+    **Training methods:**
+
+    - :meth:`sample_time`: Sample diffusion time values for training
+    - :meth:`add_noise`: Add noise to clean data at given diffusion time
+
+    **Sampling methods:**
+
     - :meth:`timesteps`: Generate discrete time-steps for sampling
-
-    Parameters
-    ----------
-    sigma_min : float
-        Minimum noise level.
-    sigma_max : float
-        Maximum noise level.
+    - :meth:`init_latents`: Initialize noisy latent state :math:`\mathbf{x}_N`
+    - :meth:`get_denoiser`: Convert a denoiser to a sampling-compatible form
 
     See Also
     --------
-    :func:`~physicsnemo.diffusion.samplers.sample` : The sampling function that
-        uses noise schedulers to generate time-steps.
+    :class:`LinearGaussianNoiseScheduler` : base abstract class for
+        linear-Gaussian schedules. Implements the NoiseScheduler protocol.
+    :func:`~physicsnemo.diffusion.samplers.sample` : sampling function for
+        generating data samples from a diffusion model.
 
     Examples
     --------
-    To create a custom noise scheduler, subclass :class:`NoiseScheduler` and
-    implement the required methods:
-
     >>> import torch
-    >>> class LinearScheduler(NoiseScheduler):
-    ...     def __init__(self, sigma_min=0.002, sigma_max=80.0):
-    ...         super().__init__(sigma_min, sigma_max)
+    >>> from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
+    >>>
+    >>> class MyScheduler:
+    ...     def sample_time(self, N, device=None, dtype=None):
+    ...         return torch.rand(N, device=device, dtype=dtype)
+    ...     def add_noise(self, x0, time):
+    ...         return x0 + time.view(-1, 1) * torch.randn_like(x0)
+    ...     def timesteps(self, num_steps, device=None, dtype=None):
+    ...         return torch.linspace(1, 0, num_steps + 1, device=device)
+    ...     def init_latents(self, spatial_shape, tN, device=None, dtype=None):
+    ...         return torch.randn(tN.shape[0], *spatial_shape, device=device)
+    ...     def get_denoiser(self, denoiser_in):
+    ...         return denoiser_in
     ...
-    ...     def sigma(self, t: torch.Tensor) -> torch.Tensor:
-    ...         return t  # Linear: sigma(t) = t
-    ...
-    ...     def sigma_inv(self, sigma: torch.Tensor) -> torch.Tensor:
-    ...         return sigma  # Inverse: t = sigma
-    ...
-    ...     def timesteps(self, num_steps: int, device=None) -> torch.Tensor:
-    ...         smax, smin = self.sigma_max, self.sigma_min
-    ...         steps = torch.linspace(smax, smin, num_steps, device=device)
-    ...         return torch.cat([steps, torch.zeros(1, device=device)])
-    ...
-    >>> scheduler = LinearScheduler()
-    >>> t = scheduler.timesteps(5)
-    >>> t.shape
-    torch.Size([6])
+    >>> scheduler = MyScheduler()
+    >>> isinstance(scheduler, NoiseScheduler)
+    True
     """
 
-    def __init__(self, sigma_min: float, sigma_max: float) -> None:
-        self.sigma_min = sigma_min
-        self.sigma_max = sigma_max
-
-    @abstractmethod
-    def sigma(self, t: Tensor) -> Tensor:
+    def sample_time(
+        self,
+        N: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "N"]:  # noqa: F821
         r"""
-        Map diffusion time :math:`t` to noise level :math:`\sigma(t)`.
+        Sample N diffusion time values for training.
+
+        Used in training to sample random diffusion times, typically in the
+        denoising score matching loss.
 
         Parameters
         ----------
-        t : torch.Tensor
-            Diffusion time tensor of shape :math:`(N,)`.
+        N : int
+            Number of time values to sample.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
 
         Returns
         -------
-        torch.Tensor
-            Noise level :math:`\sigma(t)` of shape :math:`(N,)`.
+        Tensor
+            Sampled diffusion times of shape :math:`(N,)`.
         """
         ...
 
-    @abstractmethod
-    def sigma_inv(self, sigma: Tensor) -> Tensor:
+    def add_noise(
+        self,
+        x0: Float[Tensor, "B *dims"],  # noqa: F821
+        time: Float[Tensor, "B"],  # noqa: F821
+    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
         r"""
-        Map noise level :math:`\sigma` back to diffusion time :math:`t`.
+        Add noise to clean data at the given diffusion times.
+
+        Used in training to create noisy samples from clean data.
 
         Parameters
         ----------
-        sigma : torch.Tensor
-            Noise level tensor of shape :math:`(N,)`.
+        x0 : Tensor
+            Clean latent state of shape :math:`(B, *)`.
+        time : Tensor
+            Diffusion time values of shape :math:`(B,)`.
 
         Returns
         -------
-        torch.Tensor
-            Diffusion time :math:`t` of shape :math:`(N,)`.
+        Tensor
+            Noisy latent state of shape :math:`(B, *)`.
         """
         ...
 
-    @abstractmethod
     def timesteps(
         self,
         num_steps: int,
+        *,
         device: torch.device | None = None,
-        dtype: torch.dtype = torch.float64,
-    ) -> Tensor:
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "N+1"]:  # noqa: F821
         r"""
         Generate discrete time-steps for sampling.
 
-        The returned tensor should contain ``num_steps + 1`` values, with the
-        last value being 0 (corresponding to the final clean state).
+        Used in sampling to produce the sequence of diffusion times.
 
         Parameters
         ----------
@@ -134,7 +152,792 @@ class NoiseScheduler(ABC):
         device : torch.device, optional
             Device to place the tensor on.
         dtype : torch.dtype, optional
-            Data type of the tensor, by default ``torch.float64``.
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Time-steps tensor of shape :math:`(N + 1,)` in decreasing order,
+            with the last element being 0.
+        """
+        ...
+
+    def init_latents(
+        self,
+        spatial_shape: Tuple[int, ...],
+        tN: Float[Tensor, "B"],  # noqa: F821
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "B *spatial_shape"]:  # noqa: F821
+        r"""
+        Initialize the noisy latent state :math:`\mathbf{x}_N` for sampling.
+
+        Used in sampling to generate the initial condition at diffusion time
+        ``tN``.
+
+        Parameters
+        ----------
+        spatial_shape : Tuple[int, ...]
+            Spatial shape of the latent state, e.g., ``(C, H, W)``.
+        tN : Tensor
+            Initial diffusion time of shape :math:`(B,)`. Determines the noise
+            level for the initial latent state.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Initial noisy latent state of shape :math:`(B, *spatial\_shape)`.
+        """
+        ...
+
+    def get_denoiser(
+        self,
+        denoiser_in: DiffusionDenoiser,
+        **kwargs: Any,
+    ) -> DiffusionDenoiser:
+        r"""
+        Convert a denoiser to a sampling-compatible denoiser.
+
+        Used in sampling to transform a denoiser (e.g., an x0-predictor, score
+        predictor, or other) into a callable that returns a denoising term
+        compatible with the solver. The exact transformation depends on the
+        noise scheduler implementation.
+
+        Parameters
+        ----------
+        denoiser_in : DiffusionDenoiser
+            A callable that takes ``(x_t, t)`` and returns a denoising term.
+        **kwargs : Any
+            Additional keyword arguments (implementation-specific).
+
+        Returns
+        -------
+        DiffusionDenoiser
+            A callable that implements the
+            :class:`~physicsnemo.diffusion.base.DiffusionDenoiser` interface.
+        """
+        ...
+
+
+class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
+    r"""
+    Abstract base class for linear-Gaussian noise schedules.
+
+    It implements the :class:`NoiseScheduler` interface and it can be
+    subclassed to define custom linear-Gaussian noise schedules of the form:
+
+    .. math::
+        \mathbf{x}(t) = \alpha(t) \mathbf{x}_0
+        + \sigma(t) \boldsymbol{\epsilon}
+
+    where :math:`\boldsymbol{\epsilon} \sim \mathcal{N}(0, \mathbf{I})` is
+    standard Gaussian noise, :math:`\alpha(t)` is the signal coefficient, and
+    :math:`\sigma(t)` is the noise level.
+
+    **Training:**
+
+    The :meth:`add_noise` method implements the forward diffusion process using
+    the formula above. The :meth:`sample_time` method samples diffusion times.
+
+    **Sampling:**
+
+    For ODE-based sampling, the reverse process follows the probability flow
+    ODE:
+
+    .. math::
+        \frac{d\mathbf{x}}{dt} = f(\mathbf{x}, t)
+        - \frac{1}{2} g^2(\mathbf{x}, t) \nabla_{\mathbf{x}} \log p(\mathbf{x})
+
+    For SDE-based sampling:
+
+    .. math::
+        d\mathbf{x} = \left[ f(\mathbf{x}, t)
+        - g^2(\mathbf{x}, t) \nabla_{\mathbf{x}} \log p(\mathbf{x}) \right] dt
+        + g(\mathbf{x}, t) d\mathbf{W}
+
+    The :meth:`get_denoiser` method converts a **score predictor** into the
+    appropriate ODE/SDE right-hand side. If you have an x0-predictor, use
+    :meth:`x0_to_score` first to convert it to a score predictor.
+
+    **Abstract methods (must be implemented by subclasses):**
+
+    - :meth:`sigma`: Map time to noise level :math:`\sigma(t)`
+    - :meth:`sigma_inv`: Map noise level back to time
+    - :meth:`sigma_dot`: Time derivative :math:`\dot{\sigma}(t)`
+    - :meth:`alpha`: Compute the signal coefficient :math:`\alpha(t)`
+    - :meth:`alpha_dot`: Time derivative :math:`\dot{\alpha}(t)`
+    - :meth:`timesteps`: Generate discrete time-steps for sampling
+    - :meth:`sample_time`: Sample diffusion times for training
+
+    **Concrete methods (have default implementations, but can be overridden for
+    custom behavior):**
+
+    - :meth:`drift`: Drift term :math:`f(\mathbf{x}, t)` for ODE/SDE
+    - :meth:`diffusion`: Squared diffusion term :math:`g^2(\mathbf{x}, t)`
+    - :meth:`x0_to_score`: Convert x0-prediction to score
+    - :meth:`add_noise`: Add noise to clean data (training)
+    - :meth:`init_latents`: Initialize latent state (sampling)
+    - :meth:`get_denoiser`: Get ODE/SDE denoiser (sampling)
+
+    Examples
+    --------
+    **Example 1:** A minimal EDM-like noise schedule. Only the abstract methods
+    need to be implemented since defaults work for EDM:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.noise_schedulers import (
+    ...     LinearGaussianNoiseScheduler,
+    ... )
+    >>>
+    >>> class SimpleEDMScheduler(LinearGaussianNoiseScheduler):
+    ...     def __init__(self, sigma_min=0.002, sigma_max=80.0, rho=7.0):
+    ...         self.sigma_min = sigma_min
+    ...         self.sigma_max = sigma_max
+    ...         self.rho = rho
+    ...
+    ...     def sigma(self, t): return t
+    ...     def sigma_inv(self, sigma): return sigma
+    ...     def sigma_dot(self, t): return torch.ones_like(t)
+    ...     def alpha(self, t): return torch.ones_like(t)
+    ...     def alpha_dot(self, t): return torch.zeros_like(t)
+    ...
+    ...     def timesteps(self, num_steps, *, device=None, dtype=None):
+    ...         i = torch.arange(num_steps, device=device, dtype=dtype)
+    ...         smax_rho = self.sigma_max**(1/self.rho)
+    ...         smin_rho = self.sigma_min**(1/self.rho)
+    ...         frac = i/(num_steps-1)
+    ...         t = (smax_rho + frac * (smin_rho - smax_rho))**self.rho
+    ...         return torch.cat([t, torch.zeros(1, device=device)])
+    ...
+    ...     def sample_time(self, N, *, device=None, dtype=None):
+    ...         u = torch.rand(N, device=device, dtype=dtype)
+    ...         return self.sigma_min * (self.sigma_max/self.sigma_min)**u
+    ...
+    >>> scheduler = SimpleEDMScheduler()
+    >>> t_steps = scheduler.timesteps(10)
+    >>> t_steps.shape
+    torch.Size([11])
+
+    **Example 2:** Customizing behavior by overriding concrete methods. This
+    shows how to override the drift term for a custom diffusion process:
+
+    >>> class CustomDriftScheduler(SimpleEDMScheduler):
+    ...     def drift(self, x, t):
+    ...         # Custom drift: f(x, t) = -0.5 * x (Ornstein-Uhlenbeck style)
+    ...         return -0.5 * x
+    ...
+    >>> custom = CustomDriftScheduler()
+
+    # TODO-CURSOR: the second example is great. Just add a few lines at the end
+    of the test to actually test the drift method (through the get_denoiser
+    method actually, since drift is usually not supposed to be directly called).
+
+    """
+
+    @abstractmethod
+    def sigma(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""
+        Map diffusion time to noise level :math:`\sigma(t)`.
+
+        Used in both training and sampling.
+
+        Parameters
+        ----------
+        t : Tensor
+            Diffusion time tensor of any shape.
+
+        Returns
+        -------
+        Tensor
+            Noise coefficient :math:`\sigma(t)` with same shape as ``t``.
+        """
+        ...
+
+    @abstractmethod
+    def sigma_inv(
+        self,
+        sigma: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""
+        Map noise level back to diffusion time.
+
+        Used in both training and sampling.
+
+        Parameters
+        ----------
+        sigma : Tensor
+            Noise level tensor of any shape.
+
+        Returns
+        -------
+        Tensor
+            Diffusion time with same shape as ``sigma``.
+        """
+        ...
+
+    @abstractmethod
+    def sigma_dot(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""
+        Compute time derivative of noise level :math:`\dot{\sigma}(t)`.
+
+        Used in sampling.
+
+        Parameters
+        ----------
+        t : Tensor
+            Diffusion time tensor of any shape.
+
+        Returns
+        -------
+        Tensor
+            Time derivative :math:`\dot{\sigma}(t)` with same shape as ``t``.
+        """
+        ...
+
+    @abstractmethod
+    def alpha(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""
+        Compute the signal coefficient :math:`\alpha(t)`.
+
+        Used in both training and sampling.
+
+        Parameters
+        ----------
+        t : Tensor
+            Diffusion time tensor of any shape.
+
+        Returns
+        -------
+        Tensor
+            Signal coefficient :math:`\alpha(t)` with same shape as ``t``.
+        """
+        ...
+
+    @abstractmethod
+    def alpha_dot(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""
+        Compute time derivative of signal coefficient :math:`\dot{\alpha}(t)`.
+
+        Used in sampling.
+
+        Parameters
+        ----------
+        t : Tensor
+            Diffusion time tensor of any shape.
+
+        Returns
+        -------
+        Tensor
+            Time derivative :math:`\dot{\alpha}(t)` with same shape as ``t``.
+        """
+        ...
+
+    @abstractmethod
+    def timesteps(
+        self,
+        num_steps: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "N+1"]:  # noqa: F821
+        r"""
+        Generate discrete time-steps for sampling.
+
+        Used in sampling to produce the sequence of diffusion times. Returns
+        a tensor of shape :math:`(N + 1,)` in decreasing order, with the last
+        element being 0.
+
+        Parameters
+        ----------
+        num_steps : int
+            Number of sampling steps.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Time-steps tensor of shape :math:`(N + 1,)`.
+        """
+        ...
+
+    @abstractmethod
+    def sample_time(
+        self,
+        N: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "N"]:  # noqa: F821
+        r"""
+        Sample N diffusion time values for training.
+
+        Used in training to sample random diffusion times for the denoising
+        score matching loss.
+
+        Parameters
+        ----------
+        N : int
+            Number of time values to sample.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Sampled diffusion times of shape :math:`(N,)`.
+        """
+        ...
+
+    def drift(
+        self,
+        x: Float[Tensor, "B *dims"],  # noqa: F821
+        t: Float[Tensor, "B"],  # noqa: F821
+    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        r"""
+        Compute drift term :math:`f(\mathbf{x}, t)` for ODE/SDE sampling.
+
+        Used by :meth:`get_denoiser` to build the ODE/SDE right-hand side.
+
+        By default: :math:`f(\mathbf{x}, t) = \frac{\dot{\alpha}(t)}{\alpha(t)}
+        \mathbf{x}`.
+
+        This method can be overridden to implement different drift terms.
+
+        Parameters
+        ----------
+        x : Tensor
+            Latent state of shape :math:`(B, *)`.
+        t : Tensor
+            Diffusion time of shape :math:`(B,)`.
+
+        Returns
+        -------
+        Tensor
+            Drift term with same shape as ``x``.
+        """
+        t_bc = t.reshape(-1, *([1] * (x.ndim - 1)))
+        alpha_t_bc = self.alpha(t_bc)
+        alpha_dot_t_bc = self.alpha_dot(t_bc)
+        return (alpha_dot_t_bc / alpha_t_bc) * x
+
+    def diffusion(
+        self,
+        x: Float[Tensor, "B *dims"],  # noqa: F821
+        t: Float[Tensor, "B"],  # noqa: F821
+    ) -> Float[Tensor, "B #*dims"]:  # noqa: F821
+        r"""
+        Compute squared diffusion term :math:`g^2(\mathbf{x}, t)`.
+
+        Used by :meth:`get_denoiser` to build the ODE/SDE right-hand side.
+
+        By default: :math:`g^2 = 2 \dot{\sigma} \sigma - 2 \frac{\dot{\alpha}}
+        {\alpha} \sigma^2`.
+        This method can be overridden to implement different diffusion terms.
+
+        Parameters
+        ----------
+        x : Tensor
+            Latent state of shape :math:`(B, *)`.
+        t : Tensor
+            Diffusion time of shape :math:`(B,)`.
+
+        Returns
+        -------
+        Tensor
+            Squared diffusion term, broadcastable to shape of ``x``.
+        """
+        t_bc = t.reshape(-1, *([1] * (x.ndim - 1)))
+        sigma_t_bc = self.sigma(t_bc)
+        sigma_dot_t_bc = self.sigma_dot(t_bc)
+        alpha_t_bc = self.alpha(t_bc)
+        alpha_dot_t_bc = self.alpha_dot(t_bc)
+        g_sq = (
+            2 * sigma_dot_t_bc * sigma_t_bc
+            - 2 * (alpha_dot_t_bc / alpha_t_bc) * sigma_t_bc**2
+        )
+        return g_sq.expand_as(x)
+
+    def x0_to_score(
+        self,
+        x0: Float[Tensor, "B *dims"],  # noqa: F821
+        x_t: Float[Tensor, "B *dims"],  # noqa: F821
+        t: Float[Tensor, "B"],  # noqa: F821
+    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        r"""
+        Convert x0-predictor output to score.
+
+        Use this method to convert an x0-predictor to a score predictor before
+        passing to :meth:`get_denoiser`.
+
+        The score is: :math:`\nabla_{\mathbf{x}_t} \log p(\mathbf{x}_t)
+        = \frac{\alpha(t) \hat{\mathbf{x}}_0 - \mathbf{x}_t}{\sigma^2(t)}`.
+
+        This is a helper method that usually does not need to be overridden in
+        subclasses.
+
+        Parameters
+        ----------
+        x0 : Tensor
+            Predicted clean data :math:`\hat{\mathbf{x}}_0` of shape
+            :math:`(B, *)`.
+        x_t : Tensor
+            Current noisy state :math:`\mathbf{x}_t` of shape :math:`(B, *)`.
+        t : Tensor
+            Diffusion time of shape :math:`(B,)`.
+
+        Returns
+        -------
+        Tensor
+            Score with same shape as ``x0``.
+
+        Examples
+        --------
+        >>> scheduler = EDMNoiseScheduler()
+        >>> # If you have an x0-predictor, wrap it to create a score predictor:
+        >>> x0_predictor = lambda x, t: x * 0.9
+        >>> def score_predictor(x, t):
+        ...     x0_pred = x0_predictor(x, t)
+        ...     return scheduler.x0_to_score(x0_pred, x, t)
+        >>> # Then use score_predictor with get_denoiser
+        """
+        t_bc = t.reshape(-1, *([1] * (x0.ndim - 1)))
+        alpha_t_bc = self.alpha(t_bc)
+        sigma_t_bc = self.sigma(t_bc)
+        return (alpha_t_bc * x0 - x_t) / (sigma_t_bc**2)
+
+    def get_denoiser(
+        self,
+        denoiser_in: DiffusionDenoiser,
+        denoising_type: Literal["ode", "sde"] = "ode",
+        **kwargs: Any,
+    ) -> DiffusionDenoiser:
+        r"""
+        Convert a **score predictor** to a denoiser for sampling.
+
+        The returned denoiser computes the right-hand side of the reverse
+        ODE or SDE.
+
+        **Important:** ``denoiser_in`` must be a **score predictor**, i.e., a
+        callable returning :math:`\nabla_{\mathbf{x}} \log p(\mathbf{x}_t)`.
+        If you have an x0-predictor, convert it with :meth:`x0_to_score` first.
+
+        For ODE (``denoising_type="ode"``):
+
+        .. math::
+            \frac{d\mathbf{x}}{dt} = f(\mathbf{x}, t) - \frac{1}{2} g^2(t)
+            D(\mathbf{x}, t)
+
+        where :math:`D(\mathbf{x}, t) = \nabla_{\mathbf{x}} \log p(\mathbf{x})`
+        is the score returned by ``denoiser_in``.
+
+        For SDE (``denoising_type="sde"``):
+
+        .. math::
+            d\mathbf{x} = \left[ f(\mathbf{x}, t) - g^2(t) D(\mathbf{x}, t)
+            \right] dt + g(t) d\mathbf{W}
+
+        Note: The stochastic term :math:`g(t) d\mathbf{W}` is handled by the
+        solver, not returned by the denoiser.
+
+        Parameters
+        ----------
+        denoiser_in : DiffusionDenoiser
+            A **score predictor** that takes ``(x_t, t)`` and returns the score
+            :math:`\nabla_{\mathbf{x}} \log p(\mathbf{x}_t)`.
+        denoising_type : {"ode", "sde"}, default="ode"
+            Type of reverse process. Use ``"ode"`` for deterministic sampling,
+            ``"sde"`` for stochastic sampling.
+        **kwargs : Any
+            Ignored.
+
+        Returns
+        -------
+        DiffusionDenoiser
+            A denoiser computing the RHS of the reverse ODE/SDE.
+
+        Examples
+        --------
+
+        # TODO-CURSOR: this example is good, but maybe better if you actually
+        do the x0_to_score conversion to score predictor in the example for
+        completeness.
+
+        >>> scheduler = EDMNoiseScheduler()
+        >>> # Create a score predictor (or convert x0-predictor first)
+        >>> score_predictor = lambda x, t: -x / t.view(-1, 1, 1, 1)**2
+        >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+        """
+        # Capture methods as local variables to avoid referencing self
+        drift = self.drift
+        diffusion = self.diffusion
+
+        if denoising_type == "ode":
+
+            def ode_denoiser(
+                x: Float[Tensor, "B *dims"],  # noqa: F821
+                t: Float[Tensor, "B"],  # noqa: F821
+            ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+                score = denoiser_in(x, t)
+                f = drift(x, t)
+                g_sq = diffusion(x, t)
+                dx_dt = f - 0.5 * g_sq * score
+                return dx_dt
+
+            return ode_denoiser
+
+        elif denoising_type == "sde":
+
+            def sde_denoiser(
+                x: Float[Tensor, "B *dims"],  # noqa: F821
+                t: Float[Tensor, "B"],  # noqa: F821
+            ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+                score = denoiser_in(x, t)
+                f = drift(x, t)
+                g_sq = diffusion(x, t)
+                # Deterministic part of the SDE drift
+                # Note: stochastic term g(t)*dW is handled by the solver
+                dx_dt = f - g_sq * score
+                return dx_dt
+
+            return sde_denoiser
+
+        else:
+            raise ValueError(
+                f"denoising_type must be 'ode' or 'sde', got '{denoising_type}'"
+            )
+
+    def add_noise(
+        self,
+        x0: Float[Tensor, "B *dims"],  # noqa: F821
+        time: Float[Tensor, "B"],  # noqa: F821
+    ) -> Float[Tensor, "B *dims"]:  # noqa: F821
+        r"""
+        Add noise to clean data at the given diffusion times.
+
+        Used in training to create noisy samples from clean data. Implements:
+
+        .. math::
+            \mathbf{x}(t) = \alpha(t) \mathbf{x}_0
+            + \sigma(t) \boldsymbol{\epsilon}
+
+        Usually does not need to be overridden in subclasses: overriding the
+        :meth:`alpha` and :meth:`sigma` methods is sufficient for most use
+        cases.
+
+
+        Parameters
+        ----------
+        x0 : Tensor
+            Clean latent state of shape :math:`(B, *)`.
+        time : Tensor
+            Diffusion time values of shape :math:`(B,)`.
+
+        Returns
+        -------
+        Tensor
+            Noisy latent state of shape :math:`(B, *)`.
+        """
+        t_bc = time.reshape(-1, *([1] * (x0.ndim - 1)))
+        alpha_t_bc = self.alpha(t_bc)
+        sigma_t_bc = self.sigma(t_bc)
+        noise = torch.randn_like(x0)
+        return alpha_t_bc * x0 + sigma_t_bc * noise
+
+    def init_latents(
+        self,
+        spatial_shape: Tuple[int, ...],
+        tN: Float[Tensor, "B"],  # noqa: F821
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "B *spatial_shape"]:  # noqa: F821
+        r"""
+        Initialize the noisy latent state :math:`\mathbf{x}_N` for sampling.
+
+        Generates:
+
+        .. math::
+            \mathbf{x}_N = \sigma(t_N) \cdot \boldsymbol{\epsilon}
+
+        where :math:`\boldsymbol{\epsilon} \sim \mathcal{N}(0, \mathbf{I})`.
+
+        Parameters
+        ----------
+        spatial_shape : Tuple[int, ...]
+            Spatial shape of the latent state, e.g., ``(C, H, W)``.
+        tN : Tensor
+            Initial diffusion time of shape :math:`(B,)`.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Initial noisy latent of shape :math:`(B, *spatial\_shape)`.
+        """
+        B = tN.shape[0]
+        noise = torch.randn(B, *spatial_shape, device=device, dtype=dtype)
+        tN_bc = tN.reshape(-1, *([1] * len(spatial_shape)))
+        sigma_tN_bc = self.sigma(tN_bc)
+        return sigma_tN_bc * noise
+
+
+# =============================================================================
+# Concrete noise schedule implementations
+# =============================================================================
+
+
+class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
+    r"""
+    EDM noise scheduler with identity mapping :math:`\sigma(t) = t`.
+
+    The EDM formulation uses :math:`\alpha(t) = 1` (no signal attenuation)
+    and :math:`\sigma(t) = t` (identity mapping between time and noise level).
+
+    **Sampling time-steps** are computed with polynomial spacing:
+
+    .. math::
+        t_i = \left(\sigma_{\max}^{1/\rho} + \frac{i}{N-1}
+        \left(\sigma_{\min}^{1/\rho} - \sigma_{\max}^{1/\rho}\right)
+        \right)^{\rho}
+
+    **Training times** are sampled log-uniformly between ``sigma_min`` and
+    ``sigma_max``.
+
+    Parameters
+    ----------
+    sigma_min : float, optional
+        Minimum noise level, by default 0.002.
+    sigma_max : float, optional
+        Maximum noise level, by default 80.
+    rho : float, optional
+        Exponent controlling time-step spacing. Larger values concentrate more
+        steps at lower noise levels (better for fine details). By default 7.
+
+    Note
+    ----
+    Reference: `Elucidating the Design Space of Diffusion-Based
+    Generative Models <https://arxiv.org/abs/2206.00364>`_
+
+    Examples
+    --------
+    Basic training and sampling workflow using the EDM noise scheduler:
+
+    # TODO-CURSOR: this example is great, I really like it! Just one deatil: to
+    illustrate a complete workflow we would also like to show the usage of the
+    get_denoiser method (from an x0-predictor to a score predictor), in order
+    to generate a denoiser that can be used for sampling. Just add a few lines
+    in the #sampling part of this example to illustrate the usage of the
+    get_denoiser method. Also do that for the VENoiseScheduler and the
+    IDDPMNoiseScheduler.
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+    >>>
+    >>> scheduler = EDMNoiseScheduler(sigma_min=0.002, sigma_max=80.0, rho=7)
+    >>>
+    >>> # Training: sample times and add noise
+    >>> x0 = torch.randn(4, 3, 8, 8)  # Clean data
+    >>> t = scheduler.sample_time(4)    # Sample diffusion times
+    >>> x_t = scheduler.add_noise(x0, t)  # Create noisy samples
+    >>> x_t.shape
+    torch.Size([4, 3, 8, 8])
+    >>>
+    >>> # Sampling: generate timesteps and initial latents
+    >>> t_steps = scheduler.timesteps(10)
+    >>> tN = t_steps[0].expand(4)  # Initial time for batch of 4
+    >>> xN = scheduler.init_latents((3, 8, 8), tN)  # Initial noise
+    >>> xN.shape
+    torch.Size([4, 3, 8, 8])
+    """
+
+    def __init__(
+        self,
+        sigma_min: float = 0.002,
+        sigma_max: float = 80.0,
+        rho: float = 7.0,
+    ) -> None:
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+        self.rho = rho
+
+    def sigma(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Identity mapping: :math:`\sigma(t) = t`."""
+        return t
+
+    def sigma_inv(
+        self,
+        sigma: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Identity mapping: :math:`t = \sigma`."""
+        return sigma
+
+    def sigma_dot(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Constant derivative: :math:`\dot{\sigma}(t) = 1`."""
+        return torch.ones_like(t)
+
+    def alpha(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Constant signal coefficient: :math:`\alpha(t) = 1`."""
+        return torch.ones_like(t)
+
+    def alpha_dot(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Zero derivative: :math:`\dot{\alpha}(t) = 0`."""
+        return torch.zeros_like(t)
+
+    def timesteps(
+        self,
+        num_steps: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "N+1"]:  # noqa: F821
+        r"""
+        Generate EDM time-steps with polynomial spacing.
+
+        Parameters
+        ----------
+        num_steps : int
+            Number of sampling steps.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
 
         Returns
         -------
@@ -142,150 +945,60 @@ class NoiseScheduler(ABC):
             Time-steps tensor of shape :math:`(N + 1,)` where :math:`N` is
             ``num_steps``.
         """
-        ...
-
-
-class VPNoiseScheduler(NoiseScheduler):
-    r"""
-    Variance Preserving (VP) noise scheduler.
-
-    Implements the noise schedule from the VP formulation of score-based
-    generative models:
-
-    .. math::
-
-        \sigma(t) = \sqrt{\exp\left(\frac{\beta_d}{2} t^2
-        + \beta_{\min} t\right) - 1}
-
-    Parameters
-    ----------
-    sigma_min : float, optional
-        Minimum noise level, by default computed from ``epsilon_s``.
-    sigma_max : float, optional
-        Maximum noise level, by default computed from ``beta_d`` and
-        ``beta_min``.
-    beta_d : float, optional
-        Extent of the noise level schedule, by default 19.9.
-    beta_min : float, optional
-        Initial slope of the noise level schedule, by default 0.1.
-    epsilon_s : float, optional
-        Small time value for numerical stability, by default 1e-3.
-
-    Note
-    ----
-    Reference: `Score-Based Generative Modeling through Stochastic
-    Differential Equations <https://arxiv.org/abs/2011.13456>`_
-
-    Examples
-    --------
-    >>> scheduler = VPNoiseScheduler()
-    >>> t = scheduler.timesteps(18, device="cpu")
-    >>> t.shape
-    torch.Size([19])
-    """
-
-    def __init__(
-        self,
-        sigma_min: float | None = None,
-        sigma_max: float | None = None,
-        beta_d: float = 19.9,
-        beta_min: float = 0.1,
-        epsilon_s: float = 1e-3,
-    ) -> None:
-        self.beta_d = beta_d
-        self.beta_min = beta_min
-        self.epsilon_s = epsilon_s
-
-        # Compute default sigma_min/max from VP parameters
-        if sigma_min is None:
-            sigma_min = self._sigma_from_t(epsilon_s)
-        if sigma_max is None:
-            sigma_max = self._sigma_from_t(1.0)
-
-        super().__init__(sigma_min, sigma_max)
-
-    def _sigma_from_t(self, t: float) -> float:
-        """Compute sigma from t using VP formula (scalar version)."""
-        exponent = 0.5 * self.beta_d * (t**2) + self.beta_min * t
-        return (math.exp(exponent) - 1) ** 0.5
-
-    def sigma(self, t: Tensor) -> Tensor:
-        r"""
-        Compute :math:`\sigma(t)` for the VP formulation.
-
-        Parameters
-        ----------
-        t : torch.Tensor
-            Diffusion time tensor of shape :math:`(N,)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Noise level :math:`\sigma(t)` of shape :math:`(N,)`.
-        """
-        exponent = 0.5 * self.beta_d * (t**2) + self.beta_min * t
-        return (exponent.exp() - 1).sqrt()
-
-    def sigma_inv(self, sigma: Tensor) -> Tensor:
-        r"""
-        Compute :math:`t` from :math:`\sigma` for the VP formulation.
-
-        Parameters
-        ----------
-        sigma : torch.Tensor
-            Noise level tensor of shape :math:`(N,)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Diffusion time :math:`t` of shape :math:`(N,)`.
-        """
-        return (
-            (self.beta_min**2 + 2 * self.beta_d * (1 + sigma**2).log()).sqrt()
-            - self.beta_min
-        ) / self.beta_d
-
-    def timesteps(
-        self,
-        num_steps: int,
-        device: torch.device | None = None,
-        dtype: torch.dtype = torch.float64,
-    ) -> Tensor:
-        r"""
-        Generate VP time-steps.
-
-        Parameters
-        ----------
-        num_steps : int
-            Number of sampling steps.
-        device : torch.device, optional
-            Device to place the tensor on.
-        dtype : torch.dtype, optional
-            Data type of the tensor, by default ``torch.float64``.
-
-        Returns
-        -------
-        torch.Tensor
-            Time-steps tensor of shape :math:`(N + 1,)`.
-        """
         step_indices = torch.arange(num_steps, dtype=dtype, device=device)
-        t_frac = step_indices / (num_steps - 1) * (self.epsilon_s - 1)
-        orig_t_steps = 1 + t_frac
-        sigma_steps = self.sigma(orig_t_steps)
-        t_steps = self.sigma_inv(sigma_steps)
+        smax_inv_rho = self.sigma_max ** (1 / self.rho)
+        smin_inv_rho = self.sigma_min ** (1 / self.rho)
+        frac = step_indices / (num_steps - 1)
+        interp = smax_inv_rho + frac * (smin_inv_rho - smax_inv_rho)
+        t_steps = interp**self.rho
         zero = torch.zeros(1, dtype=dtype, device=device)
         return torch.cat([t_steps, zero])
 
+    def sample_time(
+        self,
+        N: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "N"]:  # noqa: F821
+        r"""
+        Sample N diffusion times log-uniformly in :math:`[\sigma_{min},
+        \sigma_{max}]`.
 
-class VENoiseScheduler(NoiseScheduler):
+        Parameters
+        ----------
+        N : int
+            Number of time values to sample.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Sampled diffusion times of shape :math:`(N,)`.
+        """
+        u = torch.rand(N, device=device, dtype=dtype)
+        log_ratio = math.log(self.sigma_max / self.sigma_min)
+        return self.sigma_min * torch.exp(u * log_ratio)
+
+
+class VENoiseScheduler(LinearGaussianNoiseScheduler):
     r"""
     Variance Exploding (VE) noise scheduler.
 
-    Implements the noise schedule from the VE formulation:
+    Implements the VE formulation with :math:`\sigma(t) = \sqrt{t}` and
+    :math:`\alpha(t) = 1` (no signal attenuation).
+
+    **Sampling time-steps** use geometric spacing in :math:`\sigma^2` space:
 
     .. math::
+        \sigma_i^2 = \sigma_{\max}^2 \cdot
+        \left(\frac{\sigma_{\min}^2}{\sigma_{\max}^2}\right)^{i/(N-1)}
 
-        \sigma(t) = \sqrt{t}
+    **Training times** are sampled log-uniformly between ``sigma_min`` and
+    ``sigma_max``, then mapped to time via :math:`t = \sigma^2`.
 
     Parameters
     ----------
@@ -301,10 +1014,26 @@ class VENoiseScheduler(NoiseScheduler):
 
     Examples
     --------
-    >>> scheduler = VENoiseScheduler()
-    >>> t = scheduler.timesteps(18, device="cpu")
-    >>> t.shape
-    torch.Size([19])
+    Basic training and sampling workflow using the VE noise scheduler:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.noise_schedulers import VENoiseScheduler
+    >>>
+    >>> scheduler = VENoiseScheduler(sigma_min=0.02, sigma_max=100.0)
+    >>>
+    >>> # Training: sample times and add noise
+    >>> x0 = torch.randn(4, 3, 8, 8)  # Clean data
+    >>> t = scheduler.sample_time(4)    # Sample diffusion times
+    >>> x_t = scheduler.add_noise(x0, t)  # Create noisy samples
+    >>> x_t.shape
+    torch.Size([4, 3, 8, 8])
+    >>>
+    >>> # Sampling: generate timesteps and initial latents
+    >>> t_steps = scheduler.timesteps(10)
+    >>> tN = t_steps[0].expand(4)  # Initial time for batch of 4
+    >>> xN = scheduler.init_latents((3, 8, 8), tN)  # Initial noise
+    >>> xN.shape
+    torch.Size([4, 3, 8, 8])
     """
 
     def __init__(
@@ -312,48 +1041,53 @@ class VENoiseScheduler(NoiseScheduler):
         sigma_min: float = 0.02,
         sigma_max: float = 100.0,
     ) -> None:
-        super().__init__(sigma_min, sigma_max)
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
 
-    def sigma(self, t: Tensor) -> Tensor:
-        r"""
-        Compute :math:`\sigma(t) = \sqrt{t}` for the VE formulation.
-
-        Parameters
-        ----------
-        t : torch.Tensor
-            Diffusion time tensor of shape :math:`(N,)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Noise level :math:`\sigma(t)` of shape :math:`(N,)`.
-        """
+    def sigma(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""VE noise coefficient: :math:`\sigma(t) = \sqrt{t}`."""
         return t.sqrt()
 
-    def sigma_inv(self, sigma: Tensor) -> Tensor:
-        r"""
-        Compute :math:`t = \sigma^2` for the VE formulation.
-
-        Parameters
-        ----------
-        sigma : torch.Tensor
-            Noise level tensor of shape :math:`(N,)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Diffusion time :math:`t` of shape :math:`(N,)`.
-        """
+    def sigma_inv(
+        self,
+        sigma: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Inverse VE mapping: :math:`t = \sigma^2`."""
         return sigma**2
+
+    def sigma_dot(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Time derivative: :math:`\dot{\sigma}(t) = 1/(2\sqrt{t})`."""
+        return 0.5 / t.sqrt()
+
+    def alpha(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Constant signal coefficient: :math:`\alpha(t) = 1`."""
+        return torch.ones_like(t)
+
+    def alpha_dot(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Zero derivative: :math:`\dot{\alpha}(t) = 0`."""
+        return torch.zeros_like(t)
 
     def timesteps(
         self,
         num_steps: int,
+        *,
         device: torch.device | None = None,
-        dtype: torch.dtype = torch.float64,
-    ) -> Tensor:
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "N+1"]:  # noqa: F821
         r"""
-        Generate VE time-steps with geometric spacing.
+        Generate VE time-steps with geometric spacing in :math:`\sigma^2`.
 
         Parameters
         ----------
@@ -362,7 +1096,7 @@ class VENoiseScheduler(NoiseScheduler):
         device : torch.device, optional
             Device to place the tensor on.
         dtype : torch.dtype, optional
-            Data type of the tensor, by default ``torch.float64``.
+            Data type of the tensor.
 
         Returns
         -------
@@ -370,35 +1104,68 @@ class VENoiseScheduler(NoiseScheduler):
             Time-steps tensor of shape :math:`(N + 1,)`.
         """
         step_indices = torch.arange(num_steps, dtype=dtype, device=device)
-        # Geometric spacing in sigma^2 space
         ratio = self.sigma_min**2 / self.sigma_max**2
         exponent = step_indices / (num_steps - 1)
-        orig_t_steps = (self.sigma_max**2) * (ratio**exponent)
-        sigma_steps = self.sigma(orig_t_steps)
-        t_steps = self.sigma_inv(sigma_steps)
+        t_steps = (self.sigma_max**2) * (ratio**exponent)
         zero = torch.zeros(1, dtype=dtype, device=device)
         return torch.cat([t_steps, zero])
 
+    def sample_time(
+        self,
+        N: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "N"]:  # noqa: F821
+        r"""
+        Sample N diffusion times log-uniformly in sigma space, mapped to time.
 
-class IDDPMNoiseScheduler(NoiseScheduler):
+        Parameters
+        ----------
+        N : int
+            Number of time values to sample.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Sampled diffusion times of shape :math:`(N,)`.
+        """
+        u = torch.rand(N, device=device, dtype=dtype)
+        log_ratio = math.log(self.sigma_max / self.sigma_min)
+        sigma = self.sigma_min * torch.exp(u * log_ratio)
+        return self.sigma_inv(sigma)
+
+
+class IDDPMNoiseScheduler(LinearGaussianNoiseScheduler):
     r"""
-    Improved DDPM (iDDPM) noise scheduler.
+    Improved DDPM (iDDPM) noise scheduler with cosine-based schedule.
 
-    Implements the noise schedule from the improved DDPM formulation,
-    which uses a cosine-based schedule for better sample quality.
+    Uses identity mappings :math:`\sigma(t) = t` and :math:`\alpha(t) = 1`.
+    The key feature is a precomputed noise level schedule derived from a
+    cosine schedule, providing improved sample quality in comparison to
+    original DDPM.
+
+    **Sampling time-steps** are selected from a precomputed schedule of
+    :math:`M` discrete noise levels, subsampled to ``num_steps``.
+
+    **Training times** are sampled uniformly from the precomputed schedule.
 
     Parameters
     ----------
     sigma_min : float, optional
-        Minimum noise level, by default 0.002.
+        Minimum noise level for filtering, by default 0.002.
     sigma_max : float, optional
-        Maximum noise level, by default 81.
+        Maximum noise level for filtering, by default 81.
     C_1 : float, optional
-        Timestep adjustment at low noise levels, by default 0.001.
+        Clipping threshold for alpha ratio, by default 0.001.
     C_2 : float, optional
-        Timestep adjustment at high noise levels, by default 0.008.
+        Cosine schedule parameter, by default 0.008.
     M : int, optional
-        Number of discretization steps, by default 1000.
+        Number of precomputed discretization steps, by default 1000.
 
     Note
     ----
@@ -407,10 +1174,26 @@ class IDDPMNoiseScheduler(NoiseScheduler):
 
     Examples
     --------
-    >>> scheduler = IDDPMNoiseScheduler()
-    >>> t = scheduler.timesteps(18, device="cpu")
-    >>> t.shape
-    torch.Size([19])
+    Basic training and sampling workflow using the iDDPM noise scheduler:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.noise_schedulers import IDDPMNoiseScheduler
+    >>>
+    >>> scheduler = IDDPMNoiseScheduler(C_1=0.001, C_2=0.008, M=1000)
+    >>>
+    >>> # Training: sample times and add noise
+    >>> x0 = torch.randn(4, 3, 8, 8)  # Clean data
+    >>> t = scheduler.sample_time(4)    # Sample diffusion times
+    >>> x_t = scheduler.add_noise(x0, t)  # Create noisy samples
+    >>> x_t.shape
+    torch.Size([4, 3, 8, 8])
+    >>>
+    >>> # Sampling: generate timesteps and initial latents
+    >>> t_steps = scheduler.timesteps(10)
+    >>> tN = t_steps[0].expand(4)  # Initial time for batch of 4
+    >>> xN = scheduler.init_latents((3, 8, 8), tN)  # Initial noise
+    >>> xN.shape
+    torch.Size([4, 3, 8, 8])
     """
 
     def __init__(
@@ -421,7 +1204,8 @@ class IDDPMNoiseScheduler(NoiseScheduler):
         C_2: float = 0.008,
         M: int = 1000,
     ) -> None:
-        super().__init__(sigma_min, sigma_max)
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
         self.C_1 = C_1
         self.C_2 = C_2
         self.M = M
@@ -431,7 +1215,7 @@ class IDDPMNoiseScheduler(NoiseScheduler):
 
     def _compute_u_schedule(self) -> Tensor:
         """Precompute the iDDPM noise level schedule."""
-        u = torch.zeros(self.M + 1, dtype=torch.float64)
+        u = torch.zeros(self.M + 1)
         for j in range(self.M, 0, -1):
             angle_j = 0.5 * math.pi * j / self.M / (self.C_2 + 1)
             angle_jm1 = 0.5 * math.pi * (j - 1) / self.M / (self.C_2 + 1)
@@ -442,46 +1226,53 @@ class IDDPMNoiseScheduler(NoiseScheduler):
             u[j - 1] = val.sqrt()
         return u
 
-    def sigma(self, t: Tensor) -> Tensor:
-        r"""
-        For iDDPM, sigma and t are the same (identity mapping).
-
-        Parameters
-        ----------
-        t : torch.Tensor
-            Diffusion time tensor of shape :math:`(N,)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Noise level :math:`\sigma(t) = t` of shape :math:`(N,)`.
-        """
+    def sigma(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""For iDDPM, :math:`\sigma(t) = t` (identity mapping)."""
         return t
 
-    def sigma_inv(self, sigma: Tensor) -> Tensor:
-        r"""
-        For iDDPM, t and sigma are the same (identity mapping).
-
-        Parameters
-        ----------
-        sigma : torch.Tensor
-            Noise level tensor of shape :math:`(N,)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Diffusion time :math:`t = \sigma` of shape :math:`(N,)`.
-        """
+    def sigma_inv(
+        self,
+        sigma: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""For iDDPM, :math:`t = \sigma` (identity mapping)."""
         return sigma
+
+    def sigma_dot(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Constant derivative: :math:`\dot{\sigma}(t) = 1`."""
+        return torch.ones_like(t)
+
+    def alpha(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Constant signal coefficient: :math:`\alpha(t) = 1`."""
+        return torch.ones_like(t)
+
+    def alpha_dot(
+        self,
+        t: Float[Tensor, "*shape"],  # noqa: F821
+    ) -> Float[Tensor, "*shape"]:  # noqa: F821
+        r"""Zero derivative: :math:`\dot{\alpha}(t) = 0`."""
+        return torch.zeros_like(t)
 
     def timesteps(
         self,
         num_steps: int,
+        *,
         device: torch.device | None = None,
-        dtype: torch.dtype = torch.float64,
-    ) -> Tensor:
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "N+1"]:  # noqa: F821
         r"""
         Generate iDDPM time-steps from precomputed schedule.
+
+        Subsamples ``num_steps`` values from the precomputed schedule of
+        :math:`M` noise levels.
 
         Parameters
         ----------
@@ -490,7 +1281,7 @@ class IDDPMNoiseScheduler(NoiseScheduler):
         device : torch.device, optional
             Device to place the tensor on.
         dtype : torch.dtype, optional
-            Data type of the tensor, by default ``torch.float64``.
+            Data type of the tensor.
 
         Returns
         -------
@@ -498,7 +1289,7 @@ class IDDPMNoiseScheduler(NoiseScheduler):
             Time-steps tensor of shape :math:`(N + 1,)`.
         """
         u = self._u.to(device=device, dtype=dtype)
-        # Filter to sigma range
+        # Filter to valid sigma range
         in_range = torch.logical_and(u >= self.sigma_min, u <= self.sigma_max)
         u_filtered = u[in_range]
 
@@ -510,120 +1301,33 @@ class IDDPMNoiseScheduler(NoiseScheduler):
         zero = torch.zeros(1, dtype=dtype, device=device)
         return torch.cat([sigma_steps, zero])
 
-
-class EDMNoiseScheduler(NoiseScheduler):
-    r"""
-    EDM noise scheduler.
-
-    Implements the improved noise schedule from the EDM paper with
-    polynomial spacing controlled by the ``rho`` parameter.
-
-    For EDM, the noise schedule is identity: :math:`\sigma(t) = t`.
-
-    The time-steps are computed as:
-
-    .. math::
-
-        t_i = \left(\sigma_{\max}^{1/\rho} + \frac{i}{N-1}
-        \left(\sigma_{\min}^{1/\rho} - \sigma_{\max}^{1/\rho}\right)
-        \right)^{\rho}
-
-    Parameters
-    ----------
-    sigma_min : float, optional
-        Minimum noise level, by default 0.002.
-    sigma_max : float, optional
-        Maximum noise level, by default 80.
-    rho : float, optional
-        Exponent controlling the spacing of time-steps. Values in [5, 10]
-        typically produce good results, by default 7.
-
-    Note
-    ----
-    Reference: `Elucidating the Design Space of Diffusion-Based
-    Generative Models <https://arxiv.org/abs/2206.00364>`_
-
-    Examples
-    --------
-    >>> scheduler = EDMNoiseScheduler()
-    >>> t = scheduler.timesteps(18, device="cpu")
-    >>> t.shape
-    torch.Size([19])
-    >>> t[0]  # First step is sigma_max
-    tensor(80., dtype=torch.float64)
-    >>> t[-1]  # Last step is 0
-    tensor(0., dtype=torch.float64)
-    """
-
-    def __init__(
+    def sample_time(
         self,
-        sigma_min: float = 0.002,
-        sigma_max: float = 80.0,
-        rho: float = 7.0,
-    ) -> None:
-        super().__init__(sigma_min, sigma_max)
-        self.rho = rho
-
-    def sigma(self, t: Tensor) -> Tensor:
-        r"""
-        For EDM, :math:`\sigma(t) = t` (identity mapping).
-
-        Parameters
-        ----------
-        t : torch.Tensor
-            Diffusion time tensor of shape :math:`(N,)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Noise level :math:`\sigma(t) = t` of shape :math:`(N,)`.
-        """
-        return t
-
-    def sigma_inv(self, sigma: Tensor) -> Tensor:
-        r"""
-        For EDM, :math:`t = \sigma` (identity mapping).
-
-        Parameters
-        ----------
-        sigma : torch.Tensor
-            Noise level tensor of shape :math:`(N,)`.
-
-        Returns
-        -------
-        torch.Tensor
-            Diffusion time :math:`t = \sigma` of shape :math:`(N,)`.
-        """
-        return sigma
-
-    def timesteps(
-        self,
-        num_steps: int,
+        N: int,
+        *,
         device: torch.device | None = None,
-        dtype: torch.dtype = torch.float64,
-    ) -> Tensor:
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, "N"]:  # noqa: F821
         r"""
-        Generate EDM time-steps with polynomial spacing.
+        Sample N diffusion times uniformly from precomputed schedule.
 
         Parameters
         ----------
-        num_steps : int
-            Number of sampling steps.
+        N : int
+            Number of time values to sample.
         device : torch.device, optional
             Device to place the tensor on.
         dtype : torch.dtype, optional
-            Data type of the tensor, by default ``torch.float64``.
+            Data type of the tensor.
 
         Returns
         -------
-        torch.Tensor
-            Time-steps tensor of shape :math:`(N + 1,)`.
+        Tensor
+            Sampled diffusion times of shape :math:`(N,)`.
         """
-        step_indices = torch.arange(num_steps, dtype=dtype, device=device)
-        smax_inv_rho = self.sigma_max ** (1 / self.rho)
-        smin_inv_rho = self.sigma_min ** (1 / self.rho)
-        frac = step_indices / (num_steps - 1)
-        interp = smax_inv_rho + frac * (smin_inv_rho - smax_inv_rho)
-        t_steps = interp**self.rho
-        zero = torch.zeros(1, dtype=dtype, device=device)
-        return torch.cat([t_steps, zero])
+        u = self._u.to(device=device, dtype=dtype)
+        in_range = torch.logical_and(u >= self.sigma_min, u <= self.sigma_max)
+        u_filtered = u[in_range]
+        # Sample random indices
+        indices = torch.randint(0, len(u_filtered), (N,), device=device)
+        return u_filtered[indices]

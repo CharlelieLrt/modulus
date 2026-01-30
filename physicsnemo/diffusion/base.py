@@ -93,12 +93,21 @@ class DiffusionDenoiser(Protocol):
     r"""
     Protocol defining a denoiser interface for diffusion model inference.
 
-    A denoiser is a callable that takes a noisy state ``x`` and a noise level
-    (or diffusion time) ``t``, and returns a denoised prediction. This is the
-    minimal interface required for sampling from a diffusion model.
+    This is the minimal interface required for sampling from a diffusion model,
+    and any object that implements this interface can be used as a denoiser in
+    sampling utilities.
 
-    This protocol is typically used during inference with the
-    :func:`~physicsnemo.diffusion.samplers.sample` function. For training,
+    A denoiser is a callable that takes a noisy state ``x`` and a noise level
+    (or diffusion time) ``t``, and typically returns a denoising term. A
+    denoising could be the right hand side for
+    ODE/SDE-based sampling, directly the denoised latent state for discrete
+    Markov chain-based sampling, etc. This interface is generic and it does not
+    make any assumption about the nature of the denoising term. It is expected
+    to be used in conjunction with a compatible
+    :class:`~physicsnemo.diffusion.samplers.solvers.Solver` to perform the
+    actual sampling.
+
+    This protocol is used during inference. For training,
     which often requires additional inputs like conditioning, use the more
     general :class:`DiffusionModel` protocol instead.
 
@@ -152,7 +161,7 @@ class DiffusionDenoiser(Protocol):
         t: Float[torch.Tensor, "B "],  # noqa: F821
     ) -> Float[torch.Tensor, "B *dims"]:  # noqa: F821
         r"""
-        Denoise the input at the given noise level.
+        Function to produce a denoising output at the given noise level.
 
         Parameters
         ----------
@@ -161,7 +170,7 @@ class DiffusionDenoiser(Protocol):
             batch size and :math:`*` denotes any number of additional
             dimensions (e.g., channels and spatial dimensions).
         t : torch.Tensor
-            Batched diffusion time or noise level tensor of shape :math:`(B,)`.
+            Batched diffusion time tensor of shape :math:`(B,)`.
             All batch elements in the latent state ``x`` typically share the
             same diffusion time values, but ``t`` is still required to be a
             batched tensor.
@@ -169,6 +178,8 @@ class DiffusionDenoiser(Protocol):
         Returns
         -------
         torch.Tensor
-            Denoised prediction with the same shape as ``x``.
+            Denoising output. Can be the right hand side for ODE/SDE-based
+            sampling, the denoised latent state for discrete Markov chain-based
+            sampling, etc.
         """
         ...

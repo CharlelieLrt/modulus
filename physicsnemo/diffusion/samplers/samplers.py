@@ -18,16 +18,11 @@
 
 from typing import Any, Dict, List
 
+from jaxtyping import Float
 from torch import Tensor
 
 from physicsnemo.diffusion.base import DiffusionDenoiser
-from physicsnemo.diffusion.noise_schedulers import (
-    EDMNoiseScheduler,
-    IDDPMNoiseScheduler,
-    NoiseScheduler,
-    VENoiseScheduler,
-    VPNoiseScheduler,
-)
+from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
 
 from .solvers import (
     EDMStochasticEulerSolver,
@@ -44,80 +39,134 @@ SOLVERS: Dict[str, type[Solver]] = {
     "edm_stochastic_heun": EDMStochasticHeunSolver,
 }
 
-NOISE_SCHEDULES: Dict[str, type[NoiseScheduler]] = {
-    "vp": VPNoiseScheduler,
-    "ve": VENoiseScheduler,
-    "iddpm": IDDPMNoiseScheduler,
-    "edm": EDMNoiseScheduler,
-}
+
+# TODO-CURSOR: I changed my mind about the xN argument, we will keep it as it
+# is now. Just double check the entire sample function below, including this
+# documentation and make sure that:
+# - its docstring has maximal alignment with the noise_schedulers.py in terms
+#   of explanation and examples. In particular, we will revise the examples and
+#   have 3 examples in the docstring.
+#   The first example should be as simple as possible, and the two other
+#   examples should have incremental complexity, but still remain as crisp as
+#   possible. The second example should show a little more customization in the
+#  argument passed to the sample function. The last examples should show that
+#  it's not necessary to actually import anything from noise_schedulers.py. It
+#  should just define a scheduler from scratch using the base NoiseScheduler
+#  protocol (kinda bare bone maximal flexibility approach).
+# - You will double check the signatures of all methods from the
+#   noise_schedulers to make sure that they are consistent with the base NoiseScheduler
+#   protocol.
 
 
-# TODO-CURSOR: for all Tensor type hints here, you will move to jaxtyping, the
-# same way as it is done in base.py
 def sample(
     denoiser: DiffusionDenoiser,
-    xN: Tensor,
+    xN: Float[Tensor, "B *dims"],  # noqa: F821
+    noise_scheduler: NoiseScheduler,
+    num_steps: int,
     solver: str | Solver = "heun",
-    time_steps: Tensor | None = None,
-    noise_schedule: str | NoiseScheduler | None = None,
-    noise_schedule_options: Dict[str, Any] | None = None,
+    time_steps: Float[Tensor, "N"] | None = None,  # noqa: F821
     solver_options: Dict[str, Any] | None = None,
     time_eval: list[int] | None = None,
-) -> Tensor | List[Tensor]:
+) -> Float[Tensor, "B *dims"] | List[Float[Tensor, "B *dims"]]:  # noqa: F821
     r"""
     Generate batched samples from a diffusion model.
 
-    This function integrates the diffusion ODE/SDE from a noisy initial state
-    :math:`\mathbf{x}_T` to produce clean samples. It supports various
-    numerical solvers and noise schedules.
+    This interface is quite generic and can be used to generate samples from
+    any reverse diffusion process of the form:
 
-    The diffusion time-steps can be specified in two ways:
+    .. math::
+        \mathbf{x}_{n-1} = G (\mathbf{x}_{i \geq n}, t_{i \geq n-1})
 
-    1. **Explicit time-steps**: Pass a 1D tensor to ``time_steps`` containing
-       the exact diffusion time values. In this case, ``noise_schedule``,
-       and ``noise_schedule_options`` must be ``None``.
+    This covers both ODE/SDE-based sampling (e.g. VP, VE, EDM) and discrete
+    Markov chain-based sampling (e.g. DDPM). The exact expression of the
+    operator :math:`G` depends on the combination of:
 
-    2. **Generated time-steps**: Provide a ``noise_schedule`` to generate the
-       time-step values automatically. The ``noise_schedule`` can be either a
-       string key (with optional ``noise_schedule_options``) or a
-       pre-configured
-       :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler` instance
-       (in which case ``noise_schedule_options`` must be ``None``).
+    - The ``solver``, which determines the numerical method to update
+      the latent state :math:`\mathbf{x}_n` at each time-step.
+    - The ``denoiser``, which can be the right hand side for ODE/SDE-based
+      sampling, the denoised latent state for discrete Markov chain-based
+      sampling, etc.
 
-    Similarly, the ``solver`` can be specified as a string key (with optional
-    ``solver_options``), or as a pre-configured
-    :class:`~physicsnemo.diffusion.samplers.solvers.Solver` instance (in
-    which case ``solver_options`` must be ``None``).
+    Typically, the update applied is roughly:
 
-    The operator that progressively removes noise is specified by the
-    ``denoiser`` argument. It expects an :math:`x_0`-predictor or clean data
-    predictor. It must implement the following signature, specified by the
-    :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface:
+    .. math::
+        \mathbf{x}_{n-1} = \text{Step}(F(\mathbf{x}_n, t_n);
+        \mathbf{x}_n, t_n, t_{n-1})
+
+    where :math:`F` is the ``denoiser`` and :math:`\text{Step}` is the
+    update rule of the solver, implemented by the
+    :meth:`~physicsnemo.diffusion.samplers.solvers.Solver.step` method.
+    Variants are possible by passing more complex solvers and denoisers.
+
+    The ``solver`` can be specified as a string key (with optional
+    ``solver_options``), or as a pre-configured object implementing the
+    :class:`~physicsnemo.diffusion.samplers.solvers.Solver` interface (in
+    which case ``solver_options`` must be ``None``). The solver must implement
+    a ``step`` method with the following signature:
+
+    .. code-block:: python
+
+        def step(self, x: Tensor, t_cur: Tensor, t_next: Tensor) -> Tensor: ...
+
+    Any object that implements the
+    :class:`~physicsnemo.diffusion.samplers.solvers.Solver` interface can be
+    used as a solver.
+
+    The ``denoiser`` must implement the
+    :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface, with the
+    following signature:
 
     .. code-block:: python
 
         def denoiser(x: Tensor, t: Tensor) -> Tensor: ...
 
+    Any object that implements the
+    :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface can be used as
+    a denoiser.
+
+    Time-steps are generated by the ``noise_scheduler`` using its
+    :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.timesteps`
+    method with the provided ``num_steps``. To use custom time-steps, pass a
+    1D tensor to ``time_steps`` which will override the schedule's time-steps.
+
     Parameters
     ----------
     denoiser : DiffusionDenoiser
-        A callable that takes ``(x, t)`` and returns an estimate of the
-        clean data :math:`\mathbf{x}_0`. See
+        A callable that takes ``(x, t)`` and returns a denoising term with the
+        same shape as the latent state ``xN``. See
         :class:`~physicsnemo.diffusion.DiffusionDenoiser` for the expected
-        interface.
+        interface. Can usually be obtained by using
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`
+        from a noise scheduler (typically from the same noise scheduler
+        instance as the ``noise_scheduler`` argument, but can be different if
+        desired).
     xN : Tensor
         Initial noisy latent state :math:`\mathbf{x}_N` of shape :math:`(B, *)`
         where :math:`B` is the batch size. All batch elements share the same
         diffusion time values. The ``dtype`` and ``device`` of ``xN`` determine
         the ``dtype`` and ``device`` of the generated samples and any
-        internally created tensors. Can typically be obtained by using
+        internally created tensors. Can usually be obtained by using
         :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.init_latents`
-        from a noise scheduler.
+        from a noise scheduler (typically from the same noise scheduler
+        instance as the ``noise_scheduler`` argument, but can be different if
+        desired).
+    noise_scheduler : NoiseScheduler
+        The noise scheduler instance used for generating time-steps. The
+        schedule's
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.timesteps`
+        method is called with ``num_steps`` to produce the diffusion time
+        values, unless ``time_steps`` is provided to override them.
+    num_steps : int
+        Number of sampling steps. Passed to the noise scheduler's
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.timesteps`
+        method. Ignored when ``time_steps`` is provided.
     solver : str | Solver, default="heun"
-        The numerical solver to use. Can be a string key or an instance of a
-        subclass of :class:`~physicsnemo.diffusion.samplers.solvers.Solver`.
-        When `solver`` is a string, ``solver_options`` can be provided to
-        configure the solver; when it is a :class:`Solver` instance,
+        The numerical solver to use. Can be a string key or an object
+        implementing the
+        :class:`~physicsnemo.diffusion.samplers.solvers.Solver` interface.
+        When ``solver`` is a string, ``solver_options`` can be provided to
+        configure the solver; when it is a
+        :class:`~physicsnemo.diffusion.samplers.solvers.Solver` instance,
         ``solver_options`` must be ``None``. Available string keys are:
 
         * ``"euler"``: First-order Euler method. Fast but lower quality.
@@ -136,40 +185,15 @@ def sample(
           :class:`~physicsnemo.diffusion.samplers.solvers.EDMStochasticHeunSolver`.
 
     time_steps : Tensor | None, default=None
-        A 1D tensor of shape :math:`(N + 1,)` containing the explicit diffusion
-        time values :math:`t_N, t_{N-1}, ..., t_0` in decreasing order. To
-        produce a fully denoised latent state :math:`\mathbf{x}_0`, the last
-        element must be :math:`t_0 = 0`. To generate time-steps from a noise
-        schedule, must be set to ``None``. When ``time_steps`` is a tensor,
-        ``noise_schedule`` should not be provided.
-    noise_schedule : str | NoiseScheduler | None, default=None
-        The noise schedule for generating time-steps. Required when
-        ``time_steps`` is ``None``.
-        Can be a string key (with optional ``noise_schedule_options``) or an
-        instance of
-        :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler`.
-        Available string keys:
-
-        * ``"edm"``: EDM schedule with polynomial spacing. See
-          :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler`.
-
-        * ``"vp"``: Variance Preserving schedule. See
-          :class:`~physicsnemo.diffusion.noise_schedulers.VPNoiseScheduler`.
-
-        * ``"ve"``: Variance Exploding schedule. See
-          :class:`~physicsnemo.diffusion.noise_schedulers.VENoiseScheduler`.
-
-        * ``"iddpm"``: Improved DDPM schedule. See
-          :class:`~physicsnemo.diffusion.noise_schedulers.IDDPMNoiseScheduler`.
-
-    noise_schedule_options : Dict[str, Any] | None, default=None
-        Additional options passed to the noise schedule constructor. Only
-        used when ``noise_schedule`` is a string; must be ``None`` in all other
-        cases. See individual scheduler classes for available options.
+        Optional 1D tensor of shape :math:`(N + 1,)` containing explicit
+        diffusion time values :math:`t_N, t_{N-1}, ..., t_0` in decreasing
+        order. If provided, overrides the time-steps from ``noise_scheduler``
+        and ``num_steps`` is ignored. To produce a fully denoised latent state
+        :math:`\mathbf{x}_0`, the last element must be :math:`t_0 = 0`.
     solver_options : Dict[str, Any] | None, default=None
         Additional options passed to the solver constructor. Only used when
-        ``solver`` is a string; must be ``None`` in all other cases.
-        See individual solver classes for available
+        ``solver`` is a string; must be ``None`` when ``solver`` is a
+        :class:`Solver` instance. See individual solver classes for available
         options.
     time_eval : List[int] | None, default=None
         Indices of time-steps at which to return intermediate samples. If
@@ -191,55 +215,76 @@ def sample(
 
     Examples
     --------
-    Generate samples using the Heun solver with EDM noise schedule and a
-    simple toy denoiser:
+
+    # TODO-CURSOR: these exxamples are okay-ish, but that's mot really what I
+    was thinking of.
+    - In examples 1 and 2 the denoiser should be coming from the
+    noise scheduler itself, not from the user. That's the normal usage pattern.
+    In the example 3 it can be created by the user from scratch.
+    **Example 1:** Minimal usage with built-in noise scheduler.
+    - Same thing for the xN which should be coming from the noise scheduler
+    itself, with the init_latents method.
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.samplers import sample
+    >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+    >>>
+    >>> denoiser = lambda x, t: x * 0.9
+    >>> scheduler = EDMNoiseScheduler()
+    >>> xN = torch.randn(2, 3, 8, 8) * 80
+    >>> x0 = sample(denoiser, xN, scheduler, num_steps=10)
+    >>> x0.shape
+    torch.Size([2, 3, 8, 8])
+
+    **Example 2:** Using custom time-steps and the Euler solver for faster
+    sampling.
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.samplers import sample
+    >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+    >>>
+    >>> denoiser = lambda x, t: x * 0.9
+    >>> scheduler = EDMNoiseScheduler()
+    >>> xN = torch.randn(2, 3, 8, 8) * 80
+    >>> custom_t = torch.tensor([80.0, 40.0, 20.0, 10.0, 5.0, 0.0])
+    >>> x0 = sample(denoiser, xN, scheduler, num_steps=0, time_steps=custom_t,
+    ...             solver="euler")
+    >>> x0.shape
+    torch.Size([2, 3, 8, 8])
+
+    **Example 3:** Bare-bone approach defining a custom scheduler from scratch
+    without importing any noise scheduler class. Any object implementing the
+    :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler` protocol
+    can be used:
 
     >>> import torch
     >>> from physicsnemo.diffusion.samplers import sample
     >>>
+    >>> class MinimalScheduler:
+    ...     def timesteps(self, num_steps, *, device=None, dtype=None):
+    ...         return torch.linspace(1.0, 0.0, num_steps + 1,
+    ...                               device=device, dtype=dtype)
+    ...     def sample_time(self, N, *, device=None, dtype=None):
+    ...         return torch.rand(N, device=device, dtype=dtype)
+    ...     def add_noise(self, x0, time):
+    ...         return x0 + time.view(-1, 1, 1, 1) * torch.randn_like(x0)
+    ...     def init_latents(self, spatial_shape, tN, *, device=None,
+    ...                      dtype=None):
+    ...         return torch.randn(tN.shape[0], *spatial_shape,
+    ...                            device=device, dtype=dtype)
+    ...     def get_denoiser(self, denoiser_in, **kwargs):
+    ...         return denoiser_in
+    >>>
     >>> denoiser = lambda x, t: x * 0.9
-    >>> xN = torch.randn(2, 3, 64, 64) * 80
-    >>> x0 = sample(
-    ...     denoiser,
-    ...     xN,
-    ...     solver="heun",
-    ...     noise_schedule="edm",
-    ... )
+    >>> scheduler = MinimalScheduler()
+    >>> xN = torch.randn(2, 3, 8, 8)
+    >>> x0 = sample(denoiser, xN, scheduler, num_steps=10, solver="euler")
     >>> x0.shape
-    torch.Size([2, 3, 64, 64])
+    torch.Size([2, 3, 8, 8])
     """
     solver_options = solver_options or {}
-    noise_schedule_options = noise_schedule_options or {}
-
-    # Validation time-stepping
-    if isinstance(time_steps, Tensor):
-        if noise_schedule is not None:
-            raise ValueError("noise_schedule must be None when time_steps is a Tensor.")
-        if noise_schedule_options:
-            raise ValueError(
-                "noise_schedule_options must be None when time_steps is a Tensor."
-            )
-    elif time_steps is None:
-        # Case 2: Generate time-steps from noise_schedule
-        if noise_schedule is None:
-            raise ValueError("noise_schedule must be provided when time_steps is None.")
-        if isinstance(noise_schedule, NoiseScheduler) and (
-            noise_schedule_options is not None
-        ):
-            raise ValueError(
-                "noise_schedule_options must be None when noise_schedule is a "
-                "NoiseScheduler instance."
-            )
-    else:
-        raise TypeError(
-            f"time_steps must be a Tensor or None, got {type(time_steps).__name__}."
-        )
 
     # Validate and instantiate solver
-    if isinstance(solver, Solver) and solver_options:
-        raise ValueError(
-            "solver_options must be None when solver is a Solver instance."
-        )
     if isinstance(solver, str):
         if solver not in SOLVERS:
             available = ", ".join(f'"{k}"' for k in SOLVERS.keys())
@@ -248,34 +293,21 @@ def sample(
             )
         solver_cls = SOLVERS[solver]
         solver_ = solver_cls(denoiser, **solver_options)
-    elif isinstance(solver, Solver):
-        solver_ = solver
     else:
-        raise TypeError(
-            f"solver must be a string or Solver instance, got {type(solver).__name__}."
-        )
-
-    # Validate and instantiate noise schedule
-    if isinstance(noise_schedule, str):
-        if noise_schedule not in NOISE_SCHEDULES:
-            available = ", ".join(f'"{k}"' for k in NOISE_SCHEDULES.keys())
+        # Assume solver is a Solver-like object with a step method
+        if solver_options:
             raise ValueError(
-                f"Unknown noise_schedule '{noise_schedule}'. "
-                f"Available schedules: {available}."
+                "solver_options must be None when solver is a Solver instance."
             )
-        schedule_cls = NOISE_SCHEDULES[noise_schedule]
-        schedule_ = schedule_cls(**noise_schedule_options)
-    elif isinstance(noise_schedule, NoiseScheduler):
-        schedule_ = noise_schedule
+        solver_ = solver
 
-    # Generate the time-step values
-    if time_steps is None:
-        t_steps = schedule_.timesteps(device=xN.device, dtype=xN.dtype)
-    else:
+    # Generate time-steps from noise_scheduler or use provided ones
+    if time_steps is not None:
         t_steps = time_steps.to(device=xN.device, dtype=xN.dtype)
+    else:
+        t_steps = noise_scheduler.timesteps(num_steps, device=xN.device, dtype=xN.dtype)
 
     # Main sampling loop
-    # -------------------------------------------------------------------------
     samples: List[Tensor] = []
     x = xN
     n_steps = len(t_steps) - 1  # Last element is 0 (final time)

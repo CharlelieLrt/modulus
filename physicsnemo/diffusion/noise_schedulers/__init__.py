@@ -17,7 +17,7 @@
 from .noise_schedulers import (  # noqa: F401
     EDMNoiseScheduler,
     IDDPMNoiseScheduler,
+    LinearGaussianNoiseScheduler,
     NoiseScheduler,
     VENoiseScheduler,
-    VPNoiseScheduler,
 )
