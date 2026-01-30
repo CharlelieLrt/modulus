@@ -63,7 +63,7 @@ def main():
     validation_frequency = 1000
     num_validation_samples = 100
     logging_frequency = 1000
-    use_apex = True
+    use_apex = False
 
     # Initialize distributed environment
     DistributedManager.initialize()
@@ -142,8 +142,8 @@ def main():
         },
     )
     time_coord = root["time"][:]
-    sidx = np.where(time_coord == np.datetime64("2023-01-01T00:00:00"))[0][0]
-    eidx = np.where(time_coord == np.datetime64("2024-12-31T23:00:00"))[0][0]
+    sidx = np.where(time_coord == np.datetime64("2021-01-01T00:00:00"))[0][0]
+    eidx = np.where(time_coord == np.datetime64("2025-12-31T23:00:00"))[0][0]
     time_idx = np.arange(sidx, eidx)
     dataset = HRRRSurfaceDataset(
         "s3://hrrr-surface-sda/zarr-v2",
@@ -167,7 +167,7 @@ def main():
     num_training_samples = len(dataset)
 
     sidx = np.where(time_coord == np.datetime64("2025-01-01T00:00:00"))[0][0]
-    eidx = np.where(time_coord == np.datetime64("2025-06-01T00:00:00"))[0][0]
+    eidx = np.where(time_coord == np.datetime64("2025-12-31T00:00:00"))[0][0]
     time_idx = np.arange(sidx, eidx, 25)
     dataset = HRRRSurfaceDataset(
         "s3://hrrr-surface-sda/zarr-v2",
