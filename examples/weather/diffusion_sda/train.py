@@ -143,7 +143,7 @@ def main():
     )
     time_coord = root["time"][:]
     sidx = np.where(time_coord == np.datetime64("2021-01-01T00:00:00"))[0][0]
-    eidx = np.where(time_coord == np.datetime64("2025-12-31T23:00:00"))[0][0]
+    eidx = np.where(time_coord == np.datetime64("2024-12-31T23:00:00"))[0][0]
     time_idx = np.arange(sidx, eidx)
     dataset = HRRRSurfaceDataset(
         "s3://hrrr-surface-sda/zarr-v2",
