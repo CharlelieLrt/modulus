@@ -70,7 +70,7 @@ class BaseAffinePreconditioner(Module, ABC):
         model(
             x: torch.Tensor,  # Shape: (B, *)
             t: torch.Tensor,  # Shape: (B,)
-            condition: TensorDict,
+            condition: torch.Tensor | TensorDict | None = None,
             **model_kwargs: Any,
         ) -> torch.Tensor  # Shape: (B, *)
 
@@ -103,9 +103,11 @@ class BaseAffinePreconditioner(Module, ABC):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : TensorDict
-        TensorDict containing conditioning tensors with batch size :math:`B`
-        matching that of ``x``. Passed to the wrapped ``model`` unchanged.
+    condition : torch.Tensor, TensorDict, or None, optional, default=None
+        Single Tensor or a TensorDict containing conditioning tensors with
+        batch size :math:`B` matching that of ``x``. Pass ``None`` for an
+        unconditional model.
+
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -157,6 +159,7 @@ class BaseAffinePreconditioner(Module, ABC):
     We first define a simple model to wrap:
 
     >>> import torch
+    >>> from tensordict import TensorDict
     >>> from physicsnemo.nn import Module
     >>> class SimpleModel(Module):
     ...     def __init__(self, channels: int):
@@ -164,7 +167,7 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         self.channels = channels
     ...         self.net = torch.nn.Conv2d(channels, channels, 1)
     ...
-    ...     def forward(self, x, t, condition):
+    ...     def forward(self, x, t, condition=None):
     ...         return self.net(x)
 
     Now we define the EDM preconditioner:
@@ -172,7 +175,7 @@ class BaseAffinePreconditioner(Module, ABC):
     >>> from physicsnemo.diffusion.preconditioners import (
     ...     BaseAffinePreconditioner,
     ... )
-    >>> class EDMPreconditioner(BaseAffinePreconditioner):
+    >>> class SimpleEDMPreconditioner(BaseAffinePreconditioner):
     ...     def __init__(self, model, sigma_data: float = 0.5):
     ...         super().__init__(model)
     ...         self.sigma_data = sigma_data
@@ -188,10 +191,11 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         return c_in, c_noise, c_out, c_skip
     ...
     >>> model = SimpleModel(channels=3)
-    >>> precond = EDMPreconditioner(model, sigma_data=0.5)
+    >>> precond = SimpleEDMPreconditioner(model, sigma_data=0.5)
     >>> x = torch.randn(2, 3, 16, 16)
     >>> t = torch.rand(2)
-    >>> out = precond(x, t, {})
+    >>> condition = TensorDict({}, batch_size=[2])
+    >>> out = precond(x, t, condition)
     >>> out.shape
     torch.Size([2, 3, 16, 16])
 
@@ -218,9 +222,105 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         return c_in, c_noise, c_out, c_skip
     ...
     >>> precond_ve = VEPreconditioner(model)
-    >>> out_ve = precond_ve(x, t, condition={})
+    >>> out_ve = precond_ve(x, t, condition)
     >>> out_ve.shape
     torch.Size([2, 3, 16, 16])
+
+    **Wrapping existing models to satisfy the DiffusionModel interface**
+
+    Some models in PhysicsNeMo have signatures that differ from the
+    :class:`~physicsnemo.diffusion.DiffusionModel` interface. Below are
+    examples showing how to write thin wrappers to make them compatible
+    with preconditioners, including image-based conditioning via channel
+    concatenation.
+
+    **Example: Wrapping SongUNet**
+
+    The :class:`~physicsnemo.models.diffusion_unets.SongUNet` model has
+    the signature ``forward(x, noise_labels, class_labels, augment_labels)``.
+    We wrap it to match ``forward(x, t, condition)``, where ``condition``
+    contains both class labels (1D vector) and an image to concatenate
+    channel-wise:
+
+    >>> from physicsnemo.models.diffusion_unets import SongUNet
+    >>> from physicsnemo.diffusion import DiffusionModel
+    >>> from tensordict import TensorDict
+    >>> class SongUNetWrapper(Module):
+    ...     def __init__(self, img_channels, cond_channels, label_dim, **kwargs):
+    ...         super().__init__()
+    ...         # in_channels = img_channels + cond_channels for concatenation
+    ...         self.net = SongUNet(
+    ...             in_channels=img_channels + cond_channels,
+    ...             out_channels=img_channels,
+    ...             label_dim=label_dim,
+    ...             **kwargs,
+    ...         )
+    ...
+    ...     def forward(self, x, t, condition):
+    ...         # Concatenate image condition "y" channel-wise to input
+    ...         y = condition["y"]  # shape: (B, C_cond, H, W)
+    ...         x_cat = torch.cat([x, y], dim=1)
+    ...         # Extract 1D vector condition for class_labels
+    ...         class_labels = condition["class_labels"]  # shape: (B, label_dim)
+    ...         return self.net(x_cat, noise_labels=t, class_labels=class_labels)
+    ...
+    >>> wrapped = SongUNetWrapper(
+    ...     img_channels=2, cond_channels=1, label_dim=4, img_resolution=8
+    ... )
+    >>> isinstance(wrapped, DiffusionModel)
+    True
+    >>> x = torch.rand(1, 2, 8, 8)
+    >>> t = torch.rand(1)
+    >>> condition = TensorDict({
+    ...     "y": torch.rand(1, 1, 8, 8),           # image condition
+    ...     "class_labels": torch.rand(1, 4),      # 1D vector condition
+    ... }, batch_size=[1])
+    >>> out = wrapped(x, t, condition)
+    >>> out.shape
+    torch.Size([1, 2, 8, 8])
+
+    **Example: Wrapping DiT**
+
+    The :class:`~physicsnemo.experimental.models.dit.DiT` model has
+    the signature ``forward(x, t, condition, ...)``. We wrap it to support
+    both image conditioning (via channel concatenation) and vector
+    conditioning:
+
+    >>> from physicsnemo.experimental.models.dit import DiT
+    >>> class DiTWrapper(Module):
+    ...     def __init__(self, img_channels, cond_channels, cond_dim, **kwargs):
+    ...         super().__init__()
+    ...         # in_channels = img_channels + cond_channels for concatenation
+    ...         self.net = DiT(
+    ...             in_channels=img_channels + cond_channels,
+    ...             out_channels=img_channels,
+    ...             condition_dim=cond_dim,
+    ...             **kwargs,
+    ...         )
+    ...
+    ...     def forward(self, x, t, condition):
+    ...         # Concatenate image condition "y" channel-wise to input
+    ...         y = condition["y"]  # shape: (B, C_cond, H, W)
+    ...         x_cat = torch.cat([x, y], dim=1)
+    ...         # Extract 1D vector condition
+    ...         vec = condition["vec"]  # shape: (B, cond_dim)
+    ...         return self.net(x_cat, t, condition=vec)
+    ...
+    >>> wrapped_dit = DiTWrapper(
+    ...     img_channels=2, cond_channels=1, cond_dim=4,
+    ...     input_size=8, patch_size=4, attention_backend="timm",
+    ... )
+    >>> isinstance(wrapped_dit, DiffusionModel)
+    True
+    >>> x = torch.rand(1, 2, 8, 8)
+    >>> t = torch.rand(1)
+    >>> condition = TensorDict({
+    ...     "y": torch.rand(1, 1, 8, 8),  # image condition
+    ...     "vec": torch.rand(1, 4),       # 1D vector condition
+    ... }, batch_size=[1])
+    >>> out = wrapped_dit(x, t, condition)
+    >>> out.shape
+    torch.Size([1, 2, 8, 8])
     """
 
     def __init__(
@@ -294,7 +394,7 @@ class BaseAffinePreconditioner(Module, ABC):
         self,
         x: torch.Tensor,
         t: torch.Tensor,
-        condition: TensorDict,
+        condition: torch.Tensor | TensorDict | None = None,
         **model_kwargs: Any,
     ) -> torch.Tensor:
         if not torch.compiler.is_compiling():
@@ -304,12 +404,18 @@ class BaseAffinePreconditioner(Module, ABC):
                     f"Expected t to have shape ({B},) matching batch size of "
                     f"x, but got {t.shape}."
                 )
-            if condition.batch_size and condition.batch_size[0] != B:
-                cond_B = condition.batch_size[0]
-                raise ValueError(
-                    f"Condition TensorDict has batch size {cond_B} "
-                    f"but expected {B} to match x."
-                )
+            if isinstance(condition, TensorDict):
+                if condition.batch_size and condition.batch_size[0] != B:
+                    raise ValueError(
+                        f"Condition TensorDict has batch size {condition.batch_size[0]} "
+                        f"but expected {B} to match x."
+                    )
+            elif isinstance(condition, torch.Tensor):
+                if condition.shape[0] != B:
+                    raise ValueError(
+                        f"Condition tensor has batch size {condition.shape[0]} "
+                        f"but expected {B} to match x."
+                    )
 
         # Map time step to noise level via sigma method
         sigma_t = self.sigma(t).reshape(-1, *([1] * (x.ndim - 1)))
@@ -318,12 +424,19 @@ class BaseAffinePreconditioner(Module, ABC):
         c_in, c_noise, c_out, c_skip = self.compute_coefficients(sigma_t)
 
         # Forward through the underlying model
-        F_x = self.model(
-            c_in * x,
-            c_noise.flatten(),
-            condition,
-            **model_kwargs,
-        )
+        if condition is not None:
+            F_x = self.model(
+                c_in * x,
+                c_noise.flatten(),
+                condition=condition,
+                **model_kwargs,
+            )
+        else:
+            F_x = self.model(
+                c_in * x,
+                c_noise.flatten(),
+                **model_kwargs,
+            )
 
         D_x = c_skip * x + c_out * F_x
 
@@ -373,9 +486,10 @@ class VPPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : TensorDict
-        TensorDict containing conditioning tensors with batch size :math:`B`
-        matching that of ``x``. Passed to the wrapped ``model`` unchanged.
+    condition : torch.Tensor, TensorDict, or None, optional, default=None
+        Single Tensor or a TensorDict containing conditioning tensors with
+        batch size :math:`B` matching that of ``x``. Pass ``None`` for an
+        unconditional model.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -389,6 +503,25 @@ class VPPreconditioner(BaseAffinePreconditioner):
     ----
     Reference: `Score-Based Generative Modeling through Stochastic
     Differential Equations <https://arxiv.org/abs/2011.13456>`_
+
+    Examples
+    --------
+    >>> import torch
+    >>> from physicsnemo.core import Module
+    >>> # Define a simple model satisfying the diffusion model interface
+    >>> class SimpleModel(Module):
+    ...     def __init__(self, channels: int):
+    ...         super().__init__()
+    ...         self.net = torch.nn.Conv2d(channels, channels, 1)
+    ...     def forward(self, x, t, condition=None):
+    ...         return self.net(x)
+    >>> model = SimpleModel(channels=3)
+    >>> precond = VPPreconditioner(model, beta_d=19.9, beta_min=0.1, M=1000)
+    >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
+    >>> t = torch.rand(2)              # diffusion time for each sample
+    >>> out = precond(x, t, condition=None)
+    >>> out.shape
+    torch.Size([2, 3, 16, 16])
     """
 
     def __init__(
@@ -481,9 +614,10 @@ class VEPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : TensorDict
-        TensorDict containing conditioning tensors with batch size :math:`B`
-        matching that of ``x``. Passed to the wrapped ``model`` unchanged.
+    condition : torch.Tensor, TensorDict, or None, optional, default=None
+        Single Tensor or a TensorDict containing conditioning tensors with
+        batch size :math:`B` matching that of ``x``. Pass ``None`` for an
+        unconditional model.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -497,6 +631,25 @@ class VEPreconditioner(BaseAffinePreconditioner):
     ----
     Reference: `Score-Based Generative Modeling through Stochastic
     Differential Equations <https://arxiv.org/abs/2011.13456>`_
+
+    Examples
+    --------
+    >>> import torch
+    >>> from physicsnemo.core import Module
+    >>> # Define a simple model satisfying the diffusion model interface
+    >>> class SimpleModel(Module):
+    ...     def __init__(self, channels: int):
+    ...         super().__init__()
+    ...         self.net = torch.nn.Conv2d(channels, channels, 1)
+    ...     def forward(self, x, t, condition=None):
+    ...         return self.net(x)
+    >>> model = SimpleModel(channels=3)
+    >>> precond = VEPreconditioner(model)
+    >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
+    >>> t = torch.rand(2)              # diffusion time for each sample
+    >>> out = precond(x, t, condition=None)
+    >>> out.shape
+    torch.Size([2, 3, 16, 16])
     """
 
     def __init__(self, model: Module) -> None:
@@ -566,9 +719,10 @@ class IDDPMPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : TensorDict
-        TensorDict containing conditioning tensors with batch size :math:`B`
-        matching that of ``x``. Passed to the wrapped ``model`` unchanged.
+    condition : torch.Tensor, TensorDict, or None, optional, default=None
+        Single Tensor or a TensorDict containing conditioning tensors with
+        batch size :math:`B` matching that of ``x``. Pass ``None`` for an
+        unconditional model.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -582,6 +736,25 @@ class IDDPMPreconditioner(BaseAffinePreconditioner):
     ----
     Reference: `Improved Denoising Diffusion Probabilistic Models
     <https://arxiv.org/abs/2102.09672>`_
+
+    Examples
+    --------
+    >>> import torch
+    >>> from physicsnemo.core import Module
+    >>> # Define a simple model satisfying the diffusion model interface
+    >>> class SimpleModel(Module):
+    ...     def __init__(self, channels: int):
+    ...         super().__init__()
+    ...         self.net = torch.nn.Conv2d(channels, channels, 1)
+    ...     def forward(self, x, t, condition=None):
+    ...         return self.net(x)
+    >>> model = SimpleModel(channels=3)
+    >>> precond = IDDPMPreconditioner(model, C_1=0.001, C_2=0.008, M=1000)
+    >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
+    >>> t = torch.rand(2)              # diffusion time for each sample
+    >>> out = precond(x, t, condition=None)
+    >>> out.shape
+    torch.Size([2, 3, 16, 16])
     """
 
     def __init__(
@@ -675,9 +848,10 @@ class EDMPreconditioner(BaseAffinePreconditioner):
         batch size and :math:`*` denotes any number of additional dimensions.
     t : torch.Tensor
         Diffusion time tensor of shape :math:`(B,)`.
-    condition : TensorDict
-        TensorDict containing conditioning tensors with batch size :math:`B`
-        matching that of ``x``. Passed to the wrapped ``model`` unchanged.
+    condition : torch.Tensor, TensorDict, or None, optional, default=None
+        Single Tensor or a TensorDict containing conditioning tensors with
+        batch size :math:`B` matching that of ``x``. Pass ``None`` for an
+        unconditional model.
     **model_kwargs : Any
         Additional keyword arguments passed to the underlying model.
 
@@ -691,6 +865,25 @@ class EDMPreconditioner(BaseAffinePreconditioner):
     ----
     Reference: `Elucidating the Design Space of Diffusion-Based
     Generative Models <https://arxiv.org/abs/2206.00364>`_
+
+    Examples
+    --------
+    >>> import torch
+    >>> from physicsnemo.core import Module
+    >>> # Define a simple model satisfying the diffusion model interface
+    >>> class SimpleModel(Module):
+    ...     def __init__(self, channels: int):
+    ...         super().__init__()
+    ...         self.net = torch.nn.Conv2d(channels, channels, 1)
+    ...     def forward(self, x, t, condition=None):
+    ...         return self.net(x)
+    >>> model = SimpleModel(channels=3)
+    >>> precond = EDMPreconditioner(model, sigma_data=0.5)
+    >>> x = torch.randn(2, 3, 16, 16)  # batch of 2 images
+    >>> t = torch.rand(2)              # diffusion time for each sample
+    >>> out = precond(x, t, condition=None)
+    >>> out.shape
+    torch.Size([2, 3, 16, 16])
     """
 
     def __init__(

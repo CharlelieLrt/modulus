@@ -58,11 +58,16 @@ class ConvModel(Module):
         self,
         x: torch.Tensor,
         t: torch.Tensor,
-        condition: TensorDict,
+        condition: TensorDict | None = None,
         **kwargs: Any,
     ) -> torch.Tensor:
-        y = condition["y"]
-        x_cond = torch.cat([x, y], dim=1)
+        if condition is not None:
+            y = condition["y"]
+            x_cond = torch.cat([x, y], dim=1)
+        else:
+            # For unconditional: duplicate x to match expected channels
+            y = torch.zeros_like(x)
+            x_cond = torch.cat([x, y], dim=1)
         out = self.net(x_cond)
         t_scale = t.view(-1, 1, 1, 1)
         return out + t_scale
@@ -81,7 +86,7 @@ class LinearModel(Module):
         self,
         x: torch.Tensor,
         t: torch.Tensor,
-        condition: TensorDict,
+        condition: TensorDict | None = None,
         **kwargs: Any,
     ) -> torch.Tensor:
         out = self.net(x)
@@ -149,7 +154,6 @@ GLOBAL_SEED = 42
 def deterministic_settings():
     """Set deterministic settings for reproducibility, then restore old state."""
     # Save old state
-    old_deterministic = torch.are_deterministic_algorithms_enabled()
     old_cudnn_deterministic = torch.backends.cudnn.deterministic
     old_cudnn_benchmark = torch.backends.cudnn.benchmark
     old_matmul_tf32 = torch.backends.cuda.matmul.allow_tf32
@@ -160,7 +164,6 @@ def deterministic_settings():
         torch.manual_seed(GLOBAL_SEED)
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(GLOBAL_SEED)
-        torch.use_deterministic_algorithms(True)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
         torch.backends.cuda.matmul.allow_tf32 = False
@@ -168,7 +171,6 @@ def deterministic_settings():
         yield
     finally:
         # Restore old state
-        torch.use_deterministic_algorithms(old_deterministic)
         torch.backends.cudnn.deterministic = old_cudnn_deterministic
         torch.backends.cudnn.benchmark = old_cudnn_benchmark
         torch.backends.cuda.matmul.allow_tf32 = old_matmul_tf32
@@ -528,7 +530,7 @@ class TestNonRegression:
         x = batch_data["x"]
         t = batch_data["t"]
         condition = batch_data["condition"]
-        out = precond(x, t, condition)
+        out = precond(x, t, condition=condition)
 
         ref_file = f"{precond_name}_{arch_name}_forward.pth"
         ref_data = load_or_create_reference(ref_file, lambda: {"out": out.cpu()})
@@ -558,7 +560,7 @@ class TestNonRegression:
         x = batch_data["x"]
         t = batch_data["t"]
         condition = batch_data["condition"]
-        out = precond(x, t, condition)
+        out = precond(x, t, condition=condition)
 
         ref_file = f"{precond_name}_{arch_name}_forward.pth"
         ref_data = load_or_create_reference(ref_file, lambda: {"out": out.cpu()})
@@ -595,7 +597,7 @@ class TestAllPreconditioners:
         condition = batch_data["condition"]
 
         with pytest.raises(ValueError, match="Expected t to have shape"):
-            precond(x, t_wrong, condition)
+            precond(x, t_wrong, condition=condition)
 
     def test_forward_dtype_preservation(
         self,
@@ -612,7 +614,7 @@ class TestAllPreconditioners:
         t = batch_data["t"]
         condition = batch_data["condition"]
 
-        output = precond(x, t, condition)
+        output = precond(x, t, condition=condition)
 
         assert output.dtype == x.dtype
 
@@ -636,7 +638,7 @@ class TestAllPreconditioners:
         )
 
         with pytest.raises(ValueError, match="batch size"):
-            precond(x, t, condition)
+            precond(x, t, condition=condition)
 
     def test_gradient_flow(
         self,
@@ -653,7 +655,7 @@ class TestAllPreconditioners:
         t = batch_data["t"]
         condition = batch_data["condition"]
 
-        output = precond(x, t, condition)
+        output = precond(x, t, condition=condition)
         loss = output.sum()
         loss.backward()
 
