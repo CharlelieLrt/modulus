@@ -316,15 +316,17 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         super().__init__()
     ...         self.net = DiT(**dit_kwargs)
     ...
-    ...     def forward(self, x, t, condition=None. **dit_kwargs):
+    ...     def forward(self, x, t, condition=None, **kwargs):
     ...         # Extract tensor from TensorDict if provided
     ...         if isinstance(condition, TensorDict):
     ...             cond_tensor = condition["embedding"]  # or relevant key
     ...         else:
     ...             cond_tensor = condition  # already a Tensor or None
-    ...         return self.net(x, t, condition=cond_tensor, **dit_kwargs)
+    ...         return self.net(x, t, condition=cond_tensor, **kwargs)
     ...
-    >>> wrapped_dit = DiTWrapper(input_size=8, patch_size=4, in_channels=2)
+    >>> wrapped_dit = DiTWrapper(
+    ...     input_size=8, patch_size=4, in_channels=2, attention_backend="timm"
+    ... )
     >>> isinstance(wrapped_dit, DiffusionModel)
     True
     >>> x = torch.rand(1, 2, 8, 8)
