@@ -159,6 +159,7 @@ class BaseAffinePreconditioner(Module, ABC):
     We first define a simple model to wrap:
 
     >>> import torch
+    >>> from tensordict import TensorDict
     >>> from physicsnemo.nn import Module
     >>> class SimpleModel(Module):
     ...     def __init__(self, channels: int):
@@ -174,7 +175,7 @@ class BaseAffinePreconditioner(Module, ABC):
     >>> from physicsnemo.diffusion.preconditioners import (
     ...     BaseAffinePreconditioner,
     ... )
-    >>> class EDMPreconditioner(BaseAffinePreconditioner):
+    >>> class SimpleEDMPreconditioner(BaseAffinePreconditioner):
     ...     def __init__(self, model, sigma_data: float = 0.5):
     ...         super().__init__(model)
     ...         self.sigma_data = sigma_data
@@ -190,10 +191,11 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         return c_in, c_noise, c_out, c_skip
     ...
     >>> model = SimpleModel(channels=3)
-    >>> precond = EDMPreconditioner(model, sigma_data=0.5)
+    >>> precond = SimpleEDMPreconditioner(model, sigma_data=0.5)
     >>> x = torch.randn(2, 3, 16, 16)
     >>> t = torch.rand(2)
-    >>> out = precond(x, t, condition=None)
+    >>> condition = TensorDict({}, batch_size=[2])
+    >>> out = precond(x, t, condition)
     >>> out.shape
     torch.Size([2, 3, 16, 16])
 
@@ -220,52 +222,8 @@ class BaseAffinePreconditioner(Module, ABC):
     ...         return c_in, c_noise, c_out, c_skip
     ...
     >>> precond_ve = VEPreconditioner(model)
-    >>> out_ve = precond_ve(x, t, condition=None)
+    >>> out_ve = precond_ve(x, t, condition)
     >>> out_ve.shape
-    torch.Size([2, 3, 16, 16])
-
-    The following example shows how to use the ``condition`` argument with a
-    conditional model. The model receives a TensorDict with keys ``"y"`` and
-    ``"z"`` as conditioning information.
-
-    >>> from tensordict import TensorDict
-    >>> class ConditionalModel(Module):
-    ...     def __init__(self, channels: int):
-    ...         super().__init__()
-    ...         self.channels = channels
-    ...         self.net = torch.nn.Conv2d(channels, channels, 1)
-    ...
-    ...     def forward(self, x, t, condition=None):
-    ...         # Use conditioning tensors from TensorDict
-    ...         if condition is not None:
-    ...             y = condition["y"]  # shape: (B, C, H, W)
-    ...             z = condition["z"]  # shape: (B, C, H, W)
-    ...             x = x + y + z
-    ...         return self.net(x)
-    ...
-    >>> class EDMPreconditionerCond(BaseAffinePreconditioner):
-    ...     def __init__(self, model, sigma_data: float = 0.5):
-    ...         super().__init__(model)
-    ...         self.sigma_data = sigma_data
-    ...
-    ...     def compute_coefficients(self, t: torch.Tensor):
-    ...         sigma_data = self.sigma_data
-    ...         c_skip = sigma_data**2 / (t**2 + sigma_data**2)
-    ...         c_out = t * sigma_data / (t**2 + sigma_data**2).sqrt()
-    ...         c_in = 1 / (sigma_data**2 + t**2).sqrt()
-    ...         c_noise = t.log() / 4
-    ...         return c_in, c_noise, c_out, c_skip
-    ...
-    >>> cond_model = ConditionalModel(channels=3)
-    >>> precond_cond = EDMPreconditionerCond(cond_model, sigma_data=0.5)
-    >>> x = torch.randn(2, 3, 16, 16)
-    >>> t = torch.rand(2)
-    >>> condition = TensorDict({
-    ...     "y": torch.randn(2, 3, 16, 16),
-    ...     "z": torch.randn(2, 3, 16, 16),
-    ... }, batch_size=[2])
-    >>> out_cond = precond_cond(x, t, condition)
-    >>> out_cond.shape
     torch.Size([2, 3, 16, 16])
 
     **Wrapping existing models to satisfy the DiffusionModel interface**
@@ -273,68 +231,96 @@ class BaseAffinePreconditioner(Module, ABC):
     Some models in PhysicsNeMo have signatures that differ from the
     :class:`~physicsnemo.diffusion.DiffusionModel` interface. Below are
     examples showing how to write thin wrappers to make them compatible
-    with preconditioners (and other diffusion utilities).
+    with preconditioners, including image-based conditioning via channel
+    concatenation.
 
-    **Example: Wrapping a diffusion UNet model**
+    **Example: Wrapping SongUNet**
 
     The :class:`~physicsnemo.models.diffusion_unets.SongUNet` model has
     the signature ``forward(x, noise_labels, class_labels, augment_labels)``.
-    We wrap it to match ``forward(x, t, condition)``:
+    We wrap it to match ``forward(x, t, condition)``, where ``condition``
+    contains both class labels (1D vector) and an image to concatenate
+    channel-wise:
 
     >>> from physicsnemo.models.diffusion_unets import SongUNet
     >>> from physicsnemo.diffusion import DiffusionModel
+    >>> from tensordict import TensorDict
     >>> class SongUNetWrapper(Module):
-    ...     def __init__(self, **song_unet_kwargs):
+    ...     def __init__(self, img_channels, cond_channels, label_dim, **kwargs):
     ...         super().__init__()
-    ...         self.net = SongUNet(**song_unet_kwargs)
+    ...         # in_channels = img_channels + cond_channels for concatenation
+    ...         self.net = SongUNet(
+    ...             in_channels=img_channels + cond_channels,
+    ...             out_channels=img_channels,
+    ...             label_dim=label_dim,
+    ...             **kwargs,
+    ...         )
     ...
-    ...     def forward(self, x, t, condition=None):
-    ...         # t -> noise_labels (diffusion time/noise level)
-    ...         # condition["class_labels"] -> class_labels
-    ...         class_labels = condition["class_labels"] if condition else None
-    ...         return self.net(x, noise_labels=t, class_labels=class_labels)
+    ...     def forward(self, x, t, condition):
+    ...         # Concatenate image condition "y" channel-wise to input
+    ...         y = condition["y"]  # shape: (B, C_cond, H, W)
+    ...         x_cat = torch.cat([x, y], dim=1)
+    ...         # Extract 1D vector condition for class_labels
+    ...         class_labels = condition["class_labels"]  # shape: (B, label_dim)
+    ...         return self.net(x_cat, noise_labels=t, class_labels=class_labels)
     ...
-    >>> wrapped = SongUNetWrapper(img_resolution=8, in_channels=2, out_channels=2)
+    >>> wrapped = SongUNetWrapper(
+    ...     img_channels=2, cond_channels=1, label_dim=4, img_resolution=8
+    ... )
     >>> isinstance(wrapped, DiffusionModel)
     True
     >>> x = torch.rand(1, 2, 8, 8)
     >>> t = torch.rand(1)
-    >>> out = wrapped(x, t, condition=None)
+    >>> condition = TensorDict({
+    ...     "y": torch.rand(1, 1, 8, 8),           # image condition
+    ...     "class_labels": torch.rand(1, 4),      # 1D vector condition
+    ... }, batch_size=[1])
+    >>> out = wrapped(x, t, condition)
     >>> out.shape
     torch.Size([1, 2, 8, 8])
 
     **Example: Wrapping DiT**
 
     The :class:`~physicsnemo.experimental.models.dit.DiT` model has
-    the signature ``forward(x, t, condition, p_dropout, attn_kwargs)``.
-    Its ``condition`` expects a Tensor, not a TensorDict. We wrap it
-    to extract the tensor from a TensorDict if needed:
+    the signature ``forward(x, t, condition, ...)``. We wrap it to support
+    both image conditioning (via channel concatenation) and vector
+    conditioning:
 
     >>> from physicsnemo.experimental.models.dit import DiT
     >>> class DiTWrapper(Module):
-    ...     def __init__(self, **dit_kwargs):
+    ...     def __init__(self, img_channels, cond_channels, cond_dim, **kwargs):
     ...         super().__init__()
-    ...         self.net = DiT(**dit_kwargs)
+    ...         # in_channels = img_channels + cond_channels for concatenation
+    ...         self.net = DiT(
+    ...             in_channels=img_channels + cond_channels,
+    ...             out_channels=img_channels,
+    ...             condition_dim=cond_dim,
+    ...             **kwargs,
+    ...         )
     ...
-    ...     def forward(self, x, t, condition=None, **kwargs):
-    ...         # Extract tensor from TensorDict if provided
-    ...         if isinstance(condition, TensorDict):
-    ...             cond_tensor = condition["embedding"]  # or relevant key
-    ...         else:
-    ...             cond_tensor = condition  # already a Tensor or None
-    ...         return self.net(x, t, condition=cond_tensor, **kwargs)
+    ...     def forward(self, x, t, condition):
+    ...         # Concatenate image condition "y" channel-wise to input
+    ...         y = condition["y"]  # shape: (B, C_cond, H, W)
+    ...         x_cat = torch.cat([x, y], dim=1)
+    ...         # Extract 1D vector condition
+    ...         vec = condition["vec"]  # shape: (B, cond_dim)
+    ...         return self.net(x_cat, t, condition=vec)
     ...
     >>> wrapped_dit = DiTWrapper(
-    ...     input_size=8, patch_size=4, in_channels=2, attention_backend="timm"
+    ...     img_channels=2, cond_channels=1, cond_dim=4,
+    ...     input_size=8, patch_size=4, attention_backend="timm",
     ... )
     >>> isinstance(wrapped_dit, DiffusionModel)
     True
     >>> x = torch.rand(1, 2, 8, 8)
     >>> t = torch.rand(1)
-    >>> out = wrapped_dit(x, t, condition=None)
+    >>> condition = TensorDict({
+    ...     "y": torch.rand(1, 1, 8, 8),  # image condition
+    ...     "vec": torch.rand(1, 4),       # 1D vector condition
+    ... }, batch_size=[1])
+    >>> out = wrapped_dit(x, t, condition)
     >>> out.shape
     torch.Size([1, 2, 8, 8])
-
     """
 
     def __init__(
