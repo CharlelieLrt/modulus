@@ -16,7 +16,7 @@
 
 """Diffusion model sampling interface."""
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal
 
 from jaxtyping import Float
 from torch import Tensor
@@ -45,7 +45,8 @@ def sample(
     xN: Float[Tensor, " B *dims"],
     noise_scheduler: NoiseScheduler,
     num_steps: int,
-    solver: str | Solver = "heun",
+    solver: Literal["euler", "heun", "edm_stochastic_euler", "edm_stochastic_heun"]
+    | Solver = "heun",
     time_steps: Float[Tensor, " N"] | None = None,
     solver_options: Dict[str, Any] | None = None,
     time_eval: list[int] | None = None,
