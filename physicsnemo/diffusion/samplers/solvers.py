@@ -286,35 +286,37 @@ class EDMStochasticEulerSolver(Solver):
     Implements stochastic sampling with configurable noise injection
     controlled by the "churn" parameters.
 
+    .. important::
+
+        This is **not** a true SDE solver. It performs ad-hoc noise injection
+        ("churn") at each step to improve sample diversity, but the underlying
+        integration is still an ODE step. Therefore, the denoiser should return
+        the right-hand side of the **ODE**, not the SDE.
+
     By default, noise injection is performed directly in time-step space.
-    To perform noise injection in noise-level space (useful for non-EDM
-    schedules where diffusion time and noise level are not equal), provide both
-    ``sigma_fn`` and ``sigma_inv_fn``. These callables are typically methods
-    from an
-    :class:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler`,
-    but any functions with the following signatures can be used:
+    For linear-Gaussian noise schedules where diffusion time and noise level
+    are not equal (e.g., VP schedule), provide ``sigma_fn``, ``sigma_inv_fn``,
+    and optionally ``alpha_fn`` to apply churn in noise-level
+    space rather than time-step space.
+    These callbacks are typically methods from a
+    :class:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler`:
 
     .. code-block:: python
 
         def sigma_fn(t: Tensor) -> Tensor: ...      # time -> noise level
         def sigma_inv_fn(sigma: Tensor) -> Tensor: ...  # noise level -> time
-
-    Optionally, a ``scale_fn`` can be provided to scale the perturbed latent:
-
-    .. code-block:: python
-
-        def scale_fn(t: Tensor) -> Tensor: ...      # time -> scale factor
+        def alpha_fn(t: Tensor) -> Tensor: ...      # time -> signal coefficient
 
     Parameters
     ----------
     denoiser : DiffusionDenoiser
         A callable implementing the
-        :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface. Here it is
-        expected to return the right hand side of the ODE (should **not**
-        include the SDE term, since it is added within the solver itself).
+        :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface. Should
+        return the right-hand side of the **ODE** (not the SDE, since the
+        stochastic noise injection is handled internally by this solver).
         Typically obtained via
-        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`,
-        but any callable with the correct signature can be used.
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`
+        with ``denoising_type="ode"``.
     S_churn : float, optional
         Controls the amount of noise added at each step. Higher values add
         more stochasticity. By default 0 (deterministic), in which case this
@@ -332,7 +334,8 @@ class EDMStochasticEulerSolver(Solver):
     num_steps : int, optional
         Total number of sampling steps, used to scale churn. By default 18.
     sigma_fn : Callable[[Tensor], Tensor] | None, optional
-        Maps time to noise level. Typically
+        Maps time to noise level :math:`\sigma(t)`. Useful for linear-Gaussian
+        schedules where :math:`\sigma(t) \neq t`. Typically
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.sigma`.
         If provided, ``sigma_inv_fn`` must also be provided.
         By default ``None`` (identity mapping).
@@ -341,13 +344,12 @@ class EDMStochasticEulerSolver(Solver):
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.sigma_inv`.
         If provided, ``sigma_fn`` must also be provided.
         By default ``None`` (identity mapping).
-    scale_fn : Callable[[Tensor], Tensor] | None, optional
-        Scales the perturbed latent state by a time-dependent scaling factor
-        :math:`s(t)`. Typically
-        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.scale`.
-        To be used when the latent is
-        :math:`\mathbf{x}=\mathbf{x}_{scaled} = s(t) \mathbf{x}_{orig}`. By
-        default ``None`` (no scaling).
+    alpha_fn : Callable[[Tensor], Tensor] | None, optional
+        Signal coefficient :math:`\alpha(t)` for scaling the injected noise.
+        Only affects the noise scale, not the latent state itself. Useful for
+        linear-Gaussian schedules where :math:`\alpha(t) \neq 1`. Typically
+        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.alpha`.
+        By default ``None`` (:math:`\alpha(t) = 1`).
 
     Note
     ----
@@ -371,20 +373,21 @@ class EDMStochasticEulerSolver(Solver):
     >>> x_tm1.shape
     torch.Size([1, 3, 8, 8])
 
-    Using noise scheduler methods for non-EDM schedules (e.g., VP schedule).
-    Here ``sigma_fn`` and ``sigma_inv_fn`` map between time and noise level,
-    allowing the churn to be applied in noise-level space before being mapped
-    back to time-step space:
+    Using noise scheduler methods for linear-Gaussian schedules where
+    :math:`\sigma(t) \neq t` (e.g., VP schedule). The callbacks map between
+    time and noise level, allowing the churn to be applied in noise-level
+    space before converting back to time-step space:
 
     >>> from physicsnemo.diffusion.noise_schedulers import VPNoiseScheduler
     >>> scheduler = VPNoiseScheduler()
+    >>> num_steps = 10
     >>> solver = EDMStochasticEulerSolver(
     ...     denoiser,
     ...     S_churn=40,
-    ...     num_steps=scheduler.num_steps,
+    ...     num_steps=num_steps,
     ...     sigma_fn=scheduler.sigma,
     ...     sigma_inv_fn=scheduler.sigma_inv,
-    ...     scale_fn=scheduler.scale,
+    ...     alpha_fn=scheduler.alpha,
     ... )
     >>> x_tm1 = solver.step(x_t, t_cur, t_next)
     >>> x_tm1.shape
@@ -401,7 +404,7 @@ class EDMStochasticEulerSolver(Solver):
         num_steps: int = 18,
         sigma_fn: Callable[[Tensor], Tensor] | None = None,
         sigma_inv_fn: Callable[[Tensor], Tensor] | None = None,
-        scale_fn: Callable[[Tensor], Tensor] | None = None,
+        alpha_fn: Callable[[Tensor], Tensor] | None = None,
     ) -> None:
         self.denoiser = denoiser
         self.S_churn = S_churn
@@ -416,7 +419,7 @@ class EDMStochasticEulerSolver(Solver):
             )
         self.sigma_fn = sigma_fn
         self.sigma_inv_fn = sigma_inv_fn
-        self.scale_fn = scale_fn
+        self.alpha_fn = alpha_fn
 
     def step(
         self,
@@ -458,11 +461,11 @@ class EDMStochasticEulerSolver(Solver):
             gamma_bc = torch.where(churn_mask, gamma_base, 0.0)
             sigma_hat_bc = sigma_cur_bc + gamma_bc * sigma_cur_bc
             t_hat_bc = self.sigma_inv_fn(sigma_hat_bc)
-            # Noise scale with scaling factor
+            # Noise scale
             noise_var_bc = (sigma_hat_bc**2 - sigma_cur_bc**2).clamp(min=0)
-            if self.scale_fn is not None:
-                scale_hat_bc = self.scale_fn(t_hat_bc)
-                noise_scale_bc = noise_var_bc.sqrt() * scale_hat_bc * self.S_noise
+            if self.alpha_fn is not None:
+                alpha_hat_bc = self.alpha_fn(t_hat_bc)
+                noise_scale_bc = noise_var_bc.sqrt() * alpha_hat_bc * self.S_noise
             else:
                 noise_scale_bc = noise_var_bc.sqrt() * self.S_noise
         else:
@@ -472,20 +475,14 @@ class EDMStochasticEulerSolver(Solver):
             gamma_bc = torch.where(churn_mask, gamma_base, 0.0)
             t_hat_bc = t_cur_bc + gamma_bc * t_cur_bc
             noise_var_bc = (t_hat_bc**2 - t_cur_bc**2).clamp(min=0)
-            if self.scale_fn is not None:
-                scale_hat_bc = self.scale_fn(t_hat_bc)
-                noise_scale_bc = noise_var_bc.sqrt() * scale_hat_bc * self.S_noise
+            if self.alpha_fn is not None:
+                alpha_hat_bc = self.alpha_fn(t_hat_bc)
+                noise_scale_bc = noise_var_bc.sqrt() * alpha_hat_bc * self.S_noise
             else:
                 noise_scale_bc = noise_var_bc.sqrt() * self.S_noise
 
-        # Perturb latent with noise and apply scaling
-        if self.scale_fn is not None:
-            scale_cur_bc = self.scale_fn(t_cur_bc)
-            x_hat = (
-                scale_hat_bc / scale_cur_bc
-            ) * x + noise_scale_bc * torch.randn_like(x)
-        else:
-            x_hat = x + noise_scale_bc * torch.randn_like(x)
+        # Perturb latent with noise
+        x_hat = x + noise_scale_bc * torch.randn_like(x)
 
         # Euler step from t_hat to t_next
         t_hat = t_hat_bc.reshape(x.shape[0])
@@ -503,35 +500,37 @@ class EDMStochasticHeunSolver(Solver):
     controlled by the "churn" parameters, using a second-order Heun
     correction step.
 
+    .. important::
+
+        This is **not** a true SDE solver. It performs ad-hoc noise injection
+        ("churn") at each step to improve sample diversity, but the underlying
+        integration is still an ODE step. Therefore, the denoiser should return
+        the right-hand side of the **ODE**, not the SDE.
+
     By default, noise injection is performed directly in time-step space.
-    To perform noise injection in noise-level space (useful for non-EDM
-    schedules where diffusion time and noise level are not equal), provide both
-    ``sigma_fn`` and ``sigma_inv_fn``. These callables are typically methods
-    from an
-    :class:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler`,
-    but any functions with the following signatures can be used:
+    For linear-Gaussian noise schedules where diffusion time and noise level
+    are not equal (e.g., VP schedule), provide ``sigma_fn``, ``sigma_inv_fn``,
+    and optionally ``alpha_fn`` to apply churn in noise-level space rather than
+    time-step space.
+    These callbacks are typically methods from a
+    :class:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler`:
 
     .. code-block:: python
 
         def sigma_fn(t: Tensor) -> Tensor: ...      # time -> noise level
         def sigma_inv_fn(sigma: Tensor) -> Tensor: ...  # noise level -> time
-
-    Optionally, a ``scale_fn`` can be provided to scale the perturbed latent:
-
-    .. code-block:: python
-
-        def scale_fn(t: Tensor) -> Tensor: ...      # time -> scale factor
+        def alpha_fn(t: Tensor) -> Tensor: ...      # time -> signal coefficient
 
     Parameters
     ----------
     denoiser : DiffusionDenoiser
         A callable implementing the
-        :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface. Here it is
-        expected to return the right hand side of the ODE (should **not**
-        include the SDE term, since it is added within the solver itself).
+        :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface. Should
+        return the right-hand side of the **ODE** (not the SDE, since the
+        stochastic noise injection is handled internally by this solver).
         Typically obtained via
-        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`,
-        but any callable with the correct signature can be used.
+        :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`
+        with ``denoising_type="ode"``.
     alpha : float, optional
         Interpolation parameter for the corrector step, must be in (0, 1].
         ``alpha=1`` gives the standard Heun method (trapezoidal rule),
@@ -553,7 +552,8 @@ class EDMStochasticHeunSolver(Solver):
     num_steps : int, optional
         Total number of sampling steps, used to scale churn. By default 18.
     sigma_fn : Callable[[Tensor], Tensor] | None, optional
-        Maps time to noise level. Typically
+        Maps time to noise level :math:`\sigma(t)`. Useful for linear-Gaussian
+        schedules where :math:`\sigma(t) \neq t`. Typically
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.sigma`.
         If provided, ``sigma_inv_fn`` must also be provided.
         By default ``None`` (identity mapping).
@@ -562,13 +562,12 @@ class EDMStochasticHeunSolver(Solver):
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.sigma_inv`.
         If provided, ``sigma_fn`` must also be provided.
         By default ``None`` (identity mapping).
-    scale_fn : Callable[[Tensor], Tensor] | None, optional
-        Scales the perturbed latent state by a time-dependent scaling factor
-        :math:`s(t)`. Typically
-        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.scale`.
-        To be used when the latent is
-        :math:`\mathbf{x}=\mathbf{x}_{scaled} = s(t) \mathbf{x}_{orig}`. By
-        default ``None`` (no scaling).
+    alpha_fn : Callable[[Tensor], Tensor] | None, optional
+        Signal coefficient :math:`\alpha(t)` for scaling the injected noise.
+        Only affects the noise scale, not the latent state itself. Useful for
+        linear-Gaussian schedules where :math:`\alpha(t) \neq 1`. Typically
+        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.alpha`.
+        By default ``None`` (:math:`\alpha(t) = 1`).
 
     Note
     ----
@@ -592,19 +591,21 @@ class EDMStochasticHeunSolver(Solver):
     >>> x_tm1.shape
     torch.Size([1, 3, 8, 8])
 
-    Using noise scheduler methods for non-EDM schedules (e.g., VP schedule).
-    Here ``sigma_fn`` and ``sigma_inv_fn`` map between time and noise level,
-    allowing the churn to be applied in noise-level space:
+    Using noise scheduler methods for linear-Gaussian schedules where
+    :math:`\sigma(t) \neq t` (e.g., VP schedule). The callbacks map between
+    time and noise level, allowing the churn to be applied in noise-level
+    space before converting back to time-step space:
 
     >>> from physicsnemo.diffusion.noise_schedulers import VPNoiseScheduler
     >>> scheduler = VPNoiseScheduler()
+    >>> num_steps = 10
     >>> solver = EDMStochasticHeunSolver(
     ...     denoiser,
     ...     S_churn=40,
-    ...     num_steps=scheduler.num_steps,
+    ...     num_steps=num_steps,
     ...     sigma_fn=scheduler.sigma,
     ...     sigma_inv_fn=scheduler.sigma_inv,
-    ...     scale_fn=scheduler.scale,
+    ...     alpha_fn=scheduler.alpha,
     ... )
     >>> x_tm1 = solver.step(x_t, t_cur, t_next)
     >>> x_tm1.shape
@@ -622,7 +623,7 @@ class EDMStochasticHeunSolver(Solver):
         num_steps: int = 18,
         sigma_fn: Callable[[Tensor], Tensor] | None = None,
         sigma_inv_fn: Callable[[Tensor], Tensor] | None = None,
-        scale_fn: Callable[[Tensor], Tensor] | None = None,
+        alpha_fn: Callable[[Tensor], Tensor] | None = None,
     ) -> None:
         self.denoiser = denoiser
         if not 0 < alpha <= 1:
@@ -640,7 +641,7 @@ class EDMStochasticHeunSolver(Solver):
             )
         self.sigma_fn = sigma_fn
         self.sigma_inv_fn = sigma_inv_fn
-        self.scale_fn = scale_fn
+        self.alpha_fn = alpha_fn
 
     def step(
         self,
@@ -682,11 +683,11 @@ class EDMStochasticHeunSolver(Solver):
             gamma_bc = torch.where(churn_mask, gamma_base, 0.0)
             sigma_hat_bc = sigma_cur_bc + gamma_bc * sigma_cur_bc
             t_hat_bc = self.sigma_inv_fn(sigma_hat_bc)
-            # Noise scale with scaling factor
+            # Noise scale
             noise_var_bc = (sigma_hat_bc**2 - sigma_cur_bc**2).clamp(min=0)
-            if self.scale_fn is not None:
-                scale_hat_bc = self.scale_fn(t_hat_bc)
-                noise_scale_bc = noise_var_bc.sqrt() * scale_hat_bc * self.S_noise
+            if self.alpha_fn is not None:
+                alpha_hat_bc = self.alpha_fn(t_hat_bc)
+                noise_scale_bc = noise_var_bc.sqrt() * alpha_hat_bc * self.S_noise
             else:
                 noise_scale_bc = noise_var_bc.sqrt() * self.S_noise
         else:
@@ -696,20 +697,14 @@ class EDMStochasticHeunSolver(Solver):
             gamma_bc = torch.where(churn_mask, gamma_base, 0.0)
             t_hat_bc = t_cur_bc + gamma_bc * t_cur_bc
             noise_var_bc = (t_hat_bc**2 - t_cur_bc**2).clamp(min=0)
-            if self.scale_fn is not None:
-                scale_hat_bc = self.scale_fn(t_hat_bc)
-                noise_scale_bc = noise_var_bc.sqrt() * scale_hat_bc * self.S_noise
+            if self.alpha_fn is not None:
+                alpha_hat_bc = self.alpha_fn(t_hat_bc)
+                noise_scale_bc = noise_var_bc.sqrt() * alpha_hat_bc * self.S_noise
             else:
                 noise_scale_bc = noise_var_bc.sqrt() * self.S_noise
 
-        # Perturb latent with noise and apply scaling
-        if self.scale_fn is not None:
-            scale_cur_bc = self.scale_fn(t_cur_bc)
-            x_hat = (
-                scale_hat_bc / scale_cur_bc
-            ) * x + noise_scale_bc * torch.randn_like(x)
-        else:
-            x_hat = x + noise_scale_bc * torch.randn_like(x)
+        # Perturb latent with noise
+        x_hat = x + noise_scale_bc * torch.randn_like(x)
 
         # Euler step from t_hat to intermediate point (predictor)
         t_hat = t_hat_bc.reshape(x.shape[0])
