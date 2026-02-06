@@ -1562,22 +1562,39 @@ class VPNoiseScheduler(LinearGaussianNoiseScheduler):
         return self.epsilon_s + u * (self.t_max - self.epsilon_s)
 
 
-class StudentTEDMNoiseScheduler(EDMNoiseScheduler):
+class StudentTEDMNoiseScheduler(LinearGaussianNoiseScheduler):
     r"""
     Student-t EDM noise scheduler for heavy-tailed diffusion models.
 
-    Extends :class:`EDMNoiseScheduler` to use Student-t noise instead of
-    Gaussian noise. This is useful for modeling heavy-tailed distributions
-    and can improve sample quality for certain data types.
+    This scheduler is a variant of :class:`EDMNoiseScheduler` that uses
+    Student-t noise instead of Gaussian noise. It is useful for modeling
+    heavy-tailed distributions and can improve sample quality for certain
+    data types.
 
-    The main differences from standard EDM are:
+    .. important::
 
-    - **Training**: Noise is sampled from a Student-t distribution
-    - **Sampling**: Initial latents are Student-t distributed
+        Despite inheriting from :class:`LinearGaussianNoiseScheduler`, this
+        scheduler is **not truly Gaussian**. It uses the same linear structure
+        (identity mappings :math:`\sigma(t) = t` and :math:`\alpha(t) = 1`) but
+        replaces Gaussian noise with Student-t noise. The "Linear" part of
+        :class:`LinearGaussianNoiseScheduler` still applies, but the "Gaussian"
+        part does not.
 
-    The Student-t distribution is parameterized by degrees of freedom ``nu``.
-    As ``nu`` increases, the distribution approaches Gaussian. Lower values of
-    ``nu`` produce heavier tails.
+    This scheduler uses a non-gaussian forward process:
+
+    .. math::
+        \mathbf{x}(t) = \mathbf{x}_0 + \sigma(t) \mathbf{n}, \quad
+        \mathbf{n} \sim \text{Student-}t(\nu)
+
+    The marginal distribution :math:`p(\mathbf{x}_t | \mathbf{x}_0)` is
+    therefore a scaled Student-t distribution, not Gaussian.
+
+    **Comparison with EDMNoiseScheduler:**
+
+    This scheduler shares the same time-to-noise mappings as
+    :class:`EDMNoiseScheduler`.
+    The only differences are in :meth:`add_noise` and :meth:`init_latents`,
+    which use Student-t noise instead of Gaussian noise.
 
     Parameters
     ----------
@@ -1586,10 +1603,12 @@ class StudentTEDMNoiseScheduler(EDMNoiseScheduler):
     sigma_max : float, optional
         Maximum noise level, by default 80.
     rho : float, optional
-        Exponent controlling time-step spacing, by default 7.
+        Exponent controlling time-step spacing. Larger values concentrate more
+        steps at lower noise levels (better for fine details). By default 7.
     nu : int, optional
         Degrees of freedom for Student-t distribution. Must be > 2.
-        By default 10.
+        As ``nu`` increases, the distribution approaches Gaussian. Lower values
+        produce heavier tails. By default 10.
 
     Note
     ----
@@ -1631,8 +1650,108 @@ class StudentTEDMNoiseScheduler(EDMNoiseScheduler):
     ) -> None:
         if nu <= 2:
             raise ValueError(f"nu must be > 2, got {nu}")
-        super().__init__(sigma_min=sigma_min, sigma_max=sigma_max, rho=rho)
+        self.sigma_min = sigma_min
+        self.sigma_max = sigma_max
+        self.rho = rho
         self.nu = nu
+
+    def sigma(
+        self,
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""Identity mapping: :math:`\sigma(t) = t`."""
+        return t
+
+    def sigma_inv(
+        self,
+        sigma: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""Identity mapping: :math:`t = \sigma`."""
+        return sigma
+
+    def sigma_dot(
+        self,
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""Constant derivative: :math:`\dot{\sigma}(t) = 1`."""
+        return torch.ones_like(t)
+
+    def alpha(
+        self,
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""Constant signal coefficient: :math:`\alpha(t) = 1`."""
+        return torch.ones_like(t)
+
+    def alpha_dot(
+        self,
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""Zero derivative: :math:`\dot{\alpha}(t) = 0`."""
+        return torch.zeros_like(t)
+
+    def timesteps(
+        self,
+        num_steps: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, " N+1"]:
+        r"""
+        Generate EDM time-steps with polynomial spacing.
+
+        Parameters
+        ----------
+        num_steps : int
+            Number of sampling steps.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Time-steps tensor of shape :math:`(N + 1,)` where :math:`N` is
+            ``num_steps``.
+        """
+        step_indices = torch.arange(num_steps, dtype=dtype, device=device)
+        smax_inv_rho = self.sigma_max ** (1 / self.rho)
+        smin_inv_rho = self.sigma_min ** (1 / self.rho)
+        frac = step_indices / (num_steps - 1)
+        interp = smax_inv_rho + frac * (smin_inv_rho - smax_inv_rho)
+        t_steps = interp**self.rho
+        zero = torch.zeros(1, dtype=dtype, device=device)
+        return torch.cat([t_steps, zero])
+
+    def sample_time(
+        self,
+        N: int,
+        *,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> Float[Tensor, " N"]:
+        r"""
+        Sample N diffusion times log-uniformly in :math:`[\sigma_{min},
+        \sigma_{max}]`.
+
+        Parameters
+        ----------
+        N : int
+            Number of time values to sample.
+        device : torch.device, optional
+            Device to place the tensor on.
+        dtype : torch.dtype, optional
+            Data type of the tensor.
+
+        Returns
+        -------
+        Tensor
+            Sampled diffusion times of shape :math:`(N,)`.
+        """
+        u = torch.rand(N, device=device, dtype=dtype)
+        log_ratio = math.log(self.sigma_max / self.sigma_min)
+        return self.sigma_min * torch.exp(u * log_ratio)
 
     def _sample_student_t(
         self,
@@ -1686,8 +1805,12 @@ class StudentTEDMNoiseScheduler(EDMNoiseScheduler):
         r"""
         Add Student-t noise to clean data at the given diffusion times.
 
-        Implements: :math:`\mathbf{x}(t) = \mathbf{x}_0 + \sigma(t) \mathbf{n}`
-        where :math:`\mathbf{n}` is Student-t noise.
+        Unlike the Gaussian case in :class:`LinearGaussianNoiseScheduler`,
+        this method uses Student-t noise:
+
+        .. math::
+            \mathbf{x}(t) = \mathbf{x}_0 + \sigma(t) \mathbf{n}, \quad
+            \mathbf{n} \sim \text{Student-}t(\nu)
 
         Parameters
         ----------
@@ -1717,8 +1840,12 @@ class StudentTEDMNoiseScheduler(EDMNoiseScheduler):
         r"""
         Initialize noisy latent state with Student-t noise.
 
-        Generates: :math:`\mathbf{x}_N = \sigma(t_N) \cdot \mathbf{n}`
-        where :math:`\mathbf{n}` is Student-t noise.
+        Unlike the Gaussian case in :class:`LinearGaussianNoiseScheduler`,
+        this method uses Student-t noise:
+
+        .. math::
+            \mathbf{x}_N = \sigma(t_N) \cdot \mathbf{n}, \quad
+            \mathbf{n} \sim \text{Student-}t(\nu)
 
         Parameters
         ----------
