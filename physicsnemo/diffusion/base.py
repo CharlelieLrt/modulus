@@ -169,9 +169,9 @@ class DiffusionDenoiser(Protocol):
 
     def __call__(
         self,
-        x: Float[torch.Tensor, "B *dims"],  # noqa: F821
-        t: Float[torch.Tensor, "B "],  # noqa: F821
-    ) -> Float[torch.Tensor, "B *dims"]:  # noqa: F821
+        x: Float[torch.Tensor, " B *dims"],
+        t: Float[torch.Tensor, " B"],
+    ) -> Float[torch.Tensor, " B *dims"]:
         r"""
         Function to produce a denoising output at the given noise level.
 
