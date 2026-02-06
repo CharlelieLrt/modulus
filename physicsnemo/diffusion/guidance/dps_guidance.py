@@ -336,8 +336,8 @@ class DPSDenoiser(DiffusionDenoiser):
         Returns
         -------
         Tensor
-            Guided score of shape :math:`(B, *)`, computed as the sum of the
-            unconditional score and all guidance terms.
+            Guided score of same shape :math:`(B, *)` as ``x``. Computed as the
+            sum of the unconditional score and all guidance terms.
         """
         x = x.detach().clone().requires_grad_(True)
         x_0 = self.denoiser_in(x, t)
@@ -348,3 +348,420 @@ class DPSDenoiser(DiffusionDenoiser):
 
         score = self.x0_to_score_fn(x_0, x, t)
         return score + guidance_sum
+
+
+class ModelConsistencyDPSGuidance:
+    r"""
+    DPS guidance for generic observation models with Gaussian noise.
+
+    Computes the likelihood score for an observation model of the form:
+
+    .. math::
+        \mathbf{y} = A(\mathbf{x}_0) + \boldsymbol{\epsilon}, \quad
+        \boldsymbol{\epsilon} \sim \mathcal{N}(0, \sigma_y^2 \mathbf{I})
+
+    where :math:`A` is a (potentially nonlinear) observation operator,
+    :math:`\mathbf{y}` is the observed data, and :math:`\sigma_y` is the
+    measurement noise standard deviation.
+
+    The guidance term is the likelihood score:
+
+    .. math::
+        \nabla_{\mathbf{x}} \log p(\mathbf{y} | \hat{\mathbf{x}}_0)
+        = -\frac{1}{\sigma_y^2} \nabla_{\mathbf{x}}
+        \| A(\hat{\mathbf{x}}_0) - \mathbf{y} \|_p^p
+
+    where :math:`\| \cdot \|_p` is the :math:`L^p` norm and :math:`p` is the
+    ``norm_order``. This is computed via automatic differentiation.
+
+    An optional **SDA (Score-Based Data Assimilation) scaling** can be applied,
+    which scales the guidance by :math:`\sigma(t)^2` to properly weight the
+    likelihood relative to the prior at different noise levels:
+
+    .. math::
+        \text{guidance} = \sigma(t)^2 \cdot \nabla_{\mathbf{x}}
+        \log p(\mathbf{y} | \hat{\mathbf{x}}_0)
+
+    The observation operator ``A`` must be a differentiable callable with the
+    following signature:
+
+    .. code-block:: python
+
+        def A(x_0: Float[Tensor, "B *dims"]) -> Float[Tensor, "B *obs_dims"]:
+            # x_0: estimated clean state, shape (B, *)
+            # returns: predicted observations, shape (B, *obs_dims)
+            ...
+
+    Parameters
+    ----------
+    A : Callable[[Tensor], Tensor]
+        Observation operator mapping clean state to observations.
+        Must be differentiable (supports ``torch.autograd``).
+    y : Tensor
+        Observed data of shape :math:`(B, *obs\_dims)` matching the output
+        of ``A``.
+    std_y : float
+        Standard deviation of the measurement noise :math:`\sigma_y`.
+    norm_order : int, default=2
+        Order of the norm used to compute the residual. Use ``2`` for
+        standard Gaussian likelihood (L2 norm), ``1`` for L1 norm, etc.
+    sda_scaling : bool, default=False
+        If ``True``, applies SDA scaling by multiplying the guidance by
+        :math:`\sigma(t)^2`. Requires ``sigma_fn`` to be provided.
+    sigma_fn : Callable[[Tensor], Tensor] | None, default=None
+        Function mapping diffusion time to noise level :math:`\sigma(t)`.
+        Required when ``sda_scaling=True``. Typically obtained from a noise
+        scheduler, e.g.,
+        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.sigma`.
+
+    See Also
+    --------
+    :class:`DataConsistencyDPSGuidance` : Simplified guidance for masked
+        observations.
+    :class:`DPSDenoiser` : Combines a denoiser with one or more guidances.
+
+    Examples
+    --------
+    **Example 1:** Guidance for a downsampling observation operator:
+
+    >>> import torch
+    >>> import torch.nn.functional as F
+    >>> from physicsnemo.diffusion.guidance import ModelConsistencyDPSGuidance
+    >>>
+    >>> # Observation operator: 2x downsampling
+    >>> def downsample_2x(x):
+    ...     return F.avg_pool2d(x, kernel_size=2, stride=2)
+    ...
+    >>> # Low-resolution observations
+    >>> y_obs = torch.randn(1, 3, 4, 4)  # 4x4 from 8x8 original
+    >>>
+    >>> guidance = ModelConsistencyDPSGuidance(
+    ...     A=downsample_2x,
+    ...     y=y_obs,
+    ...     std_y=0.1,
+    ... )
+    >>>
+    >>> # Use in DPS sampling
+    >>> x = torch.randn(1, 3, 8, 8, requires_grad=True)
+    >>> t = torch.tensor([1.0])
+    >>> x_0 = x * 0.9  # Toy x0 estimate
+    >>> output = guidance(x, t, x_0)
+    >>> output.shape
+    torch.Size([1, 3, 8, 8])
+
+    **Example 2:** With SDA scaling for improved assimilation:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.guidance import ModelConsistencyDPSGuidance
+    >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+    >>>
+    >>> scheduler = EDMNoiseScheduler()
+    >>>
+    >>> # Simple linear observation operator (select first channel)
+    >>> A = lambda x: x[:, :1]
+    >>> y_obs = torch.randn(1, 1, 8, 8)
+    >>>
+    >>> guidance = ModelConsistencyDPSGuidance(
+    ...     A=A,
+    ...     y=y_obs,
+    ...     std_y=0.05,
+    ...     sda_scaling=True,
+    ...     sigma_fn=scheduler.sigma,
+    ... )
+    >>>
+    >>> x = torch.randn(1, 3, 8, 8, requires_grad=True)
+    >>> t = torch.tensor([1.0])
+    >>> x_0 = x * 0.9
+    >>> output = guidance(x, t, x_0)
+    >>> output.shape
+    torch.Size([1, 3, 8, 8])
+    """
+
+    def __init__(
+        self,
+        A: Callable[[Float[Tensor, " B *dims"]], Float[Tensor, " B *obs_dims"]],
+        y: Float[Tensor, " B *obs_dims"],
+        std_y: float,
+        norm_order: int = 2,
+        sda_scaling: bool = False,
+        sigma_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
+        | None = None,
+    ) -> None:
+        if sda_scaling and sigma_fn is None:
+            raise ValueError("sigma_fn must be provided when sda_scaling=True")
+        self.A = A
+        self.y = y
+        self.std_y = std_y
+        self.norm_order = norm_order
+        self.sda_scaling = sda_scaling
+        self.sigma_fn = sigma_fn
+
+    def __call__(
+        self,
+        x: Float[Tensor, " B *dims"],
+        t: Float[Tensor, " B"],
+        x_0: Float[Tensor, " B *dims"],
+    ) -> Float[Tensor, " B *dims"]:
+        r"""
+        Compute the likelihood score guidance term.
+
+        Parameters
+        ----------
+        x : Tensor
+            Noisy latent state at diffusion time ``t``, of shape :math:`(B, *)`.
+            Must have ``requires_grad=True`` for gradient computation.
+        t : Tensor
+            Batched diffusion time of shape :math:`(B,)`.
+        x_0 : Tensor
+            Estimate of the clean latent state, of shape :math:`(B, *)`.
+
+        Returns
+        -------
+        Tensor
+            Likelihood score guidance term of same shape as ``x``.
+        """
+        # Ensure x_0 has gradients for autograd
+        x_0_grad = x_0.detach().requires_grad_(True)
+
+        # Compute predicted observations and residual
+        y_pred = self.A(x_0_grad)
+        residual = y_pred - self.y
+
+        # Compute norm^p of residual (summed over all dims except batch)
+        residual_flat = residual.reshape(residual.shape[0], -1)
+        norm_p = residual_flat.abs().pow(self.norm_order).sum(dim=1)
+
+        # Compute gradient of norm w.r.t. x_0
+        grad_x0 = torch.autograd.grad(
+            outputs=norm_p.sum(),
+            inputs=x_0_grad,
+            create_graph=False,
+        )[0]
+
+        # Likelihood score: -1/std_y^2 * grad
+        guidance = -grad_x0 / (self.std_y**2)
+
+        # Apply SDA scaling if enabled
+        if self.sda_scaling and self.sigma_fn is not None:
+            t_bc = t.reshape(-1, *([1] * (x.ndim - 1)))
+            sigma_t_sq = self.sigma_fn(t_bc) ** 2
+            guidance = sigma_t_sq * guidance
+
+        return guidance
+
+
+class DataConsistencyDPSGuidance:
+    r"""
+    DPS guidance for masked observations with Gaussian noise.
+
+    A simplified version of :class:`ModelConsistencyDPSGuidance` where the
+    observation operator is a mask applied element-wise. This is typical for
+    data assimilation tasks like inpainting or outpainting, where observations
+    are available at specific locations.
+
+    The observation model is:
+
+    .. math::
+        \mathbf{y} = \mathbf{M} \odot \mathbf{x}_0 + \boldsymbol{\epsilon},
+        \quad \boldsymbol{\epsilon} \sim \mathcal{N}(0, \sigma_y^2 \mathbf{I})
+
+    where :math:`\mathbf{M}` is a binary mask (1 = observed, 0 = missing),
+    :math:`\odot` denotes element-wise multiplication, and :math:`\sigma_y`
+    is the measurement noise standard deviation.
+
+    The guidance term is the likelihood score:
+
+    .. math::
+        \nabla_{\mathbf{x}} \log p(\mathbf{y} | \hat{\mathbf{x}}_0)
+        = -\frac{1}{\sigma_y^2} \nabla_{\mathbf{x}}
+        \| \mathbf{M} \odot (\hat{\mathbf{x}}_0 - \mathbf{y}) \|_p^p
+
+    An optional **SDA (Score-Based Data Assimilation) scaling** can be applied,
+    which scales the guidance by :math:`\sigma(t)^2`.
+
+    Parameters
+    ----------
+    mask : Tensor
+        Binary mask of shape :math:`(B, *)` or broadcastable shape.
+        Values should be 1 for observed locations and 0 for missing.
+    y : Tensor
+        Observed data of shape :math:`(B, *)` matching the state shape.
+        Values at unobserved locations (where ``mask=0``) are ignored.
+    std_y : float
+        Standard deviation of the measurement noise :math:`\sigma_y`.
+    norm_order : int, default=2
+        Order of the norm used to compute the residual. Use ``2`` for
+        standard Gaussian likelihood (L2 norm), ``1`` for L1 norm, etc.
+    sda_scaling : bool, default=False
+        If ``True``, applies SDA scaling by multiplying the guidance by
+        :math:`\sigma(t)^2`. Requires ``sigma_fn`` to be provided.
+    sigma_fn : Callable[[Tensor], Tensor] | None, default=None
+        Function mapping diffusion time to noise level :math:`\sigma(t)`.
+        Required when ``sda_scaling=True``.
+
+    See Also
+    --------
+    :class:`ModelConsistencyDPSGuidance` : Guidance for general observation
+        operators.
+    :class:`DPSDenoiser` : Combines a denoiser with one or more guidances.
+
+    Examples
+    --------
+    **Example 1:** Inpainting with known pixels at specific locations:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.guidance import DataConsistencyDPSGuidance
+    >>>
+    >>> # Mask: observe 50% of pixels randomly
+    >>> mask = (torch.rand(1, 3, 8, 8) > 0.5).float()
+    >>> y_obs = torch.randn(1, 3, 8, 8)  # Observed values
+    >>>
+    >>> guidance = DataConsistencyDPSGuidance(
+    ...     mask=mask,
+    ...     y=y_obs,
+    ...     std_y=0.1,
+    ... )
+    >>>
+    >>> x = torch.randn(1, 3, 8, 8, requires_grad=True)
+    >>> t = torch.tensor([1.0])
+    >>> x_0 = x * 0.9  # Toy x0 estimate
+    >>> output = guidance(x, t, x_0)
+    >>> output.shape
+    torch.Size([1, 3, 8, 8])
+
+    **Example 2:** With SDA scaling and L1 norm for robustness:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.guidance import DataConsistencyDPSGuidance
+    >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+    >>>
+    >>> scheduler = EDMNoiseScheduler()
+    >>>
+    >>> # Observe boundary pixels only (outpainting scenario)
+    >>> mask = torch.zeros(1, 3, 8, 8)
+    >>> mask[:, :, 0, :] = 1  # Top row
+    >>> mask[:, :, -1, :] = 1  # Bottom row
+    >>> mask[:, :, :, 0] = 1  # Left column
+    >>> mask[:, :, :, -1] = 1  # Right column
+    >>> y_obs = torch.randn(1, 3, 8, 8)
+    >>>
+    >>> guidance = DataConsistencyDPSGuidance(
+    ...     mask=mask,
+    ...     y=y_obs,
+    ...     std_y=0.05,
+    ...     norm_order=1,  # L1 norm for robustness to outliers
+    ...     sda_scaling=True,
+    ...     sigma_fn=scheduler.sigma,
+    ... )
+    >>>
+    >>> x = torch.randn(1, 3, 8, 8, requires_grad=True)
+    >>> t = torch.tensor([1.0])
+    >>> x_0 = x * 0.9
+    >>> output = guidance(x, t, x_0)
+    >>> output.shape
+    torch.Size([1, 3, 8, 8])
+
+    **Example 3:** Using with DPSDenoiser for complete sampling:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.guidance import (
+    ...     DataConsistencyDPSGuidance,
+    ...     DPSDenoiser,
+    ... )
+    >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+    >>>
+    >>> scheduler = EDMNoiseScheduler()
+    >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
+    >>>
+    >>> mask = torch.ones(1, 3, 8, 8)
+    >>> y_obs = torch.randn(1, 3, 8, 8)
+    >>>
+    >>> guidance = DataConsistencyDPSGuidance(
+    ...     mask=mask,
+    ...     y=y_obs,
+    ...     std_y=0.1,
+    ... )
+    >>>
+    >>> dps_denoiser = DPSDenoiser(
+    ...     denoiser_in=x0_predictor,
+    ...     x0_to_score_fn=scheduler.x0_to_score,
+    ...     guidances=guidance,
+    ... )
+    >>>
+    >>> x = torch.randn(1, 3, 8, 8)
+    >>> t = torch.tensor([1.0])
+    >>> output = dps_denoiser(x, t)
+    >>> output.shape
+    torch.Size([1, 3, 8, 8])
+    """
+
+    def __init__(
+        self,
+        mask: Float[Tensor, " *mask_shape"],
+        y: Float[Tensor, " B *dims"],
+        std_y: float,
+        norm_order: int = 2,
+        sda_scaling: bool = False,
+        sigma_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
+        | None = None,
+    ) -> None:
+        if sda_scaling and sigma_fn is None:
+            raise ValueError("sigma_fn must be provided when sda_scaling=True")
+        self.mask = mask
+        self.y = y
+        self.std_y = std_y
+        self.norm_order = norm_order
+        self.sda_scaling = sda_scaling
+        self.sigma_fn = sigma_fn
+
+    def __call__(
+        self,
+        x: Float[Tensor, " B *dims"],
+        t: Float[Tensor, " B"],
+        x_0: Float[Tensor, " B *dims"],
+    ) -> Float[Tensor, " B *dims"]:
+        r"""
+        Compute the likelihood score guidance term.
+
+        Parameters
+        ----------
+        x : Tensor
+            Noisy latent state at diffusion time ``t``, of shape :math:`(B, *)`.
+            Must have ``requires_grad=True`` for gradient computation.
+        t : Tensor
+            Batched diffusion time of shape :math:`(B,)`.
+        x_0 : Tensor
+            Estimate of the clean latent state, of shape :math:`(B, *)`.
+
+        Returns
+        -------
+        Tensor
+            Likelihood score guidance term of same shape as ``x``.
+        """
+        # Ensure x_0 has gradients for autograd
+        x_0_grad = x_0.detach().requires_grad_(True)
+
+        # Compute masked residual
+        residual = self.mask * (x_0_grad - self.y)
+
+        # Compute norm^p of residual (summed over all dims except batch)
+        residual_flat = residual.reshape(residual.shape[0], -1)
+        norm_p = residual_flat.abs().pow(self.norm_order).sum(dim=1)
+
+        # Compute gradient of norm w.r.t. x_0
+        grad_x0 = torch.autograd.grad(
+            outputs=norm_p.sum(),
+            inputs=x_0_grad,
+            create_graph=False,
+        )[0]
+
+        # Likelihood score: -1/std_y^2 * grad
+        guidance = -grad_x0 / (self.std_y**2)
+
+        # Apply SDA scaling if enabled
+        if self.sda_scaling and self.sigma_fn is not None:
+            t_bc = t.reshape(-1, *([1] * (x.ndim - 1)))
+            sigma_t_sq = self.sigma_fn(t_bc) ** 2
+            guidance = sigma_t_sq * guidance
+
+        return guidance
