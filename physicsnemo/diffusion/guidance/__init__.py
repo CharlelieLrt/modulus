@@ -16,9 +16,16 @@
 
 """DPS (Diffusion Posterior Sampling) guidance for diffusion models."""
 
-from .dps_guidance import DPSDenoiser, DPSGuidance
+from .dps_guidance import (
+    DataConsistencyDPSGuidance,
+    DPSDenoiser,
+    DPSGuidance,
+    ModelConsistencyDPSGuidance,
+)
 
 __all__ = [
     "DPSGuidance",
     "DPSDenoiser",
+    "ModelConsistencyDPSGuidance",
+    "DataConsistencyDPSGuidance",
 ]
