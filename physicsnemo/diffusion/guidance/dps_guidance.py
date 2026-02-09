@@ -365,14 +365,14 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         \nabla_{\mathbf{x}} \log p(\mathbf{y} | \mathbf{x}_t)
         = -\frac{1}{2 \left( \sigma_y^2 + \gamma \frac{\sigma(t)^2}{\alpha(t)^2}
         \right)} \nabla_{\mathbf{x}}
-        \| A\left(\hat{\mathbf{x}}_0 (\mathbf{x}_t, t)\right) - \mathbf{y} \|_p^p
+        \| A\left(\hat{\mathbf{x}}_0\right) - \mathbf{y} \|^2
 
-    where :math:`A` is the observation operator, :math:`\| \cdot \|_p` is the
-    :math:`L^p` norm, and the scaling incorporates a Score-Based Data
-    Assimilation (SDA) correction through
-    the parameter :math:`\gamma` that accounts for the variance of the
+    where :math:`A` is the observation operator and the scaling incorporates
+    a Score-Based Data Assimilation (SDA) correction through the parameter
+    :math:`\gamma` that accounts for the variance of the
     :math:`\hat{\mathbf{x}}_0(\mathbf{x}_t, t)` estimate at different diffusion
-    times.
+    times. The L2 norm can be replaced by other Lp norms or custom loss
+    functions via the ``norm`` parameter.
 
     The observation operator ``A`` must be a differentiable callable with the
     following signature:
@@ -382,6 +382,16 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         def A(x_0: Tensor) -> Tensor:
             # x_0: estimated clean state, shape (B, *)
             # returns: predicted observations, same shape (B, *obs_dims) as y
+            ...
+
+    When ``norm`` is a callable, it must have the following signature:
+
+    .. code-block:: python
+
+        def norm(
+            y_pred,  # Shape: (B, *obs_dims)
+            y_true,  # Shape: (B, *obs_dims)
+        ) -> Tensor:  # Scalar loss per batch element, shape: (B,)
             ...
 
     Parameters
@@ -394,9 +404,11 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         of ``A``.
     std_y : float
         Standard deviation of the measurement noise :math:`\sigma_y`.
-    norm_order : int, default=2
-        Order of the norm used to compute the residual. Use ``2`` for
-        standard Gaussian likelihood (L2 norm), ``1`` for L1 norm, etc.
+    norm : int | Callable[[Tensor, Tensor], Tensor] | None, default=None
+        Loss function used to compute the residual. ``None`` (default) uses
+        the L2 norm. An ``int`` value uses the corresponding Lp norm. A
+        callable receives ``(y_pred, y_true)`` and returns a scalar loss per
+        batch element of shape :math:`(B,)`.
     gamma : float, default=0.0
         SDA scaling parameter. When ``gamma > 0``, applies SDA correction
         that accounts for the variance of the x0 estimate. Set to ``0`` for
@@ -523,6 +535,34 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
     >>> score = dps_denoiser(x, t)
     >>> score.shape
     torch.Size([1, 3, 8, 8])
+
+    **Example 3:** With a custom loss function (Huber loss):
+
+    >>> import torch
+    >>> import torch.nn.functional as F
+    >>> from physicsnemo.diffusion.guidance import ModelConsistencyDPSGuidance
+    >>>
+    >>> # Wrap torch's Huber loss to return per-batch scalars
+    >>> def huber_loss(y_pred, y_true):
+    ...     per_elem = F.huber_loss(y_pred, y_true, reduction="none")
+    ...     return per_elem.reshape(y_pred.shape[0], -1).sum(dim=1)
+    ...
+    >>> A = lambda x: x[:, :1]  # Select first channel
+    >>> y_obs = torch.randn(1, 1, 8, 8)
+    >>>
+    >>> guidance = ModelConsistencyDPSGuidance(
+    ...     A=A,
+    ...     y=y_obs,
+    ...     std_y=0.1,
+    ...     norm=huber_loss,  # Custom loss function
+    ... )
+    >>>
+    >>> x = torch.randn(1, 3, 8, 8, requires_grad=True)
+    >>> t = torch.tensor([1.0])
+    >>> x_0 = x * 0.9
+    >>> output = guidance(x, t, x_0)
+    >>> output.shape
+    torch.Size([1, 3, 8, 8])
     """
 
     def __init__(
@@ -530,7 +570,12 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         A: Callable[[Float[Tensor, " B *dims"]], Float[Tensor, " B *obs_dims"]],
         y: Float[Tensor, " B *obs_dims"],
         std_y: float,
-        norm_order: int = 2,
+        norm: int
+        | Callable[
+            [Float[Tensor, " B *obs_dims"], Float[Tensor, " B *obs_dims"]],
+            Float[Tensor, " B"],
+        ]
+        | None = None,
         gamma: float = 0.0,
         sigma_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
         | None = None,
@@ -542,7 +587,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         self.A = A
         self.y = y
         self.std_y = std_y
-        self.norm_order = norm_order
+        self.norm = norm
         self.gamma = gamma
         self.sigma_fn = sigma_fn
         self.alpha_fn = alpha_fn
@@ -575,17 +620,20 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
             Likelihood score guidance term of same shape as ``x``.
         """
         with torch.enable_grad():
-            # Compute predicted observations and residual
+            # Compute predicted observations
             y_pred = self.A(x_0)
-            residual = y_pred - self.y
 
-            # Compute norm^p of residual (summed over all dims except batch)
-            residual_flat = residual.reshape(residual.shape[0], -1)
-            norm_p = residual_flat.abs().pow(self.norm_order).sum(dim=1)
+            # Compute loss
+            if callable(self.norm):
+                loss = self.norm(y_pred, self.y)
+            else:
+                p = self.norm if self.norm is not None else 2
+                residual = (y_pred - self.y).reshape(y_pred.shape[0], -1)
+                loss = residual.abs().pow(p).sum(dim=1)
 
-            # Compute gradient of norm w.r.t. x
+            # Compute gradient of loss w.r.t. x (backprop through x_0)
             grad_x = torch.autograd.grad(
-                outputs=norm_p.sum(),
+                outputs=loss.sum(),
                 inputs=x,
                 create_graph=False,
             )[0]
@@ -622,11 +670,23 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         \nabla_{\mathbf{x}} \log p(\mathbf{y} | \mathbf{x}_t)
         = -\frac{1}{2 \left( \sigma_y^2 + \gamma \frac{\sigma(t)^2}{\alpha(t)^2}
         \right)} \nabla_{\mathbf{x}}
-        \| \mathbf{M} \odot (\hat{\mathbf{x}}_0 - \mathbf{y}) \|_p^p
+        \| \mathbf{M} \odot (\hat{\mathbf{x}}_0 - \mathbf{y}) \|^2
 
     where :math:`\mathbf{M}` is a binary mask (1 = observed, 0 = missing),
     :math:`\odot` denotes element-wise multiplication, and the scaling
-    incorporates an SDA correction through the parameter :math:`\gamma`.
+    incorporates an SDA correction through the parameter :math:`\gamma`. The
+    L2 norm can be replaced by other Lp norms or custom loss functions via the
+    ``norm`` parameter.
+
+    When ``norm`` is a callable, it must have the following signature:
+
+    .. code-block:: python
+
+        def norm(
+            y_pred,  # Shape: (B, *obs_dims)
+            y_true,  # Shape: (B, *obs_dims)
+        ) -> Tensor:  # Scalar loss per batch element, shape: (B,)
+            ...
 
     Parameters
     ----------
@@ -638,9 +698,11 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         Values at unobserved locations (where ``mask=0``) are ignored.
     std_y : float
         Standard deviation of the measurement noise :math:`\sigma_y`.
-    norm_order : int, default=2
-        Order of the norm used to compute the residual. Use ``2`` for
-        standard Gaussian likelihood (L2 norm), ``1`` for L1 norm, etc.
+    norm : int | Callable[[Tensor, Tensor], Tensor] | None, default=None
+        Loss function used to compute the residual. ``None`` (default) uses
+        the L2 norm. An ``int`` value uses the corresponding Lp norm. A
+        callable receives ``(mask * x_0, mask * y)`` and returns a scalar loss
+        per batch element of shape :math:`(B,)`.
     gamma : float, default=0.0
         SDA scaling parameter. When ``gamma > 0``, applies SDA correction
         that accounts for the variance of the x0 estimate. Set to ``0`` for
@@ -739,7 +801,7 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     ...     mask=mask,
     ...     y=y_obs,
     ...     std_y=0.075,
-    ...     norm_order=1,  # L1 norm
+    ...     norm=1,  # L1 norm
     ...     gamma=1.0,  # Enable SDA scaling
     ...     sigma_fn=scheduler.sigma,
     ...     alpha_fn=scheduler.alpha,
@@ -762,6 +824,36 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     >>> score = dps_denoiser(x, t)
     >>> score.shape
     torch.Size([1, 3, 8, 8])
+
+    **Example 3:** With a custom loss function (Huber loss):
+
+    >>> import torch
+    >>> import torch.nn.functional as F
+    >>> from physicsnemo.diffusion.guidance import DataConsistencyDPSGuidance
+    >>>
+    >>> # Wrap torch's Huber loss to return per-batch scalars
+    >>> def huber_loss(y_pred, y_true):
+    ...     per_elem = F.huber_loss(y_pred, y_true, reduction="none")
+    ...     return per_elem.reshape(y_pred.shape[0], -1).sum(dim=1)
+    ...
+    >>> mask = torch.zeros(1, 3, 8, 8)
+    >>> mask[:, :, 2, 3] = 1
+    >>> mask[:, :, 5, 6] = 1
+    >>> y_obs = torch.randn(1, 3, 8, 8)
+    >>>
+    >>> guidance = DataConsistencyDPSGuidance(
+    ...     mask=mask,
+    ...     y=y_obs,
+    ...     std_y=0.1,
+    ...     norm=huber_loss,  # Custom loss function
+    ... )
+    >>>
+    >>> x = torch.randn(1, 3, 8, 8, requires_grad=True)
+    >>> t = torch.tensor([1.0])
+    >>> x_0 = x * 0.9
+    >>> output = guidance(x, t, x_0)
+    >>> output.shape
+    torch.Size([1, 3, 8, 8])
     """
 
     def __init__(
@@ -769,7 +861,12 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         mask: Float[Tensor, " *mask_shape"],
         y: Float[Tensor, " B *dims"],
         std_y: float,
-        norm_order: int = 2,
+        norm: int
+        | Callable[
+            [Float[Tensor, "B *dims"], Float[Tensor, "B *dims"]],  # noqa: F821
+            Float[Tensor, " B"],
+        ]
+        | None = None,
         gamma: float = 0.0,
         sigma_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
         | None = None,
@@ -781,7 +878,7 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         self.mask = mask
         self.y = y
         self.std_y = std_y
-        self.norm_order = norm_order
+        self.norm = norm
         self.gamma = gamma
         self.sigma_fn = sigma_fn
         self.alpha_fn = alpha_fn
@@ -814,16 +911,21 @@ class DataConsistencyDPSGuidance(DPSGuidance):
             Likelihood score guidance term of same shape as ``x``.
         """
         with torch.enable_grad():
-            # Compute masked residual
-            residual = self.mask * (x_0 - self.y)
+            # Compute masked predicted and observed values
+            y_pred = self.mask * x_0
+            y_true = self.mask * self.y
 
-            # Compute norm^p of residual
-            residual_flat = residual.reshape(residual.shape[0], -1)
-            norm_p = residual_flat.abs().pow(self.norm_order).sum(dim=1)
+            # Compute loss
+            if callable(self.norm):
+                loss = self.norm(y_pred, y_true)
+            else:
+                p = self.norm if self.norm is not None else 2
+                residual = (y_pred - y_true).reshape(x_0.shape[0], -1)
+                loss = residual.abs().pow(p).sum(dim=1)
 
-            # Compute gradient of norm w.r.t. x
+            # Compute gradient of loss w.r.t. x (backprop through x_0)
             grad_x = torch.autograd.grad(
-                outputs=norm_p.sum(),
+                outputs=loss.sum(),
                 inputs=x,
                 create_graph=False,
             )[0]
