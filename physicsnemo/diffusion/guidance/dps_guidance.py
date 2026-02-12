@@ -404,11 +404,11 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         of ``A``.
     std_y : float
         Standard deviation of the measurement noise :math:`\sigma_y`.
-    norm : int | Callable[[Tensor, Tensor], Tensor] | None, default=None
-        Loss function used to compute the residual. ``None`` (default) uses
-        the L2 norm. An ``int`` value uses the corresponding Lp norm. A
-        callable receives ``(y_pred, y_true)`` and returns a scalar loss per
-        batch element of shape :math:`(B,)`.
+    norm : int | Callable[[Tensor, Tensor], Tensor], default=2
+        Loss function used to compute the residual. An ``int`` value (default
+        ``2``) uses the corresponding Lp norm. A callable receives
+        ``(y_pred, y_true)`` and returns a scalar loss per batch element of
+        shape :math:`(B,)`.
     gamma : float, default=0.0
         SDA scaling parameter. When ``gamma > 0``, applies SDA correction
         that accounts for the variance of the x0 estimate. Set to ``0`` for
@@ -574,8 +574,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         | Callable[
             [Float[Tensor, " B *obs_dims"], Float[Tensor, " B *obs_dims"]],
             Float[Tensor, " B"],
-        ]
-        | None = None,
+        ] = 2,
         gamma: float = 0.0,
         sigma_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
         | None = None,
@@ -627,9 +626,8 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
             if callable(self.norm):
                 loss = self.norm(y_pred, self.y)
             else:
-                p = self.norm if self.norm is not None else 2
                 residual = (y_pred - self.y).reshape(y_pred.shape[0], -1)
-                loss = residual.abs().pow(p).sum(dim=1)
+                loss = residual.abs().pow(self.norm).sum(dim=1)
 
             # Compute gradient of loss w.r.t. x (backprop through x_0)
             grad_x = torch.autograd.grad(
@@ -698,11 +696,11 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         Values at unobserved locations (where ``mask=0``) are ignored.
     std_y : float
         Standard deviation of the measurement noise :math:`\sigma_y`.
-    norm : int | Callable[[Tensor, Tensor], Tensor] | None, default=None
-        Loss function used to compute the residual. ``None`` (default) uses
-        the L2 norm. An ``int`` value uses the corresponding Lp norm. A
-        callable receives ``(mask * x_0, mask * y)`` and returns a scalar loss
-        per batch element of shape :math:`(B,)`.
+    norm : int | Callable[[Tensor, Tensor], Tensor], default=2
+        Loss function used to compute the residual. An ``int`` value (default
+        ``2``) uses the corresponding Lp norm. A callable receives
+        ``(mask * x_0, mask * y)`` and returns a scalar loss per batch element
+        of shape :math:`(B,)`.
     gamma : float, default=0.0
         SDA scaling parameter. When ``gamma > 0``, applies SDA correction
         that accounts for the variance of the x0 estimate. Set to ``0`` for
@@ -865,8 +863,7 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         | Callable[
             [Float[Tensor, "B *dims"], Float[Tensor, "B *dims"]],  # noqa: F821
             Float[Tensor, " B"],
-        ]
-        | None = None,
+        ] = 2,
         gamma: float = 0.0,
         sigma_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
         | None = None,
@@ -919,9 +916,8 @@ class DataConsistencyDPSGuidance(DPSGuidance):
             if callable(self.norm):
                 loss = self.norm(y_pred, y_true)
             else:
-                p = self.norm if self.norm is not None else 2
                 residual = (y_pred - y_true).reshape(x_0.shape[0], -1)
-                loss = residual.abs().pow(p).sum(dim=1)
+                loss = residual.abs().pow(self.norm).sum(dim=1)
 
             # Compute gradient of loss w.r.t. x (backprop through x_0)
             grad_x = torch.autograd.grad(
