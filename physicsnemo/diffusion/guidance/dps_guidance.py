@@ -590,8 +590,12 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         self.std_y = std_y
         self.norm = norm
         self.gamma = gamma
-        self.sigma_fn = sigma_fn
-        self.alpha_fn = alpha_fn
+        self.sigma_fn = (
+            sigma_fn if sigma_fn is not None else lambda t: torch.zeros_like(t)
+        )
+        self.alpha_fn = (
+            alpha_fn if alpha_fn is not None else lambda t: torch.ones_like(t)
+        )
 
     def __call__(
         self,
@@ -640,17 +644,11 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
 
         # Compute scaling factor
         t_bc = t.reshape(-1, *([1] * (x.ndim - 1)))
-        if self.gamma > 0 and self.sigma_fn is not None:
-            sigma_t = self.sigma_fn(t_bc)
-            alpha_t = self.alpha_fn(t_bc) if self.alpha_fn is not None else 1.0
-            variance = self.std_y**2 + self.gamma * (sigma_t**2) / (alpha_t**2)
-        else:
-            variance = self.std_y**2
+        sigma_t = self.sigma_fn(t_bc)
+        alpha_t = self.alpha_fn(t_bc)
+        variance = self.std_y**2 + self.gamma * (sigma_t**2) / (alpha_t**2)
 
-        # Likelihood score
-        guidance = -grad_x / (2 * variance)
-
-        return guidance
+        return -grad_x / (2 * variance)
 
 
 class DataConsistencyDPSGuidance(DPSGuidance):
@@ -879,8 +877,12 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         self.std_y = std_y
         self.norm = norm
         self.gamma = gamma
-        self.sigma_fn = sigma_fn
-        self.alpha_fn = alpha_fn
+        self.sigma_fn = (
+            sigma_fn if sigma_fn is not None else lambda t: torch.zeros_like(t)
+        )
+        self.alpha_fn = (
+            alpha_fn if alpha_fn is not None else lambda t: torch.ones_like(t)
+        )
 
     def __call__(
         self,
@@ -930,14 +932,8 @@ class DataConsistencyDPSGuidance(DPSGuidance):
 
         # Compute scaling factor
         t_bc = t.reshape(-1, *([1] * (x.ndim - 1)))
-        if self.gamma > 0 and self.sigma_fn is not None:
-            sigma_t = self.sigma_fn(t_bc)
-            alpha_t = self.alpha_fn(t_bc) if self.alpha_fn is not None else 1.0
-            variance = self.std_y**2 + self.gamma * (sigma_t**2) / (alpha_t**2)
-        else:
-            variance = self.std_y**2
+        sigma_t = self.sigma_fn(t_bc)
+        alpha_t = self.alpha_fn(t_bc)
+        variance = self.std_y**2 + self.gamma * (sigma_t**2) / (alpha_t**2)
 
-        # Likelihood score
-        guidance = -grad_x / (2 * variance)
-
-        return guidance
+        return -grad_x / (2 * variance)
