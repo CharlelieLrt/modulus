@@ -611,7 +611,8 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         x : Tensor
             Noisy latent state :math:`\mathbf{x}_t`, of shape :math:`(B, *)`.
             Must have ``requires_grad=True`` and be part of a computational
-            graph connecting to ``x_0``.
+            graph connecting to ``x_0``. Its ``dtype`` and ``device``
+            determine those of all internal computations.
         t : Tensor
             Batched diffusion time of shape :math:`(B,)`.
         x_0 : Tensor
@@ -624,15 +625,18 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         Tensor
             Likelihood score guidance term of same shape as ``x``.
         """
+        # Ensure stored tensors match x's dtype and device
+        y = self.y.to(dtype=x.dtype, device=x.device)
+
         with torch.enable_grad():
             # Compute predicted observations
             y_pred = self.observation_operator(x_0)
 
             # Compute loss
             if callable(self.norm):
-                loss = self.norm(y_pred, self.y)
+                loss = self.norm(y_pred, y)
             else:
-                residual = (y_pred - self.y).reshape(y_pred.shape[0], -1)
+                residual = (y_pred - y).reshape(y_pred.shape[0], -1)
                 loss = residual.abs().pow(self.norm).sum(dim=1)
 
             # Compute gradient of loss w.r.t. x (backprop through x_0)
@@ -898,7 +902,8 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         x : Tensor
             Noisy latent state :math:`\mathbf{x}_t`, of shape :math:`(B, *)`.
             Must have ``requires_grad=True`` and be part of a computational
-            graph connecting to ``x_0``.
+            graph connecting to ``x_0``. Its ``dtype`` and ``device``
+            determine those of all internal computations.
         t : Tensor
             Batched diffusion time of shape :math:`(B,)`.
         x_0 : Tensor
@@ -911,11 +916,14 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         Tensor
             Likelihood score guidance term of same shape as ``x``.
         """
+        # Ensure stored tensors match x's dtype and device
+        mask = self.mask.to(dtype=x.dtype, device=x.device)
+        y = self.y.to(dtype=x.dtype, device=x.device)
+
         with torch.enable_grad():
             # Compute masked predicted and observed values
-            mask = self.mask.to(dtype=x_0.dtype, device=x_0.device)
             y_pred = mask * x_0
-            y_true = mask * self.y
+            y_true = mask * y
 
             # Compute loss
             if callable(self.norm):
