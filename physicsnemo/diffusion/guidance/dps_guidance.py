@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023 - 2025 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2026 NVIDIA CORPORATION & AFFILIATES.
 # SPDX-FileCopyrightText: All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
@@ -33,7 +33,7 @@ class DPSGuidance(Protocol):
 
     A DPS guidance is a callable that computes a guidance term to steer the
     diffusion sampling process toward satisfying some observation constraint.
-    A DPSGuidance is expected to be a score-predictor, as it returns a quantity
+    A ``DPSGuidance`` is expected to be a score-predictor, as it returns a quantity
     analogous to a score.
 
     The typical form is:
