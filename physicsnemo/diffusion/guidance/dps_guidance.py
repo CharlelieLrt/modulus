@@ -19,7 +19,7 @@
 from typing import Callable, Protocol, Sequence, runtime_checkable
 
 import torch
-from jaxtyping import Float
+from jaxtyping import Bool, Float
 from torch import Tensor
 
 from physicsnemo.diffusion.base import DiffusionDenoiser
@@ -689,8 +689,8 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     Parameters
     ----------
     mask : Tensor
-        Binary mask of shape :math:`(B, *)` matching the state shape.
-        Values should be 1 for observed locations and 0 for missing.
+        Boolean mask of shape :math:`(B, *)` matching the state shape.
+        ``True`` for observed locations, ``False`` for missing.
     y : Tensor
         Observed data of shape :math:`(B, *)` matching the state shape.
         Values at unobserved locations (where ``mask=0``) are ignored.
@@ -741,11 +741,11 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     ...     DPSDenoiser,
     ... )
     >>>
-    >>> # Sparse mask: only observe a few probe locations
-    >>> mask = torch.zeros(1, 3, 8, 8)
-    >>> mask[:, :, 2, 3] = 1  # Probe at (2, 3)
-    >>> mask[:, :, 5, 6] = 1  # Probe at (5, 6)
-    >>> mask[:, :, 1, 7] = 1  # Probe at (1, 7)
+    >>> # Boolean mask: only observe a few probe locations
+    >>> mask = torch.zeros(1, 3, 8, 8, dtype=torch.bool)
+    >>> mask[:, :, 2, 3] = True  # Probe at (2, 3)
+    >>> mask[:, :, 5, 6] = True  # Probe at (5, 6)
+    >>> mask[:, :, 1, 7] = True  # Probe at (1, 7)
     >>> y_obs = torch.randn(1, 3, 8, 8)  # Observed values
     >>>
     >>> guidance = DataConsistencyDPSGuidance(
@@ -788,10 +788,10 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     >>> scheduler = EDMNoiseScheduler()
     >>>
     >>> # Same sparse probe locations as Example 1
-    >>> mask = torch.zeros(1, 3, 8, 8)
-    >>> mask[:, :, 2, 3] = 1
-    >>> mask[:, :, 5, 6] = 1
-    >>> mask[:, :, 1, 7] = 1
+    >>> mask = torch.zeros(1, 3, 8, 8, dtype=torch.bool)
+    >>> mask[:, :, 2, 3] = True
+    >>> mask[:, :, 5, 6] = True
+    >>> mask[:, :, 1, 7] = True
     >>> y_obs = torch.randn(1, 3, 8, 8)
     >>>
     >>> # Enable SDA scaling and use L1 norm for robustness
@@ -834,9 +834,9 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     ...     per_elem = F.huber_loss(y_pred, y_true, reduction="none")
     ...     return per_elem.reshape(y_pred.shape[0], -1).sum(dim=1)
     ...
-    >>> mask = torch.zeros(1, 3, 8, 8)
-    >>> mask[:, :, 2, 3] = 1
-    >>> mask[:, :, 5, 6] = 1
+    >>> mask = torch.zeros(1, 3, 8, 8, dtype=torch.bool)
+    >>> mask[:, :, 2, 3] = True
+    >>> mask[:, :, 5, 6] = True
     >>> y_obs = torch.randn(1, 3, 8, 8)
     >>>
     >>> guidance = DataConsistencyDPSGuidance(
@@ -856,7 +856,7 @@ class DataConsistencyDPSGuidance(DPSGuidance):
 
     def __init__(
         self,
-        mask: Float[Tensor, " *mask_shape"],
+        mask: Bool[Tensor, " B *dims"],
         y: Float[Tensor, " B *dims"],
         std_y: float,
         norm: int
@@ -872,7 +872,7 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     ) -> None:
         if gamma > 0 and sigma_fn is None:
             raise ValueError("sigma_fn must be provided when gamma > 0")
-        self.mask = mask
+        self.mask = mask.float()
         self.y = y
         self.std_y = std_y
         self.norm = norm
@@ -913,8 +913,9 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         """
         with torch.enable_grad():
             # Compute masked predicted and observed values
-            y_pred = self.mask * x_0
-            y_true = self.mask * self.y
+            mask = self.mask.to(dtype=x_0.dtype, device=x_0.device)
+            y_pred = mask * x_0
+            y_true = mask * self.y
 
             # Compute loss
             if callable(self.norm):
