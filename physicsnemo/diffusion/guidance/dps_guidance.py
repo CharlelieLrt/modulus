@@ -374,12 +374,12 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
     times. The L2 norm can be replaced by other Lp norms or custom loss
     functions via the ``norm`` parameter.
 
-    The observation operator ``A`` must be a differentiable callable with the
+    The ``observation_operator`` must be a differentiable callable with the
     following signature:
 
     .. code-block:: python
 
-        def A(x_0: Tensor) -> Tensor:
+        def observation_operator(x_0: Tensor) -> Tensor:
             # x_0: estimated clean state, shape (B, *)
             # returns: predicted observations, same shape (B, *obs_dims) as y
             ...
@@ -396,7 +396,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
 
     Parameters
     ----------
-    A : Callable[[Tensor], Tensor]
+    observation_operator : Callable[[Tensor], Tensor]
         Observation operator mapping clean state to observations.
         Must be differentiable (supports ``torch.autograd``).
     y : Tensor
@@ -465,7 +465,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
     >>> y_obs = torch.randn(1, 3, 4, 4)
     >>>
     >>> guidance = ModelConsistencyDPSGuidance(
-    ...     A=blur_downsample,
+    ...     observation_operator=blur_downsample,
     ...     y=y_obs,
     ...     std_y=0.1,
     ... )
@@ -510,7 +510,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
     >>>
     >>> # Enable SDA scaling with gamma > 0, providing sigma and alpha functions
     >>> guidance = ModelConsistencyDPSGuidance(
-    ...     A=A,
+    ...     observation_operator=A,
     ...     y=y_obs,
     ...     std_y=0.075,
     ...     gamma=0.05,  # Enable SDA scaling
@@ -551,7 +551,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
     >>> y_obs = torch.randn(1, 1, 8, 8)
     >>>
     >>> guidance = ModelConsistencyDPSGuidance(
-    ...     A=A,
+    ...     observation_operator=A,
     ...     y=y_obs,
     ...     std_y=0.1,
     ...     norm=huber_loss,  # Custom loss function
@@ -567,7 +567,9 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
 
     def __init__(
         self,
-        A: Callable[[Float[Tensor, " B *dims"]], Float[Tensor, " B *obs_dims"]],
+        observation_operator: Callable[
+            [Float[Tensor, " B *dims"]], Float[Tensor, " B *obs_dims"]
+        ],
         y: Float[Tensor, " B *obs_dims"],
         std_y: float,
         norm: int
@@ -583,7 +585,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
     ) -> None:
         if gamma > 0 and sigma_fn is None:
             raise ValueError("sigma_fn must be provided when gamma > 0")
-        self.A = A
+        self.observation_operator = observation_operator
         self.y = y
         self.std_y = std_y
         self.norm = norm
@@ -620,7 +622,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         """
         with torch.enable_grad():
             # Compute predicted observations
-            y_pred = self.A(x_0)
+            y_pred = self.observation_operator(x_0)
 
             # Compute loss
             if callable(self.norm):
