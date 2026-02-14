@@ -67,7 +67,7 @@ class Solver(Protocol):
     ...         d = (x - self.denoiser(x, t_cur)) / t_cur
     ...         return x + (t_next - t_cur) * d
     ...
-    >>> denoiser = lambda x, t: x * 0.9
+    >>> denoiser = lambda x, t: x / (1 + t.view(-1, 1)**2)  # Toy denoiser
     >>> solver = SimpleEuler(denoiser)
     >>> isinstance(solver, Solver)
     True
@@ -123,7 +123,7 @@ class EulerSolver(Solver):
     >>> import torch
     >>> from physicsnemo.diffusion.samplers.solvers import EulerSolver
     >>>
-    >>> denoiser = lambda x, t: x * 0.9
+    >>> denoiser = lambda x, t: x / (1 + t.view(-1, 1, 1, 1)**2)  # Toy denoiser
     >>> solver = EulerSolver(denoiser)
     >>> x_t = torch.randn(1, 3, 8, 8)
     >>> t_cur = torch.tensor([1.0])
@@ -200,7 +200,7 @@ class HeunSolver(Solver):
     >>> import torch
     >>> from physicsnemo.diffusion.samplers.solvers import HeunSolver
     >>>
-    >>> denoiser = lambda x, t: x * 0.9
+    >>> denoiser = lambda x, t: x / (1 + t.view(-1, 1, 1, 1)**2)  # Toy denoiser
     >>> solver = HeunSolver(denoiser)
     >>> x_t = torch.randn(1, 3, 8, 8)
     >>> t_cur = torch.tensor([1.0])
@@ -364,7 +364,7 @@ class EDMStochasticEulerSolver(Solver):
     >>> from physicsnemo.diffusion.samplers.solvers import (
     ...     EDMStochasticEulerSolver,
     ... )
-    >>> denoiser = lambda x, t: x * 0.9
+    >>> denoiser = lambda x, t: x / (1 + t.view(-1, 1, 1, 1)**2)  # Toy denoiser
     >>> solver = EDMStochasticEulerSolver(denoiser, S_churn=40, num_steps=18)
     >>> x_t = torch.randn(1, 3, 8, 8)
     >>> t_cur = torch.tensor([1.0])
@@ -577,7 +577,7 @@ class EDMStochasticHeunSolver(Solver):
     >>> from physicsnemo.diffusion.samplers.solvers import (
     ...     EDMStochasticHeunSolver,
     ... )
-    >>> denoiser = lambda x, t: x * 0.9
+    >>> denoiser = lambda x, t: x / (1 + t.view(-1, 1, 1, 1)**2)  # Toy denoiser
     >>> solver = EDMStochasticHeunSolver(denoiser, S_churn=40, num_steps=18)
     >>> x_t = torch.randn(1, 3, 8, 8)
     >>> t_cur = torch.tensor([1.0])

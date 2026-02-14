@@ -159,7 +159,9 @@ class Predictor(Protocol):
     >>> class MyModel:
     ...     def __call__(self, x, t, condition=None):
     ...         # x0-predictor: returns estimate of clean data
-    ...         return x * 0.9 + condition["y"]
+    ...         # (here assumes conditional normal distribution N(x|y))
+    ...         t_bc = t.view(-1, *([1] * (x.ndim - 1)))
+    ...         return x / (1 + t_bc**2) + condition["y"]
     ...
     >>> model = MyModel()
     >>> cond = TensorDict({"y": torch.randn(2, 4)}, batch_size=[2])
@@ -260,7 +262,9 @@ class Denoiser(Protocol):
     >>> from physicsnemo.diffusion import Denoiser
     >>>
     >>> # Start from a predictor (x0-predictor)
-    >>> x0_predictor = lambda x, t: x * 0.9
+    >>> def x0_predictor(x, t):
+    ...     t_bc = t.view(-1, *([1] * (x.ndim - 1)))
+    ...     return x / (1 + t_bc**2)
     >>>
     >>> # Build a denoiser (ODE RHS) from scratch:
     >>> # score = (x0 - x) / sigma^2,  ODE RHS = -0.5 * g^2 * score

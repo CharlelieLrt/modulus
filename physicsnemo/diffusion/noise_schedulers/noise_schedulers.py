@@ -73,8 +73,13 @@ class NoiseScheduler(Protocol):
     ...         return torch.linspace(1, 0, num_steps + 1, device=device)
     ...     def init_latents(self, spatial_shape, tN, device=None, dtype=None):
     ...         return torch.randn(tN.shape[0], *spatial_shape, device=device)
-    ...     def get_denoiser(self, predictor, **kwargs):
-    ...         return predictor  # Pass-through (assumes predictor is already a denoiser)
+    ...     def get_denoiser(self, x0_predictor=None, score_predictor=None, **kwargs):
+    ...         def denoiser(x, t):
+    ...             if x0_predictor is not None:
+    ...                 return (x - x0_predictor(x, t)) / (t.view(-1, 1))
+    ...             elif score_predictor is not None:
+    ...                 return -score_predictor(x, t) * t.view(-1, 1)
+    ...         return denoiser
     ...
     >>> scheduler = MyScheduler()
     >>> isinstance(scheduler, NoiseScheduler)
@@ -198,7 +203,6 @@ class NoiseScheduler(Protocol):
 
     def get_denoiser(
         self,
-        predictor: Predictor,
         **kwargs: Any,
     ) -> Denoiser:
         r"""
@@ -211,14 +215,12 @@ class NoiseScheduler(Protocol):
 
         Parameters
         ----------
-        predictor : Predictor
-            A callable implementing the
-            :class:`~physicsnemo.diffusion.Predictor` interface. It takes
-            ``(x_t, t)`` and returns a prediction (e.g., clean data estimate,
-            score, etc.). The expected predictor type depends on the noise
-            scheduler implementation; see subclass docstrings for details.
         **kwargs : Any
-            Additional keyword arguments (implementation-specific).
+            Implementation-specific keyword arguments. Concrete
+            implementations typically accept keyword-only predictor arguments
+            (e.g., ``score_predictor``, ``x0_predictor``). See concrete classes
+            docstrings for details (e.g.
+            :meth:`LinearGaussianNoiseScheduler.get_denoiser`).
 
         Returns
         -------
@@ -267,9 +269,9 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         - g^2(\mathbf{x}, t) \nabla_{\mathbf{x}} \log p(\mathbf{x}) \right] dt
         + g(\mathbf{x}, t) d\mathbf{W}
 
-    The :meth:`get_denoiser` method converts a **score predictor** into the
-    appropriate ODE/SDE right-hand side. If you have an x0-predictor, use
-    :meth:`x0_to_score` first to convert it to a score predictor.
+    The :meth:`get_denoiser` factory converts a predictor (either a
+    score-predictor or an x0-predictor) into the appropriate ODE/SDE
+    right-hand side.
 
     **Abstract methods (must be implemented by subclasses):**
 
@@ -342,7 +344,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     >>>
     >>> # The custom drift is used internally by get_denoiser
     >>> score_pred = lambda x, t: -x / t.view(-1, 1)**2  # Toy score predictor
-    >>> denoiser = custom.get_denoiser(score_pred, "ode")
+    >>> denoiser = custom.get_denoiser(score_predictor=score_pred)
     >>> x = torch.randn(2, 4)
     >>> t = torch.tensor([1.0, 1.0])
     >>> out = denoiser(x, t)  # Uses custom drift in ODE RHS computation
@@ -600,8 +602,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         r"""
         Convert x0-predictor output to score.
 
-        Use this method to convert an x0-predictor to a score predictor before
-        passing to :meth:`get_denoiser`.
+        This conversion is done automatically by :meth:`get_denoiser` when
+        ``x0_predictor`` is provided, but can also be called manually.
 
         The score is: :math:`\nabla_{\mathbf{x}_t} \log p(\mathbf{x}_t)
         = \frac{\alpha(t) \hat{\mathbf{x}}_0 - \mathbf{x}_t}{\sigma^2(t)}`.
@@ -627,12 +629,15 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         Examples
         --------
         >>> scheduler = EDMNoiseScheduler()
-        >>> # If you have an x0-predictor, wrap it to create a score predictor:
-        >>> x0_predictor = lambda x, t: x * 0.9
+        >>> # If you have an x0-predictor, wrap it for manual conversion
+        >>> # (done automatically by get_denoiser):
+        >>> def x0_predictor(x, t):
+        ...     t_bc = t.view(-1, *([1] * (x.ndim - 1)))
+        ...     return x / (1 + t_bc**2)
         >>> def score_predictor(x, t):
         ...     x0_pred = x0_predictor(x, t)
         ...     return scheduler.x0_to_score(x0_pred, x, t)
-        >>> # Then use score_predictor with get_denoiser
+        >>> # Or simply: scheduler.get_denoiser(x0_predictor=x0_predictor)
         """
         t_bc = t.reshape(-1, *([1] * (x0.ndim - 1)))
         alpha_t_bc = self.alpha(t_bc)
@@ -641,46 +646,50 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
     def get_denoiser(
         self,
-        predictor: Predictor,
+        *,
+        score_predictor: Predictor | None = None,
+        x0_predictor: Predictor | None = None,
         denoising_type: Literal["ode", "sde"] = "ode",
         **kwargs: Any,
     ) -> Denoiser:
         r"""
-        Factory that converts a **score-predictor** to a denoiser for sampling.
+        Factory that converts a predictor to a denoiser for sampling.
 
-        The returned denoiser computes the right-hand side of the reverse
-        ODE or SDE.
-
-        **Important:** ``predictor`` must be a **score-predictor**, i.e., a
-        callable returning :math:`\nabla_{\mathbf{x}} \log p(\mathbf{x}_t)`.
-        If you have an x0-predictor, convert it to a score-predictor using
-        :meth:`x0_to_score` first.
+        Accepts either a **score-predictor** or an **x0-predictor** (exactly
+        one must be provided). The returned denoiser computes the right-hand
+        side of the reverse ODE or SDE.
 
         For ODE (``denoising_type="ode"``):
 
         .. math::
             \frac{d\mathbf{x}}{dt} = f(\mathbf{x}, t) - \frac{1}{2} g^2(t)
-            D(\mathbf{x}, t)
-
-        where :math:`D(\mathbf{x}, t) = \nabla_{\mathbf{x}} \log p(\mathbf{x})`
-        is the score returned by ``predictor``.
+            s(\mathbf{x}, t)
 
         For SDE (``denoising_type="sde"``):
 
         .. math::
-            d\mathbf{x} = \left[ f(\mathbf{x}, t) - g^2(t) D(\mathbf{x}, t)
+            d\mathbf{x} = \left[ f(\mathbf{x}, t) - g^2(t) s(\mathbf{x}, t)
             \right] dt + g(t) d\mathbf{W}
 
-        Note: The stochastic term :math:`g(t) d\mathbf{W}` is handled by the
-        solver, not returned by the denoiser.
+        where :math:`s(\mathbf{x}, t)` is the score. When an x0-predictor is
+        provided, the score is computed internally via :meth:`x0_to_score`.
+        When a score-predictor is provided, it is used directly.
+        *Note:* As usually done in SDE integration, the stochastic term
+        :math:`g(t) d\mathbf{W}` is handled by the solver, not returned by the
+        denoiser itself.
 
         Parameters
         ----------
-        predictor : Predictor
-            A **score-predictor** that takes ``(x_t, t)`` and returns a score
-            (can be the unconditional score, the conditional score, or even
-            include likelihood score for guidance, etc.) Must implement the
-            :class:`~physicsnemo.diffusion.Predictor` interface.
+        score_predictor : Predictor, optional
+            A score-predictor that takes ``(x_t, t)`` and returns a score
+            (e.g. :math:`\nabla_{\mathbf{x}} \log p(\mathbf{x}_t)`). Can be
+            unconditional, conditional, guidance-augmented, etc. Mutually
+            exclusive with ``x0_predictor``.
+        x0_predictor : Predictor, optional
+            An x0-predictor that takes ``(x_t, t)`` and returns an estimate
+            of clean data :math:`\hat{\mathbf{x}}_0`. The score is computed
+            internally via :meth:`x0_to_score`. Mutually exclusive with
+            ``score_predictor``.
         denoising_type : {"ode", "sde"}, default="ode"
             Type of reverse process. Use ``"ode"`` for deterministic sampling,
             ``"sde"`` for stochastic sampling.
@@ -690,31 +699,63 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         Returns
         -------
         Denoiser
-            A denoiser computing the RHS of the reverse ODE/SDE. Implements the
-            :class:`~physicsnemo.diffusion.Denoiser` interface.
+            A denoiser computing the RHS of the reverse ODE/SDE. Implements
+            the :class:`~physicsnemo.diffusion.Denoiser` interface.
+
+        Raises
+        ------
+        ValueError
+            If both or neither ``score_predictor`` and ``x0_predictor`` are
+            provided.
 
         Examples
         --------
+        Generate ODE RHS from a score-predictor:
+
         >>> import torch
         >>> scheduler = EDMNoiseScheduler()
-        >>>
-        >>> # Convert x0-predictor to score-predictor, then to ODE denoiser
-        >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
-        >>> def score_predictor(x, t):
-        ...     x0_pred = x0_predictor(x, t)
-        ...     return scheduler.x0_to_score(x0_pred, x, t)
-        >>>
-        >>> # Then use get_denoiser to create the ODE right-hand side
-        >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+        >>> score_pred = lambda x, t: -x / t.view(-1, 1, 1, 1)**2  # Toy score-predictor
+        >>> denoiser = scheduler.get_denoiser(
+        ...     score_predictor=score_pred, denoising_type="ode")
         >>> x = torch.randn(2, 3, 8, 8)
         >>> t = torch.tensor([1.0, 1.0])
         >>> dx_dt = denoiser(x, t)  # Returns ODE RHS for sampling
         >>> dx_dt.shape
         torch.Size([2, 3, 8, 8])
+
+        Generate ODE RHS from an x0-predictor (score conversion is done internally):
+
+        >>> x0_pred = lambda x, t: x / (1 + t.view(-1, 1, 1, 1)**2)  # Toy x0-predictor
+        >>> denoiser = scheduler.get_denoiser(
+        ...     x0_predictor=x0_pred, denoising_type="ode")
+        >>> dx_dt = denoiser(x, t)  # Returns ODE RHS for sampling
+        >>> dx_dt.shape
+        torch.Size([2, 3, 8, 8])
         """
+        # Validate: exactly one of score_predictor or x0_predictor
+        if (score_predictor is None) == (x0_predictor is None):
+            raise ValueError(
+                "Exactly one of 'score_predictor' or 'x0_predictor' "
+                "must be provided, not both or neither."
+            )
+
         # Capture methods as local variables to avoid referencing self
         drift = self.drift
         diffusion = self.diffusion
+        # Build the score function
+        if x0_predictor is not None:
+            x0_to_score = self.x0_to_score
+
+            def _score(
+                x: Float[Tensor, " B *dims"],
+                t: Float[Tensor, " B"],
+            ) -> Float[Tensor, " B *dims"]:
+                x0 = x0_predictor(x, t)
+                return x0_to_score(x0, x, t)
+
+            score_fn = _score
+        else:
+            score_fn = score_predictor
 
         if denoising_type == "ode":
 
@@ -722,7 +763,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
                 x: Float[Tensor, "B *dims"],  # noqa: F821
                 t: Float[Tensor, "B"],  # noqa: F821
             ) -> Float[Tensor, " B *dims"]:
-                score = predictor(x, t)
+                score = score_fn(x, t)
                 f = drift(x, t)
                 g_sq = diffusion(x, t)
                 dx_dt = f - 0.5 * g_sq * score
@@ -736,7 +777,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
                 x: Float[Tensor, "B *dims"],  # noqa: F821
                 t: Float[Tensor, "B"],  # noqa: F821
             ) -> Float[Tensor, " B *dims"]:
-                score = predictor(x, t)
+                score = score_fn(x, t)
                 f = drift(x, t)
                 g_sq = diffusion(x, t)
                 # Deterministic part of the SDE drift
@@ -890,10 +931,8 @@ class EDMNoiseScheduler(LinearGaussianNoiseScheduler):
     torch.Size([4, 3, 8, 8])
     >>>
     >>> # Convert x0-predictor to denoiser for sampling
-    >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
-    >>> def score_predictor(x, t):
-    ...     return scheduler.x0_to_score(x0_predictor(x, t), x, t)
-    >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, 1, 1, 1)**2)  # Toy x0-predictor
+    >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>> denoiser(xN, tN).shape  # ODE RHS for sampling
     torch.Size([4, 3, 8, 8])
     """
@@ -1059,10 +1098,8 @@ class VENoiseScheduler(LinearGaussianNoiseScheduler):
     torch.Size([4, 3, 8, 8])
     >>>
     >>> # Convert x0-predictor to denoiser for sampling
-    >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
-    >>> def score_predictor(x, t):
-    ...     return scheduler.x0_to_score(x0_predictor(x, t), x, t)
-    >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, 1, 1, 1)**2)  # Toy x0-predictor
+    >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>> denoiser(xN, tN).shape  # ODE RHS for sampling
     torch.Size([4, 3, 8, 8])
     """
@@ -1227,10 +1264,8 @@ class IDDPMNoiseScheduler(LinearGaussianNoiseScheduler):
     torch.Size([4, 3, 8, 8])
     >>>
     >>> # Convert x0-predictor to denoiser for sampling
-    >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
-    >>> def score_predictor(x, t):
-    ...     return scheduler.x0_to_score(x0_predictor(x, t), x, t)
-    >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, 1, 1, 1)**2)  # Toy x0-predictor
+    >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>> denoiser(xN, tN).shape  # ODE RHS for sampling
     torch.Size([4, 3, 8, 8])
     """
@@ -1438,9 +1473,7 @@ class VPNoiseScheduler(LinearGaussianNoiseScheduler):
     >>>
     >>> # Convert x0-predictor to denoiser for sampling
     >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
-    >>> def score_predictor(x, t):
-    ...     return scheduler.x0_to_score(x0_predictor(x, t), x, t)
-    >>> denoiser = scheduler.get_denoiser(score_predictor, "ode")
+    >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>> denoiser(xN, tN).shape  # ODE RHS for sampling
     torch.Size([4, 3, 8, 8])
     """
