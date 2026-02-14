@@ -249,14 +249,14 @@ class HeunSolver(Solver):
         t_cur_bc = t_cur.reshape(-1, *([1] * (x.ndim - 1)))
         t_next_bc = t_next.reshape(-1, *([1] * (x.ndim - 1)))
 
-        h = t_next_bc - t_cur_bc
+        h_bc = t_next_bc - t_cur_bc
 
         # First RHS evaluation
         d_cur = self.denoiser(x, t_cur)
 
         # Predictor step to intermediate point
-        t_prime_bc = t_cur_bc + self.alpha * h
-        x_prime = x + self.alpha * h * d_cur
+        t_prime_bc = t_cur_bc + self.alpha * h_bc
+        x_prime = x + self.alpha * h_bc * d_cur
 
         # Mask for elements where t_next != 0 (need 2nd order correction)
         # Shape: (B, 1, ..., 1) for broadcasting
@@ -272,8 +272,8 @@ class HeunSolver(Solver):
         # Where t_next == 0, use first-order Euler step
         w_cur = 1 - 1 / (2 * self.alpha)
         w_prime = 1 / (2 * self.alpha)
-        x_euler = x + h * d_cur
-        x_heun = x + h * (w_cur * d_cur + w_prime * d_prime)
+        x_euler = x + h_bc * d_cur
+        x_heun = x + h_bc * (w_cur * d_cur + w_prime * d_prime)
         x_next = mask_bc * x_heun + (1 - mask_bc) * x_euler
 
         return x_next
@@ -417,9 +417,18 @@ class EDMStochasticEulerSolver(Solver):
             raise ValueError(
                 "sigma_fn and sigma_inv_fn must both be provided or both None."
             )
-        self.sigma_fn = sigma_fn
-        self.sigma_inv_fn = sigma_inv_fn
-        self.alpha_fn = alpha_fn
+        if sigma_fn is None and sigma_inv_fn is None:
+            self.sigma_fn = lambda t: t
+            self.sigma_inv_fn = lambda sigma: sigma
+            self._use_noise_level_space = False
+        else:
+            self.sigma_fn = sigma_fn
+            self.sigma_inv_fn = sigma_inv_fn
+            self._use_noise_level_space = True
+        if alpha_fn is None:
+            self.alpha_fn = lambda t: torch.ones_like(t)
+        else:
+            self.alpha_fn = alpha_fn
 
     def step(
         self,
@@ -453,33 +462,19 @@ class EDMStochasticEulerSolver(Solver):
         gamma_base = min(self.S_churn / self.num_steps, math.sqrt(2) - 1)
 
         # Compute perturbed time t_hat with increased noise
-        if self.sigma_fn is not None and self.sigma_inv_fn is not None:
-            # Work in noise-level space
-            # Mask: apply churn only where S_min <= sigma <= S_max
-            sigma_cur_bc = self.sigma_fn(t_cur_bc)
-            churn_mask = (sigma_cur_bc >= self.S_min) & (sigma_cur_bc <= self.S_max)
-            gamma_bc = torch.where(churn_mask, gamma_base, 0.0)
-            sigma_hat_bc = sigma_cur_bc + gamma_bc * sigma_cur_bc
-            t_hat_bc = self.sigma_inv_fn(sigma_hat_bc)
-            # Noise scale
-            noise_var_bc = (sigma_hat_bc**2 - sigma_cur_bc**2).clamp(min=0)
-            if self.alpha_fn is not None:
-                alpha_hat_bc = self.alpha_fn(t_hat_bc)
-                noise_scale_bc = noise_var_bc.sqrt() * alpha_hat_bc * self.S_noise
-            else:
-                noise_scale_bc = noise_var_bc.sqrt() * self.S_noise
-        else:
-            # Work directly in time-step space
-            # Mask: apply churn only where S_min <= t_cur <= S_max
-            churn_mask = (t_cur_bc >= self.S_min) & (t_cur_bc <= self.S_max)
-            gamma_bc = torch.where(churn_mask, gamma_base, 0.0)
-            t_hat_bc = t_cur_bc + gamma_bc * t_cur_bc
-            noise_var_bc = (t_hat_bc**2 - t_cur_bc**2).clamp(min=0)
-            if self.alpha_fn is not None:
-                alpha_hat_bc = self.alpha_fn(t_hat_bc)
-                noise_scale_bc = noise_var_bc.sqrt() * alpha_hat_bc * self.S_noise
-            else:
-                noise_scale_bc = noise_var_bc.sqrt() * self.S_noise
+        # NOTE: sigma_fn and sigma_inv_fn are identity if not provided (stays
+        # in time-step space) alpha_fn returns ones if not provided (no signal
+        # attenuation).
+        sigma_cur_bc = self.sigma_fn(t_cur_bc)
+        # Mask: apply churn only where S_min <= sigma <= S_max
+        churn_mask = (sigma_cur_bc >= self.S_min) & (sigma_cur_bc <= self.S_max)
+        gamma_bc = torch.where(churn_mask, gamma_base, 0.0)
+        sigma_hat_bc = sigma_cur_bc + gamma_bc * sigma_cur_bc
+        t_hat_bc = self.sigma_inv_fn(sigma_hat_bc)
+        # Noise scale: sqrt(sigma_hat^2 - sigma_cur^2) * alpha(t_hat)
+        noise_var_bc = (sigma_hat_bc**2 - sigma_cur_bc**2).clamp(min=0)
+        alpha_hat_bc = self.alpha_fn(t_hat_bc)
+        noise_scale_bc = noise_var_bc.sqrt() * alpha_hat_bc * self.S_noise
 
         # Perturb latent with noise
         x_hat = x + noise_scale_bc * torch.randn_like(x)
@@ -639,9 +634,19 @@ class EDMStochasticHeunSolver(Solver):
             raise ValueError(
                 "sigma_fn and sigma_inv_fn must both be provided or both None."
             )
-        self.sigma_fn = sigma_fn
-        self.sigma_inv_fn = sigma_inv_fn
-        self.alpha_fn = alpha_fn
+        if sigma_fn is None and sigma_inv_fn is None:
+            self.sigma_fn = lambda t: t
+            self.sigma_inv_fn = lambda sigma: sigma
+            self._use_noise_level_space = False
+        else:
+            self.sigma_fn = sigma_fn
+            self.sigma_inv_fn = sigma_inv_fn
+            self._use_noise_level_space = True
+        # Default alpha_fn returns ones (no signal attenuation)
+        if alpha_fn is None:
+            self.alpha_fn = lambda t: torch.ones_like(t)
+        else:
+            self.alpha_fn = alpha_fn
 
     def step(
         self,
@@ -675,43 +680,29 @@ class EDMStochasticHeunSolver(Solver):
         gamma_base = min(self.S_churn / self.num_steps, math.sqrt(2) - 1)
 
         # Compute perturbed time t_hat with increased noise
-        if self.sigma_fn is not None and self.sigma_inv_fn is not None:
-            # Work in noise-level space
-            # Mask: apply churn only where S_min <= sigma <= S_max
-            sigma_cur_bc = self.sigma_fn(t_cur_bc)
-            churn_mask = (sigma_cur_bc >= self.S_min) & (sigma_cur_bc <= self.S_max)
-            gamma_bc = torch.where(churn_mask, gamma_base, 0.0)
-            sigma_hat_bc = sigma_cur_bc + gamma_bc * sigma_cur_bc
-            t_hat_bc = self.sigma_inv_fn(sigma_hat_bc)
-            # Noise scale
-            noise_var_bc = (sigma_hat_bc**2 - sigma_cur_bc**2).clamp(min=0)
-            if self.alpha_fn is not None:
-                alpha_hat_bc = self.alpha_fn(t_hat_bc)
-                noise_scale_bc = noise_var_bc.sqrt() * alpha_hat_bc * self.S_noise
-            else:
-                noise_scale_bc = noise_var_bc.sqrt() * self.S_noise
-        else:
-            # Work directly in time-step space
-            # Mask: apply churn only where S_min <= t_cur <= S_max
-            churn_mask = (t_cur_bc >= self.S_min) & (t_cur_bc <= self.S_max)
-            gamma_bc = torch.where(churn_mask, gamma_base, 0.0)
-            t_hat_bc = t_cur_bc + gamma_bc * t_cur_bc
-            noise_var_bc = (t_hat_bc**2 - t_cur_bc**2).clamp(min=0)
-            if self.alpha_fn is not None:
-                alpha_hat_bc = self.alpha_fn(t_hat_bc)
-                noise_scale_bc = noise_var_bc.sqrt() * alpha_hat_bc * self.S_noise
-            else:
-                noise_scale_bc = noise_var_bc.sqrt() * self.S_noise
+        # NOTE: sigma_fn and sigma_inv_fn are identity if not provided (stays
+        # in time-step space) alpha_fn returns ones if not provided (no signal
+        # attenuation).
+        sigma_cur_bc = self.sigma_fn(t_cur_bc)
+        # Mask: apply churn only where S_min <= sigma <= S_max
+        churn_mask = (sigma_cur_bc >= self.S_min) & (sigma_cur_bc <= self.S_max)
+        gamma_bc = torch.where(churn_mask, gamma_base, 0.0)
+        sigma_hat_bc = sigma_cur_bc + gamma_bc * sigma_cur_bc
+        t_hat_bc = self.sigma_inv_fn(sigma_hat_bc)
+        # Noise scale: sqrt(sigma_hat^2 - sigma_cur^2) * alpha(t_hat)
+        noise_var_bc = (sigma_hat_bc**2 - sigma_cur_bc**2).clamp(min=0)
+        alpha_hat_bc = self.alpha_fn(t_hat_bc)
+        noise_scale_bc = noise_var_bc.sqrt() * alpha_hat_bc * self.S_noise
 
         # Perturb latent with noise
         x_hat = x + noise_scale_bc * torch.randn_like(x)
 
         # Euler step from t_hat to intermediate point (predictor)
         t_hat = t_hat_bc.reshape(x.shape[0])
-        h = t_next_bc - t_hat_bc
+        h_bc = t_next_bc - t_hat_bc
         d_cur = self.denoiser(x_hat, t_hat)
-        t_prime_bc = t_hat_bc + self.alpha * h
-        x_prime = x_hat + self.alpha * h * d_cur
+        t_prime_bc = t_hat_bc + self.alpha * h_bc
+        x_prime = x_hat + self.alpha * h_bc * d_cur
 
         # Mask for elements where t_next != 0 (need 2nd order correction)
         mask_bc = (t_next_bc != 0).float()
@@ -725,8 +716,8 @@ class EDMStochasticHeunSolver(Solver):
         # Apply 2nd order correction only where t_next != 0
         w_cur = 1 - 1 / (2 * self.alpha)
         w_prime = 1 / (2 * self.alpha)
-        x_euler = x_hat + h * d_cur
-        x_heun = x_hat + h * (w_cur * d_cur + w_prime * d_prime)
+        x_euler = x_hat + h_bc * d_cur
+        x_heun = x_hat + h_bc * (w_cur * d_cur + w_prime * d_prime)
         x_next = mask_bc * x_heun + (1 - mask_bc) * x_euler
 
         return x_next

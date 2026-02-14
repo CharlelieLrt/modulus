@@ -47,7 +47,7 @@ def sample(
     num_steps: int,
     solver: Literal["euler", "heun", "edm_stochastic_euler", "edm_stochastic_heun"]
     | Solver = "heun",
-    time_steps: Float[Tensor, " N"] | None = None,
+    time_steps: Float[Tensor, " N_plus_1"] | None = None,
     solver_options: Dict[str, Any] | None = None,
     time_eval: list[int] | None = None,
 ) -> Float[Tensor, " B *dims"] | List[Float[Tensor, " B *dims"]]:
@@ -144,13 +144,20 @@ def sample(
         :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.timesteps`
         method. Ignored when ``time_steps`` is provided.
     solver : str | Solver, default="heun"
-        The numerical solver to use. Can be a string key or an object
+        The numerical solver to use. Supports three levels of customizability:
+
+        **Basic**: Pass a string key to use a built-in solver
+        with default settings.
+
+        **Moderately advanced**: Pass a string key plus
+        ``solver_options`` to override default solver parameters.
+
+        **Advanced**: Pass a custom :class:`Solver` instance
         implementing the
         :class:`~physicsnemo.diffusion.samplers.solvers.Solver` interface.
-        When ``solver`` is a string, ``solver_options`` can be provided to
-        configure the solver; when it is a
-        :class:`~physicsnemo.diffusion.samplers.solvers.Solver` instance,
-        ``solver_options`` must be ``None``. Available string keys are:
+        In this case, ``solver_options`` must be empty.
+
+        Available string keys:
 
         * ``"euler"``: First-order Euler method. Fast but lower quality.
           See :class:`~physicsnemo.diffusion.samplers.solvers.EulerSolver`.
@@ -173,9 +180,9 @@ def sample(
         order. If provided, overrides the time-steps from ``noise_scheduler``
         and ``num_steps`` is ignored. To produce a fully denoised latent state
         :math:`\mathbf{x}_0`, the last element must be :math:`t_0 = 0`.
-    solver_options : Dict[str, Any] | None, default=None
+    solver_options : Dict[str, Any], default={}
         Additional options passed to the solver constructor. Only used when
-        ``solver`` is a string; must be ``None`` when ``solver`` is a
+        ``solver`` is a string; must be empty when ``solver`` is a
         :class:`Solver` instance. See individual solver classes for available
         options.
     time_eval : List[int] | None, default=None
@@ -298,7 +305,8 @@ def sample(
     >>> x0.shape
     torch.Size([2, 3, 8, 8])
     """
-    solver_options = solver_options or {}
+    if solver_options is None:
+        solver_options = {}
 
     # Validate and instantiate solver
     if isinstance(solver, str):

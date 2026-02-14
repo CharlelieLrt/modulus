@@ -582,7 +582,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
             2 * sigma_dot_t_bc * sigma_t_bc
             - 2 * (alpha_dot_t_bc / alpha_t_bc) * sigma_t_bc**2
         )
-        return g_sq.expand_as(x)
+        return g_sq
 
     def x0_to_score(
         self,
