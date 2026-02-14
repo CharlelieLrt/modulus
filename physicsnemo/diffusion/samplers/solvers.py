@@ -23,7 +23,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from physicsnemo.diffusion.base import DiffusionDenoiser
+from physicsnemo.diffusion.base import Denoiser
 
 
 @runtime_checkable
@@ -110,9 +110,9 @@ class EulerSolver(Solver):
 
     Parameters
     ----------
-    denoiser : DiffusionDenoiser
+    denoiser : Denoiser
         A callable implementing the
-        :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface. Here it is
+        :class:`~physicsnemo.diffusion.Denoiser` interface. Here it is
         expected to return the right hand side of the ODE. Typically obtained
         via
         :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`,
@@ -135,7 +135,7 @@ class EulerSolver(Solver):
     True
     """
 
-    def __init__(self, denoiser: DiffusionDenoiser) -> None:
+    def __init__(self, denoiser: Denoiser) -> None:
         self.denoiser = denoiser
 
     def step(
@@ -183,9 +183,9 @@ class HeunSolver(Solver):
 
     Parameters
     ----------
-    denoiser : DiffusionDenoiser
+    denoiser : Denoiser
         A callable implementing the
-        :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface. Here it is
+        :class:`~physicsnemo.diffusion.Denoiser` interface. Here it is
         expected to return the right hand side of the ODE. Typically obtained
         via
         :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`,
@@ -212,7 +212,7 @@ class HeunSolver(Solver):
 
     def __init__(
         self,
-        denoiser: DiffusionDenoiser,
+        denoiser: Denoiser,
         alpha: float = 1.0,
     ) -> None:
         self.denoiser = denoiser
@@ -309,9 +309,9 @@ class EDMStochasticEulerSolver(Solver):
 
     Parameters
     ----------
-    denoiser : DiffusionDenoiser
+    denoiser : Denoiser
         A callable implementing the
-        :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface. Should
+        :class:`~physicsnemo.diffusion.Denoiser` interface. Should
         return the right-hand side of the **ODE** (not the SDE, since the
         stochastic noise injection is handled internally by this solver).
         Typically obtained via
@@ -396,7 +396,7 @@ class EDMStochasticEulerSolver(Solver):
 
     def __init__(
         self,
-        denoiser: DiffusionDenoiser,
+        denoiser: Denoiser,
         S_churn: float = 0,
         S_min: float = 0,
         S_max: float = float("inf"),
@@ -518,9 +518,9 @@ class EDMStochasticHeunSolver(Solver):
 
     Parameters
     ----------
-    denoiser : DiffusionDenoiser
+    denoiser : Denoiser
         A callable implementing the
-        :class:`~physicsnemo.diffusion.DiffusionDenoiser` interface. Should
+        :class:`~physicsnemo.diffusion.Denoiser` interface. Should
         return the right-hand side of the **ODE** (not the SDE, since the
         stochastic noise injection is handled internally by this solver).
         Typically obtained via
@@ -609,7 +609,7 @@ class EDMStochasticHeunSolver(Solver):
 
     def __init__(
         self,
-        denoiser: DiffusionDenoiser,
+        denoiser: Denoiser,
         alpha: float = 1.0,
         S_churn: float = 0,
         S_min: float = 0,

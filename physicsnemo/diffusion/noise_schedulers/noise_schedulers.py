@@ -24,7 +24,7 @@ import torch
 from jaxtyping import Float
 from torch import Tensor
 
-from physicsnemo.diffusion.base import DiffusionDenoiser
+from physicsnemo.diffusion.base import Denoiser, Predictor
 
 
 @runtime_checkable
@@ -49,7 +49,8 @@ class NoiseScheduler(Protocol):
 
     - :meth:`timesteps`: Generate discrete time-steps for sampling
     - :meth:`init_latents`: Initialize noisy latent state :math:`\mathbf{x}_N`
-    - :meth:`get_denoiser`: Convert a denoiser to a sampling-compatible form
+    - :meth:`get_denoiser`: Convert a predictor (e.g. model that predicts
+         clean, data, score, etc.) to a sampling-compatible denoiser
 
     See Also
     --------
@@ -72,8 +73,8 @@ class NoiseScheduler(Protocol):
     ...         return torch.linspace(1, 0, num_steps + 1, device=device)
     ...     def init_latents(self, spatial_shape, tN, device=None, dtype=None):
     ...         return torch.randn(tN.shape[0], *spatial_shape, device=device)
-    ...     def get_denoiser(self, denoiser_in):
-    ...         return denoiser_in
+    ...     def get_denoiser(self, predictor, **kwargs):
+    ...         return predictor  # Pass-through (assumes predictor is already a denoiser)
     ...
     >>> scheduler = MyScheduler()
     >>> isinstance(scheduler, NoiseScheduler)
@@ -197,29 +198,35 @@ class NoiseScheduler(Protocol):
 
     def get_denoiser(
         self,
-        denoiser_in: DiffusionDenoiser,
+        predictor: Predictor,
         **kwargs: Any,
-    ) -> DiffusionDenoiser:
+    ) -> Denoiser:
         r"""
-        Convert a denoiser to a sampling-compatible denoiser.
+        Factory that converts a predictor into a denoiser for sampling.
 
-        Used in sampling to transform a denoiser (e.g., an x0-predictor, score
-        predictor, or other) into a callable that returns a denoising term
-        compatible with the solver. The exact transformation depends on the
-        noise scheduler implementation.
+        Used in sampling to transform a :class:`Predictor` (e.g., x0-predictor,
+        score-predictor) into a :class:`Denoiser` that returns the
+        update term compatible with the solver. The exact transformation
+        depends on the noise scheduler implementation.
 
         Parameters
         ----------
-        denoiser_in : DiffusionDenoiser
-            A callable that takes ``(x_t, t)`` and returns a denoising term.
+        predictor : Predictor
+            A callable implementing the
+            :class:`~physicsnemo.diffusion.Predictor` interface. It takes
+            ``(x_t, t)`` and returns a prediction (e.g., clean data estimate,
+            score, etc.). The expected predictor type depends on the noise
+            scheduler implementation; see subclass docstrings for details.
         **kwargs : Any
             Additional keyword arguments (implementation-specific).
 
         Returns
         -------
-        DiffusionDenoiser
+        Denoiser
             A callable that implements the
-            :class:`~physicsnemo.diffusion.base.DiffusionDenoiser` interface.
+            :class:`~physicsnemo.diffusion.Denoiser` interface, for use
+            with solvers and the
+            :func:`~physicsnemo.diffusion.samplers.sample` function.
         """
         ...
 
@@ -282,7 +289,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     - :meth:`x0_to_score`: Convert x0-prediction to score
     - :meth:`add_noise`: Add noise to clean data (training)
     - :meth:`init_latents`: Initialize latent state (sampling)
-    - :meth:`get_denoiser`: Get ODE/SDE denoiser (sampling)
+    - :meth:`get_denoiser`: Get ODE/SDE RHS (sampling)
 
     Examples
     --------
@@ -634,19 +641,20 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
     def get_denoiser(
         self,
-        denoiser_in: DiffusionDenoiser,
+        predictor: Predictor,
         denoising_type: Literal["ode", "sde"] = "ode",
         **kwargs: Any,
-    ) -> DiffusionDenoiser:
+    ) -> Denoiser:
         r"""
-        Convert a **score predictor** to a denoiser for sampling.
+        Factory that converts a **score-predictor** to a denoiser for sampling.
 
         The returned denoiser computes the right-hand side of the reverse
         ODE or SDE.
 
-        **Important:** ``denoiser_in`` must be a **score predictor**, i.e., a
+        **Important:** ``predictor`` must be a **score-predictor**, i.e., a
         callable returning :math:`\nabla_{\mathbf{x}} \log p(\mathbf{x}_t)`.
-        If you have an x0-predictor, convert it with :meth:`x0_to_score` first.
+        If you have an x0-predictor, convert it to a score-predictor using
+        :meth:`x0_to_score` first.
 
         For ODE (``denoising_type="ode"``):
 
@@ -655,7 +663,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
             D(\mathbf{x}, t)
 
         where :math:`D(\mathbf{x}, t) = \nabla_{\mathbf{x}} \log p(\mathbf{x})`
-        is the score returned by ``denoiser_in``.
+        is the score returned by ``predictor``.
 
         For SDE (``denoising_type="sde"``):
 
@@ -668,9 +676,11 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
         Parameters
         ----------
-        denoiser_in : DiffusionDenoiser
-            A **score predictor** that takes ``(x_t, t)`` and returns the score
-            :math:`\nabla_{\mathbf{x}} \log p(\mathbf{x}_t)`.
+        predictor : Predictor
+            A **score-predictor** that takes ``(x_t, t)`` and returns a score
+            (can be the unconditional score, the conditional score, or even
+            include likelihood score for guidance, etc.) Must implement the
+            :class:`~physicsnemo.diffusion.Predictor` interface.
         denoising_type : {"ode", "sde"}, default="ode"
             Type of reverse process. Use ``"ode"`` for deterministic sampling,
             ``"sde"`` for stochastic sampling.
@@ -679,15 +689,16 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
         Returns
         -------
-        DiffusionDenoiser
-            A denoiser computing the RHS of the reverse ODE/SDE.
+        Denoiser
+            A denoiser computing the RHS of the reverse ODE/SDE. Implements the
+            :class:`~physicsnemo.diffusion.Denoiser` interface.
 
         Examples
         --------
         >>> import torch
         >>> scheduler = EDMNoiseScheduler()
         >>>
-        >>> # Convert x0-predictor to score predictor, then to ODE denoiser
+        >>> # Convert x0-predictor to score-predictor, then to ODE denoiser
         >>> x0_predictor = lambda x, t: x * 0.9  # Toy x0-predictor
         >>> def score_predictor(x, t):
         ...     x0_pred = x0_predictor(x, t)
@@ -711,7 +722,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
                 x: Float[Tensor, "B *dims"],  # noqa: F821
                 t: Float[Tensor, "B"],  # noqa: F821
             ) -> Float[Tensor, " B *dims"]:
-                score = denoiser_in(x, t)
+                score = predictor(x, t)
                 f = drift(x, t)
                 g_sq = diffusion(x, t)
                 dx_dt = f - 0.5 * g_sq * score
@@ -725,7 +736,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
                 x: Float[Tensor, "B *dims"],  # noqa: F821
                 t: Float[Tensor, "B"],  # noqa: F821
             ) -> Float[Tensor, " B *dims"]:
-                score = denoiser_in(x, t)
+                score = predictor(x, t)
                 f = drift(x, t)
                 g_sq = diffusion(x, t)
                 # Deterministic part of the SDE drift
