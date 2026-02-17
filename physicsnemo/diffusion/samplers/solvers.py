@@ -67,7 +67,7 @@ class Solver(Protocol):
     ...         d = (x - self.denoiser(x, t_cur)) / t_cur
     ...         return x + (t_next - t_cur) * d
     ...
-    >>> denoiser = lambda x, t: x / (1 + t.view(-1, *([1] * (x.ndim - 1)))**2)  # Toy denoiser
+    >>> denoiser = lambda x, t: x / (1 + t.view(-1, 1)**2)  # Toy denoiser
     >>> solver = SimpleEuler(denoiser)
     >>> isinstance(solver, Solver)
     True
@@ -417,16 +417,18 @@ class EDMStochasticEulerSolver(Solver):
             raise ValueError(
                 "sigma_fn and sigma_inv_fn must both be provided or both None."
             )
-        # Set default identity/ones functions to avoid graph breaks with torch.compile
-        self.sigma_fn: Callable[[Tensor], Tensor] = (
-            sigma_fn if sigma_fn is not None else lambda t: t
-        )
-        self.sigma_inv_fn: Callable[[Tensor], Tensor] = (
-            sigma_inv_fn if sigma_inv_fn is not None else lambda s: s
-        )
-        self.alpha_fn: Callable[[Tensor], Tensor] = (
-            alpha_fn if alpha_fn is not None else lambda t: torch.ones_like(t)
-        )
+        if sigma_fn is None and sigma_inv_fn is None:
+            self.sigma_fn = lambda t: t
+            self.sigma_inv_fn = lambda sigma: sigma
+            self._use_noise_level_space = False
+        else:
+            self.sigma_fn = sigma_fn
+            self.sigma_inv_fn = sigma_inv_fn
+            self._use_noise_level_space = True
+        if alpha_fn is None:
+            self.alpha_fn = lambda t: torch.ones_like(t)
+        else:
+            self.alpha_fn = alpha_fn
 
     def step(
         self,
@@ -632,16 +634,19 @@ class EDMStochasticHeunSolver(Solver):
             raise ValueError(
                 "sigma_fn and sigma_inv_fn must both be provided or both None."
             )
-        # Set default identity/ones functions to avoid graph breaks with torch.compile
-        self.sigma_fn: Callable[[Tensor], Tensor] = (
-            sigma_fn if sigma_fn is not None else lambda t: t
-        )
-        self.sigma_inv_fn: Callable[[Tensor], Tensor] = (
-            sigma_inv_fn if sigma_inv_fn is not None else lambda s: s
-        )
-        self.alpha_fn: Callable[[Tensor], Tensor] = (
-            alpha_fn if alpha_fn is not None else lambda t: torch.ones_like(t)
-        )
+        if sigma_fn is None and sigma_inv_fn is None:
+            self.sigma_fn = lambda t: t
+            self.sigma_inv_fn = lambda sigma: sigma
+            self._use_noise_level_space = False
+        else:
+            self.sigma_fn = sigma_fn
+            self.sigma_inv_fn = sigma_inv_fn
+            self._use_noise_level_space = True
+        # Default alpha_fn returns ones (no signal attenuation)
+        if alpha_fn is None:
+            self.alpha_fn = lambda t: torch.ones_like(t)
+        else:
+            self.alpha_fn = alpha_fn
 
     def step(
         self,

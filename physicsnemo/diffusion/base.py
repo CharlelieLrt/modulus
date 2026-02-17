@@ -174,8 +174,8 @@ class Predictor(Protocol):
     :math:`\alpha(t) = 1`):
 
     >>> def x0_to_score(x0, x_t, t):
-    ...     t_bc = t.view(-1, *([1] * (x0.ndim - 1)))
-    ...     return (x0 - x_t) / t_bc**2
+    ...     sigma_sq = t.view(-1, 1) ** 2
+    ...     return (x0 - x_t) / sigma_sq
     >>>
     >>> def score_predictor(x, t):
     ...     x0_pred = x0_predictor(x, t)

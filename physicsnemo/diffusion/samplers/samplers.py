@@ -216,10 +216,8 @@ def sample(
     >>> from physicsnemo.diffusion.samplers import sample
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
     >>>
-    >>> # ODE RHS for p(x) = N(0, I), EDM: dx/dt = t*x/(1+t^2)
-    >>> def denoiser(x, t):
-    ...     t_bc = t.view(-1, *([1] * (x.ndim - 1)))
-    ...     return t_bc * x / (1 + t_bc**2)
+    >>> # Toy denoiser (in practice, this would be a trained neural network)
+    >>> denoiser = lambda x, t: x / (1 + t.view(-1, 1)**2)  # Toy denoiser
     >>> scheduler = EDMNoiseScheduler()
     >>> xN = torch.randn(2, 3, 8, 8) * 80  # Initial noise scaled by sigma_max
     >>> x0 = sample(denoiser, xN, scheduler, num_steps=10)
@@ -241,10 +239,8 @@ def sample(
     >>> # Use scheduler to generate initial latents at time tN
     >>> xN = scheduler.init_latents((3, 8, 8), tN)
     >>>
-    >>> # x0-predictor for p(x) = N(0, I): E[x0|xt] = x/(1+t^2)
-    >>> def x0_predictor(x, t):
-    ...     t_bc = t.view(-1, *([1] * (x.ndim - 1)))
-    ...     return x / (1 + t_bc**2)
+    >>> # Convert x0-predictor to denoiser (score conversion is automatic)
+    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, 1)**2)  # Toy x0-predictor
     >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>>
     >>> x0 = sample(denoiser, xN, scheduler, num_steps=10)
@@ -265,10 +261,8 @@ def sample(
     >>> tN = custom_t[0].expand(2)
     >>> xN = scheduler.init_latents((3, 8, 8), tN)
     >>>
-    >>> # Same x0-predictor as Example 2
-    >>> def x0_predictor(x, t):
-    ...     t_bc = t.view(-1, *([1] * (x.ndim - 1)))
-    ...     return x / (1 + t_bc**2)
+    >>> # Same denoiser setup as Example 2
+    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, 1)**2)  # Toy x0-predictor
     >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>>
     >>> # Use custom time-steps and Euler solver (num_steps ignored)
@@ -310,10 +304,8 @@ def sample(
     >>> tN = torch.tensor([1.0, 1.0])
     >>> xN = scheduler.init_latents((3, 8, 8), tN)
     >>>
-    >>> # x0-predictor for p(x) = N(0, I): E[x0|xt] = x/(1+t^2)
-    >>> def x0_predictor(x, t):
-    ...     t_bc = t.view(-1, *([1] * (x.ndim - 1)))
-    ...     return x / (1 + t_bc**2)
+    >>> # x0-predictor -> denoiser via the scheduler factory
+    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, 1)**2)  # Toy x0-predictor
     >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>> x0 = sample(denoiser, xN, scheduler, num_steps=10, solver="euler")
     >>> x0.shape
