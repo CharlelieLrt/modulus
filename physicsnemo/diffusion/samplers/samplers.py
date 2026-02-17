@@ -217,7 +217,7 @@ def sample(
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
     >>>
     >>> # Toy denoiser (in practice, this would be a trained neural network)
-    >>> denoiser = lambda x, t: x / (1 + t.view(-1, 1)**2)  # Toy denoiser
+    >>> denoiser = lambda x, t: x / (1 + t.view(-1, *([1] * (x.ndim - 1)))**2)  # Toy denoiser
     >>> scheduler = EDMNoiseScheduler()
     >>> xN = torch.randn(2, 3, 8, 8) * 80  # Initial noise scaled by sigma_max
     >>> x0 = sample(denoiser, xN, scheduler, num_steps=10)
@@ -240,7 +240,7 @@ def sample(
     >>> xN = scheduler.init_latents((3, 8, 8), tN)
     >>>
     >>> # Convert x0-predictor to denoiser (score conversion is automatic)
-    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, 1)**2)  # Toy x0-predictor
+    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, *([1] * (x.ndim - 1)))**2)  # Toy x0-predictor
     >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>>
     >>> x0 = sample(denoiser, xN, scheduler, num_steps=10)
@@ -262,7 +262,7 @@ def sample(
     >>> xN = scheduler.init_latents((3, 8, 8), tN)
     >>>
     >>> # Same denoiser setup as Example 2
-    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, 1)**2)  # Toy x0-predictor
+    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, *([1] * (x.ndim - 1)))**2)  # Toy x0-predictor
     >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>>
     >>> # Use custom time-steps and Euler solver (num_steps ignored)
@@ -305,7 +305,7 @@ def sample(
     >>> xN = scheduler.init_latents((3, 8, 8), tN)
     >>>
     >>> # x0-predictor -> denoiser via the scheduler factory
-    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, 1)**2)  # Toy x0-predictor
+    >>> x0_predictor = lambda x, t: x / (1 + t.view(-1, *([1] * (x.ndim - 1)))**2)  # Toy x0-predictor
     >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
     >>> x0 = sample(denoiser, xN, scheduler, num_steps=10, solver="euler")
     >>> x0.shape

@@ -343,7 +343,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     >>> custom = CustomDriftScheduler()
     >>>
     >>> # The custom drift is used internally by get_denoiser
-    >>> score_pred = lambda x, t: -x / t.view(-1, 1)**2  # Toy score predictor
+    >>> score_pred = lambda x, t: -x / (1 + t.view(-1, 1)**2)  # Toy score predictor
     >>> denoiser = custom.get_denoiser(score_predictor=score_pred)
     >>> x = torch.randn(2, 4)
     >>> t = torch.tensor([1.0, 1.0])
