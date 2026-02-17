@@ -68,17 +68,17 @@ class NoiseScheduler(Protocol):
     ...     def sample_time(self, N, device=None, dtype=None):
     ...         return torch.rand(N, device=device, dtype=dtype)
     ...     def add_noise(self, x0, time):
-    ...         return x0 + time.view(-1, 1) * torch.randn_like(x0)
+    ...         t_bc = time.view(-1, *([1]*(x0.ndim-1)))
+    ...         return x0 + t_bc * torch.randn_like(x0)
     ...     def timesteps(self, num_steps, device=None, dtype=None):
     ...         return torch.linspace(1, 0, num_steps + 1, device=device)
     ...     def init_latents(self, spatial_shape, tN, device=None, dtype=None):
     ...         return torch.randn(tN.shape[0], *spatial_shape, device=device)
-    ...     def get_denoiser(self, x0_predictor=None, score_predictor=None, **kwargs):
+    ...     def get_denoiser(self, *, x0_predictor=None, **kwargs):
     ...         def denoiser(x, t):
-    ...             if x0_predictor is not None:
-    ...                 return (x - x0_predictor(x, t)) / (t.view(-1, 1))
-    ...             elif score_predictor is not None:
-    ...                 return -score_predictor(x, t) * t.view(-1, 1)
+    ...             t_bc = t.view(-1, *([1]*(x.ndim-1)))
+    ...             x0 = x0_predictor(x, t)
+    ...             return (x0 - x) / t_bc
     ...         return denoiser
     ...
     >>> scheduler = MyScheduler()
@@ -343,7 +343,10 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     >>> custom = CustomDriftScheduler()
     >>>
     >>> # The custom drift is used internally by get_denoiser
-    >>> score_pred = lambda x, t: -x / t.view(-1, 1)**2  # Toy score predictor
+    >>> # Score of p(x) = N(0, I): s(x,t) = -x/(1+t^2)
+    >>> def score_pred(x, t):
+    ...     t_bc = t.view(-1, *([1] * (x.ndim - 1)))
+    ...     return -x / (1 + t_bc**2)
     >>> denoiser = custom.get_denoiser(score_predictor=score_pred)
     >>> x = torch.randn(2, 4)
     >>> t = torch.tensor([1.0, 1.0])
@@ -755,7 +758,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
             score_fn = _score
         else:
-            score_fn = score_predictor
+            score_fn = score_predictor  # type: ignore[assignment]
 
         if denoising_type == "ode":
 
