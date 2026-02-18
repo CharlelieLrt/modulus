@@ -22,7 +22,7 @@ import torch
 from jaxtyping import Bool, Float
 from torch import Tensor
 
-from physicsnemo.diffusion.base import DiffusionDenoiser
+from physicsnemo.diffusion.base import Denoiser, Predictor
 
 
 @runtime_checkable
@@ -33,8 +33,8 @@ class DPSGuidance(Protocol):
 
     A DPS guidance is a callable that computes a guidance term to steer the
     diffusion sampling process toward satisfying some observation constraint.
-    A ``DPSGuidance`` is expected to be a score-predictor, as it returns a quantity
-    analogous to a score.
+    It returns a quantity analogous to a likelihood score, which is typically
+    added to the unconditional score during sampling.
 
     The typical form is:
 
@@ -49,13 +49,13 @@ class DPSGuidance(Protocol):
     a quantity similar to a score (e.g., a likelihood score).
 
     This is the minimal interface for guidance, and any object that implements
-    this interface can be used with diffusion utilities such as
-    :class:`DPSDenoiser` or
-    :meth:`~physicsnemo.diffusion.noise_schedulers.get_denoiser`.
+    this interface can be used with :class:`DPSDenoiser` to build a guided
+    score-predictor, which implements the
+    :class:`~physicsnemo.diffusion.Predictor` interface.
 
     See Also
     --------
-    :class:`DPSDenoiser` : Combines a denoiser with one or more guidances.
+    :class:`DPSDenoiser` : Combines an x0-predictor with one or more guidances.
 
     Examples
     --------
@@ -117,8 +117,8 @@ class DPSGuidance(Protocol):
     ...     # Step 4: Sum and return
     ...     return score + guidance_term
     ...
-    >>> # guided_denoiser is now a DiffusionDenoiser (score predictor),
-    >>> # and can be used with any sampling utility that expects this interface
+    >>> # guided_denoiser is now a Predictor (score predictor); pass it to
+    >>> # scheduler.get_denoiser(score_predictor=...) to obtain a Denoiser
     >>> x = torch.randn(1, 3, 8, 8)
     >>> t = torch.tensor([1.0])
     >>> output = guided_denoiser(x, t)
@@ -126,7 +126,7 @@ class DPSGuidance(Protocol):
     torch.Size([1, 3, 8, 8])
 
     Note: :class:`DPSDenoiser` provides a convenient way to apply one or more
-    guidances to a denoiser without manually implementing the above pattern.
+    guidances to an x0-predictor without manually implementing the above pattern.
     """
 
     def __call__(
@@ -161,15 +161,16 @@ class DPSGuidance(Protocol):
         ...
 
 
-class DPSDenoiser(DiffusionDenoiser):
+class DPSDenoiser(Denoiser):
     r"""
-    Denoiser that combines an x0-predictor with DPS-style guidance.
+    Score predictor that combines an x0-predictor with DPS-style guidance.
 
-    This class transforms a :class:`~physicsnemo.diffusion.DiffusionDenoiser`
-    (specifically, an **x0-predictor**) into another
-    :class:`~physicsnemo.diffusion.DiffusionDenoiser` (a **score predictor**)
-    by applying one or more DPS guidances. The resulting denoiser can be used
-    directly with ODE/SDE solvers and sampling utilities.
+    This class transforms a :class:`~physicsnemo.diffusion.Predictor`
+    (specifically, an **x0-predictor**) into a score-predictor
+    (with the :class:`~physicsnemo.diffusion.Denoiser` interface) by applying one or more DPS
+    guidances. The resulting score-predictor can be passed to
+    :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`
+    to obtain a :class:`~physicsnemo.diffusion.Denoiser` for sampling.
 
     The output is the sum of the unconditional score (derived from the
     x0-prediction) and all guidance terms:
@@ -186,19 +187,20 @@ class DPSDenoiser(DiffusionDenoiser):
 
     .. code-block:: python
 
-        def guidance(x: Tensor, t: Tensor, x_0: Tensor) -> Tensor:
-            # x: noisy latent state at time t, shape (B, *)
-            # t: diffusion time, shape (B,)
-            # x_0: estimated clean state, shape (B, *)
-            # returns: guidance term, shape (B, *)
-            ...
+        def guidance(
+            x: Tensor,    # shape: (B, *dims)
+            t: Tensor,    # shape: (B,)
+            x_0: Tensor,  # shape: (B, *dims)
+        ) -> Tensor: ...  # guidance term, shape: (B, *dims)
 
     Parameters
     ----------
-    denoiser_in : DiffusionDenoiser
-        Input denoiser that takes ``(x, t)`` and returns an estimate of the
-        clean data :math:`\hat{\mathbf{x}}_0`. This is typically an x0-predictor
-        obtained from a trained diffusion model.
+    x0_predictor : Predictor
+        A :class:`~physicsnemo.diffusion.Predictor` that takes ``(x, t)``
+        and returns an estimate of the clean data
+        :math:`\hat{\mathbf{x}}_0`. Typically obtained from a trained
+        :class:`~physicsnemo.diffusion.DiffusionModel` via
+        ``functools.partial``.
     x0_to_score_fn : Callable[[Tensor, Tensor, Tensor], Tensor]
         Callback to convert x0-prediction to score. Signature:
         ``x0_to_score_fn(x_0, x, t) -> score``. Typically obtained from a noise
@@ -211,8 +213,9 @@ class DPSDenoiser(DiffusionDenoiser):
     See Also
     --------
     :class:`DPSGuidance` : Protocol for guidance implementations.
-    :func:`~physicsnemo.diffusion.samplers.sample` : Sampling function that
-        uses denoisers.
+    :class:`~physicsnemo.diffusion.Predictor` : Protocol satisfied by this class.
+    :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser` :
+        Converts the score-predictor to a denoiser for sampling.
 
     Examples
     --------
@@ -242,9 +245,9 @@ class DPSDenoiser(DiffusionDenoiser):
     >>> y_obs = torch.randn(1, 3, 8, 8)
     >>> guidance = InpaintGuidance(mask, y_obs)
     >>>
-    >>> # Create DPS denoiser
+    >>> # Create DPS score predictor
     >>> dps_denoiser = DPSDenoiser(
-    ...     denoiser_in=x0_predictor,
+    ...     x0_predictor=x0_predictor,
     ...     x0_to_score_fn=x0_to_score_fn,
     ...     guidances=guidance,
     ... )
@@ -289,7 +292,7 @@ class DPSDenoiser(DiffusionDenoiser):
     >>>
     >>> # Combine multiple guidances
     >>> dps_denoiser = DPSDenoiser(
-    ...     denoiser_in=x0_predictor,
+    ...     x0_predictor=x0_predictor,
     ...     x0_to_score_fn=scheduler.x0_to_score,
     ...     guidances=[guidance1, guidance2],
     ... )
@@ -303,14 +306,14 @@ class DPSDenoiser(DiffusionDenoiser):
 
     def __init__(
         self,
-        denoiser_in: DiffusionDenoiser,
+        x0_predictor: Predictor,
         x0_to_score_fn: Callable[
             [Float[Tensor, " B *dims"], Float[Tensor, " B *dims"], Float[Tensor, " B"]],
             Float[Tensor, " B *dims"],
         ],
         guidances: DPSGuidance | Sequence[DPSGuidance],
     ) -> None:
-        self.denoiser_in = denoiser_in
+        self.x0_predictor = x0_predictor
         self.x0_to_score_fn = x0_to_score_fn
         # Normalize guidances to a list
         if isinstance(guidances, Sequence) and not isinstance(guidances, str):
@@ -342,7 +345,7 @@ class DPSDenoiser(DiffusionDenoiser):
         x = x.detach().requires_grad_(True)
 
         with torch.enable_grad():
-            x_0 = self.denoiser_in(x, t)
+            x_0 = self.x0_predictor(x, t)
             guidance_sum = torch.zeros_like(x)
             for guidance in self.guidances:
                 guidance_sum += guidance(x, t, x_0)
@@ -379,20 +382,18 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
 
     .. code-block:: python
 
-        def observation_operator(x_0: Tensor) -> Tensor:
-            # x_0: estimated clean state, shape (B, *)
-            # returns: predicted observations, same shape (B, *obs_dims) as y
-            ...
+        def observation_operator(
+            x_0: Tensor,  # shape: (B, *dims)
+        ) -> Tensor: ...  # predicted observations, shape: (B, *obs_dims)
 
     When ``norm`` is a callable, it must have the following signature:
 
     .. code-block:: python
 
         def norm(
-            y_pred,  # Shape: (B, *obs_dims)
-            y_true,  # Shape: (B, *obs_dims)
-        ) -> Tensor:  # Scalar loss per batch element, shape: (B,)
-            ...
+            y_pred: Tensor,  # shape: (B, *obs_dims)
+            y_true: Tensor,  # shape: (B, *obs_dims)
+        ) -> Tensor: ...    # scalar loss per batch element, shape: (B,)
 
     Parameters
     ----------
@@ -438,7 +439,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
     --------
     :class:`DataConsistencyDPSGuidance` : Simplified guidance for masked
         observations.
-    :class:`DPSDenoiser` : Combines a denoiser with one or more guidances.
+    :class:`DPSDenoiser` : Combines an x0-predictor with one or more guidances.
 
     Examples
     --------
@@ -485,7 +486,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
     ...     return (x_0 - x) / (t_bc ** 2)
     ...
     >>> dps_denoiser = DPSDenoiser(
-    ...     denoiser_in=x0_predictor,
+    ...     x0_predictor=x0_predictor,
     ...     x0_to_score_fn=x0_to_score_fn,
     ...     guidances=guidance,
     ... )
@@ -528,7 +529,7 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
     >>> # Use with DPSDenoiser and scheduler's x0_to_score
     >>> x0_predictor = lambda x, t: x * 0.9
     >>> dps_denoiser = DPSDenoiser(
-    ...     denoiser_in=x0_predictor,
+    ...     x0_predictor=x0_predictor,
     ...     x0_to_score_fn=scheduler.x0_to_score,
     ...     guidances=guidance,
     ... )
@@ -685,10 +686,9 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     .. code-block:: python
 
         def norm(
-            y_pred,  # Shape: (B, *obs_dims)
-            y_true,  # Shape: (B, *obs_dims)
-        ) -> Tensor:  # Scalar loss per batch element, shape: (B,)
-            ...
+            y_pred: Tensor,  # shape: (B, *obs_dims)
+            y_true: Tensor,  # shape: (B, *obs_dims)
+        ) -> Tensor: ...    # scalar loss per batch element, shape: (B,)
 
     Parameters
     ----------
@@ -733,7 +733,7 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     --------
     :class:`ModelConsistencyDPSGuidance` : Guidance for general observation
         operators.
-    :class:`DPSDenoiser` : Combines a denoiser with one or more guidances.
+    :class:`DPSDenoiser` : Combines an x0-predictor with one or more guidances.
 
     Examples
     --------
@@ -772,7 +772,7 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     ...     return (x_0 - x) / (t_bc ** 2)
     ...
     >>> dps_denoiser = DPSDenoiser(
-    ...     denoiser_in=x0_predictor,
+    ...     x0_predictor=x0_predictor,
     ...     x0_to_score_fn=x0_to_score_fn,
     ...     guidances=guidance,
     ... )
@@ -819,7 +819,7 @@ class DataConsistencyDPSGuidance(DPSGuidance):
     >>> # Use with DPSDenoiser and scheduler's x0_to_score
     >>> x0_predictor = lambda x, t: x * 0.9
     >>> dps_denoiser = DPSDenoiser(
-    ...     denoiser_in=x0_predictor,
+    ...     x0_predictor=x0_predictor,
     ...     x0_to_score_fn=scheduler.x0_to_score,
     ...     guidances=guidance,
     ... )
