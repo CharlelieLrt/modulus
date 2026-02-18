@@ -89,7 +89,12 @@ def sample(
 
     .. code-block:: python
 
-        def step(self, x: Tensor, t_cur: Tensor, t_next: Tensor) -> Tensor: ...
+        def step(
+            self,
+            x: Tensor,      # shape: (B, *dims)
+            t_cur: Tensor,   # shape: (B,)
+            t_next: Tensor,  # shape: (B,)
+        ) -> Tensor: ...  # updated x, shape: (B, *dims)
 
     Any object that implements the
     :class:`~physicsnemo.diffusion.samplers.solvers.Solver` interface can be

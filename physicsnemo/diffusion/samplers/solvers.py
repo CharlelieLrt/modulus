@@ -302,9 +302,18 @@ class EDMStochasticEulerSolver(Solver):
 
     .. code-block:: python
 
-        def sigma_fn(t: Tensor) -> Tensor: ...      # time -> noise level
-        def sigma_inv_fn(sigma: Tensor) -> Tensor: ...  # noise level -> time
-        def diffusion_fn(x: Tensor, t: Tensor) -> Tensor: ...  # -> noise scale
+        def sigma_fn(
+            t: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # noise level, same shape as t
+
+        def sigma_inv_fn(
+            sigma: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # diffusion time, same shape as sigma
+
+        def diffusion_fn(
+            x: Tensor,  # shape: (B, *dims)
+            t: Tensor,  # shape: (B,)
+        ) -> Tensor: ...  # g^2(x, t), broadcastable to shape of x
 
     Parameters
     ----------
@@ -403,9 +412,14 @@ class EDMStochasticEulerSolver(Solver):
         S_max: float = float("inf"),
         S_noise: float = 1,
         num_steps: int = 18,
-        sigma_fn: Callable[[Tensor], Tensor] | None = None,
-        sigma_inv_fn: Callable[[Tensor], Tensor] | None = None,
-        diffusion_fn: Callable[[Tensor, Tensor], Tensor] | None = None,
+        sigma_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
+        | None = None,
+        sigma_inv_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
+        | None = None,
+        diffusion_fn: Callable[
+            [Float[Tensor, " B *dims"], Float[Tensor, " B"]], Float[Tensor, " B *_"]
+        ]
+        | None = None,
     ) -> None:
         self.denoiser = denoiser
         self.S_churn = S_churn
@@ -519,9 +533,18 @@ class EDMStochasticHeunSolver(Solver):
 
     .. code-block:: python
 
-        def sigma_fn(t: Tensor) -> Tensor: ...      # time -> noise level
-        def sigma_inv_fn(sigma: Tensor) -> Tensor: ...  # noise level -> time
-        def diffusion_fn(x: Tensor, t: Tensor) -> Tensor: ...  # -> noise scale
+        def sigma_fn(
+            t: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # noise level, same shape as t
+
+        def sigma_inv_fn(
+            sigma: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # diffusion time, same shape as sigma
+
+        def diffusion_fn(
+            x: Tensor,  # shape: (B, *dims)
+            t: Tensor,  # shape: (B,)
+        ) -> Tensor: ...  # g^2(x, t), broadcastable to shape of x
 
     Parameters
     ----------
@@ -625,9 +648,14 @@ class EDMStochasticHeunSolver(Solver):
         S_max: float = float("inf"),
         S_noise: float = 1,
         num_steps: int = 18,
-        sigma_fn: Callable[[Tensor], Tensor] | None = None,
-        sigma_inv_fn: Callable[[Tensor], Tensor] | None = None,
-        diffusion_fn: Callable[[Tensor, Tensor], Tensor] | None = None,
+        sigma_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
+        | None = None,
+        sigma_inv_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
+        | None = None,
+        diffusion_fn: Callable[
+            [Float[Tensor, " B *dims"], Float[Tensor, " B"]], Float[Tensor, " B *_"]
+        ]
+        | None = None,
     ) -> None:
         self.denoiser = denoiser
         if not 0 < alpha <= 1:
