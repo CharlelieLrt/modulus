@@ -193,6 +193,16 @@ class DPSDenoiser(Denoiser):
             x_0: Tensor,  # shape: (B, *dims)
         ) -> Tensor: ...  # guidance term, shape: (B, *dims)
 
+    .. important::
+
+        When using **multiple guidances** that internally call
+        ``torch.autograd.grad`` (e.g., :class:`ModelConsistencyDPSGuidance`
+        or :class:`DataConsistencyDPSGuidance`), each guidance except the last
+        must be constructed with ``retain_graph=True``. Otherwise the
+        computational graph is destroyed after the first guidance computes its
+        gradient and subsequent guidances will fail. With a **single guidance**
+        this is not needed.
+
     Parameters
     ----------
     x0_predictor : Predictor
@@ -302,6 +312,44 @@ class DPSDenoiser(Denoiser):
     >>> output = dps_denoiser(x, t)
     >>> output.shape
     torch.Size([2, 3, 8, 8])
+
+    **Example 3:** Multiple autograd-based guidances require
+    ``retain_graph=True`` on all but the last:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.guidance import (
+    ...     DPSDenoiser,
+    ...     DataConsistencyDPSGuidance,
+    ... )
+    >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+    >>>
+    >>> scheduler = EDMNoiseScheduler()
+    >>> x0_predictor = lambda x, t: x * 0.9
+    >>>
+    >>> mask1 = torch.zeros(1, 3, 8, 8, dtype=torch.bool)
+    >>> mask1[:, :, 2, 3] = True
+    >>> mask2 = torch.zeros(1, 3, 8, 8, dtype=torch.bool)
+    >>> mask2[:, :, 5, 6] = True
+    >>> y_obs = torch.randn(1, 3, 8, 8)
+    >>>
+    >>> # First guidance retains the graph for the second one
+    >>> g1 = DataConsistencyDPSGuidance(
+    ...     mask=mask1, y=y_obs, std_y=0.1, retain_graph=True,
+    ... )
+    >>> # Last guidance does not need retain_graph
+    >>> g2 = DataConsistencyDPSGuidance(
+    ...     mask=mask2, y=y_obs, std_y=0.1,
+    ... )
+    >>>
+    >>> dps = DPSDenoiser(
+    ...     x0_predictor=x0_predictor,
+    ...     x0_to_score_fn=scheduler.x0_to_score,
+    ...     guidances=[g1, g2],
+    ... )
+    >>> x = torch.randn(1, 3, 8, 8)
+    >>> t = torch.tensor([1.0])
+    >>> dps(x, t).shape
+    torch.Size([1, 3, 8, 8])
     """
 
     def __init__(
@@ -426,6 +474,15 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         obtained from a noise scheduler, e.g.,
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.alpha`
         for a linear-Gaussian noise schedule.
+    retain_graph : bool, default=False
+        If ``True``, the computational graph is retained after computing
+        gradients. Required when combining multiple autograd-based guidances
+        in a single :class:`DPSDenoiser` — all guidances except the last
+        must set this to ``True``.
+    create_graph : bool, default=False
+        If ``True``, a graph of the derivative is constructed, allowing
+        higher-order derivatives (e.g., differentiating through the entire
+        sampling process).
 
     Note
     ----
@@ -583,6 +640,8 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         | None = None,
         alpha_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
         | None = None,
+        retain_graph: bool = False,
+        create_graph: bool = False,
     ) -> None:
         if gamma > 0 and sigma_fn is None:
             raise ValueError("sigma_fn must be provided when gamma > 0")
@@ -597,6 +656,8 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
         self.alpha_fn = (
             alpha_fn if alpha_fn is not None else lambda t: torch.ones_like(t)
         )
+        self.retain_graph = retain_graph
+        self.create_graph = create_graph
 
     def __call__(
         self,
@@ -644,7 +705,8 @@ class ModelConsistencyDPSGuidance(DPSGuidance):
             grad_x = torch.autograd.grad(
                 outputs=loss.sum(),
                 inputs=x,
-                create_graph=False,
+                retain_graph=self.retain_graph,
+                create_graph=self.create_graph,
             )[0]
 
         # Compute scaling factor
@@ -720,6 +782,15 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         Optional; defaults to :math:`\alpha(t) = 1` if not provided. For example, use
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.alpha`
         for a linear-Gaussian noise schedule.
+    retain_graph : bool, default=False
+        If ``True``, the computational graph is retained after computing
+        gradients. Required when combining multiple autograd-based guidances
+        in a single :class:`DPSDenoiser` — all guidances except the last
+        must set this to ``True``.
+    create_graph : bool, default=False
+        If ``True``, a graph of the derivative is constructed, allowing
+        higher-order derivatives (e.g., differentiating through the entire
+        sampling process).
 
     Note
     ----
@@ -873,6 +944,8 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         | None = None,
         alpha_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
         | None = None,
+        retain_graph: bool = False,
+        create_graph: bool = False,
     ) -> None:
         if gamma > 0 and sigma_fn is None:
             raise ValueError("sigma_fn must be provided when gamma > 0")
@@ -887,6 +960,8 @@ class DataConsistencyDPSGuidance(DPSGuidance):
         self.alpha_fn = (
             alpha_fn if alpha_fn is not None else lambda t: torch.ones_like(t)
         )
+        self.retain_graph = retain_graph
+        self.create_graph = create_graph
 
     def __call__(
         self,
@@ -936,7 +1011,8 @@ class DataConsistencyDPSGuidance(DPSGuidance):
             grad_x = torch.autograd.grad(
                 outputs=loss.sum(),
                 inputs=x,
-                create_graph=False,
+                retain_graph=self.retain_graph,
+                create_graph=self.create_graph,
             )[0]
 
         # Compute scaling factor
