@@ -70,8 +70,9 @@ class DSMLoss:
             **model_kwargs: Any,
         ) -> torch.Tensor          # Model prediction, shape: (B, *)
 
-    When ``prediction_type="score"``, the ``score_to_x0_fn`` callback must
-    have the following signature:
+    When ``prediction_type="score"``, you must also provide a
+    ``score_to_x0_fn`` callback when instantiating the loss, with the
+    following signature:
 
     .. code-block:: python
 

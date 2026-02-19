@@ -492,8 +492,9 @@ class VPPreconditioner(BaseAffinePreconditioner):
     This preconditioner is not directly compatible for score-prediction
     training or others.
     
-    For training, typically used with :class:`~physicsnemo.diffusion.metrics.losses.DSMLoss`
-    with the default ``prediction_type="x0"`` and
+    For training, it is usually paired with
+    :class:`~physicsnemo.diffusion.metrics.losses.DSMLoss`
+    (``prediction_type="x0"``) and
     :class:`~physicsnemo.diffusion.noise_schedulers.VPNoiseScheduler`.
 
     Parameters
@@ -636,9 +637,9 @@ class VEPreconditioner(BaseAffinePreconditioner):
     :math:`\mathbf{x}_0`-prediction (clean data estimate). This preconditioner
     is not directly compatible for score-prediction training or others.
     
-    For training,
-    typically used with :class:`~physicsnemo.diffusion.metrics.losses.DSMLoss` with
-    the default ``prediction_type="x0"`` and
+    For training, it is usually paired with
+    :class:`~physicsnemo.diffusion.metrics.losses.DSMLoss`
+    (``prediction_type="x0"``) and
     :class:`~physicsnemo.diffusion.noise_schedulers.VENoiseScheduler`.
 
     Parameters
@@ -744,10 +745,9 @@ class IDDPMPreconditioner(BaseAffinePreconditioner):
     preconditioner is not directly compatible for score-prediction training or
     others.
     
-    For training, typically
-    used with :class:`~physicsnemo.diffusion.metrics.losses.DSMLoss` with
-    :class:`~physicsnemo.diffusion.metrics.losses.DSMLoss` with the default
-    ``prediction_type="x0"`` and
+    For training, it is usually paired with
+    :class:`~physicsnemo.diffusion.metrics.losses.DSMLoss`
+    (``prediction_type="x0"``) and
     :class:`~physicsnemo.diffusion.noise_schedulers.IDDPMNoiseScheduler`.
 
     Parameters
@@ -889,9 +889,9 @@ class EDMPreconditioner(BaseAffinePreconditioner):
     :math:`\mathbf{x}_0`-prediction (clean data estimate). This preconditioner
     is not directly compatible for score-prediction training or others.
     
-    For training,
-    typically used with :class:`~physicsnemo.diffusion.metrics.losses.DSMLoss`
-    with the default ``prediction_type="x0"`` and
+    For training, it is usually paired with
+    :class:`~physicsnemo.diffusion.metrics.losses.DSMLoss`
+    (``prediction_type="x0"``) and
     :class:`~physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler`.
 
     Parameters
