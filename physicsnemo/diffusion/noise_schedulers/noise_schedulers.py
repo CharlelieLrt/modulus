@@ -355,6 +355,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     ...     def sample_time(self, N, *, device=None, dtype=None):
     ...         u = torch.rand(N, device=device, dtype=dtype)
     ...         return self.sigma_min * (self.sigma_max/self.sigma_min)**u
+    ...     def loss_weight(self, t):
+    ...         return 1 / t**2
     ...
     >>> scheduler = SimpleEDMScheduler()
     >>> t_steps = scheduler.timesteps(10)
