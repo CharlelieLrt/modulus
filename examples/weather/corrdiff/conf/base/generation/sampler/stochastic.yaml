@@ -18,4 +18,4 @@
 
 type: stochastic
 num_steps: 18
-  # Number of denoising steps
+# Number of denoising steps
