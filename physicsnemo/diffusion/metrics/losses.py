@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Denoising score matching loss for diffusion model training."""
+"""Denoising score matching losses for diffusion model training."""
 
 from typing import Callable, Literal
 
@@ -27,9 +27,10 @@ from physicsnemo.diffusion.base import DiffusionModel
 from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
 
 
-class DSMLoss:
+class MSEDSMLoss:
     r"""
-    Denoising Score Matching (DSM) loss for training diffusion models.
+    Mean-squared-error denoising score matching loss for training diffusion
+    models.
 
     Implements the denoising score matching objective. Given clean data
     :math:`\mathbf{x}_0`, the loss is:
@@ -113,6 +114,10 @@ class DSMLoss:
         Callback to convert a score prediction to an
         :math:`\hat{\mathbf{x}}_0` estimate. Required when
         ``prediction_type="score"``. See above for the expected signature.
+    reduction : Literal["none", "mean", "sum"], default="mean"
+        Reduction to apply to the output: ``"none"`` returns the
+        per-element loss, ``"mean"`` returns the mean over all elements,
+        ``"sum"`` returns the sum over all elements.
 
     Raises
     ------
@@ -130,7 +135,7 @@ class DSMLoss:
     >>> from physicsnemo.core import Module
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
     >>> from physicsnemo.diffusion.preconditioners import EDMPreconditioner
-    >>> from physicsnemo.diffusion.metrics.losses import DSMLoss
+    >>> from physicsnemo.diffusion.metrics.losses import MSEDSMLoss
     >>>
     >>> class UnconditionalModel(Module):
     ...     def __init__(self):
@@ -142,7 +147,7 @@ class DSMLoss:
     >>> model = UnconditionalModel()
     >>> scheduler = EDMNoiseScheduler()
     >>> precond = EDMPreconditioner(model)
-    >>> loss_fn = DSMLoss(precond, scheduler)
+    >>> loss_fn = MSEDSMLoss(precond, scheduler)
     >>> x0 = torch.randn(4, 3, 8, 8)
     >>> loss = loss_fn(x0)
     >>> loss.shape
@@ -169,7 +174,7 @@ class DSMLoss:
     >>> cond_model = ConditionalModel()
     >>> scheduler_vp = VPNoiseScheduler()
     >>> precond_vp = VPPreconditioner(cond_model)
-    >>> loss_fn = DSMLoss(precond_vp, scheduler_vp)
+    >>> loss_fn = MSEDSMLoss(precond_vp, scheduler_vp)
     >>> condition = TensorDict({
     ...     "image": torch.randn(4, 3, 8, 8),
     ...     "vector": torch.randn(4, 4),
@@ -185,7 +190,7 @@ class DSMLoss:
     provides a ready-made conversion:
 
     >>> scheduler = EDMNoiseScheduler()
-    >>> loss_fn = DSMLoss(
+    >>> loss_fn = MSEDSMLoss(
     ...     model=model,
     ...     noise_scheduler=scheduler,
     ...     prediction_type="score",
@@ -197,7 +202,7 @@ class DSMLoss:
 
     **Example 4:** Bare-bones approach without any built-in scheduler or
     preconditioner. This shows how to plug custom components into
-    :class:`DSMLoss` by implementing the
+    :class:`MSEDSMLoss` by implementing the
     :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler` and
     :class:`~physicsnemo.diffusion.DiffusionModel` protocols from scratch:
 
@@ -229,8 +234,8 @@ class DSMLoss:
     ...             torch.cat([x, condition], dim=1), self.w)
     >>>
     >>> my_scheduler = MyScheduler()
-    >>> my_model = ConditionalModel()
-    >>> loss_fn = DSMLoss(my_model, my_scheduler)
+    >>> cond_model = ConditionalModel()
+    >>> loss_fn = MSEDSMLoss(cond_model, my_scheduler)
     >>> x0 = torch.randn(2, 3, 8, 8)
     >>> cond = torch.randn(2, 3, 8, 8)  # single-tensor conditioning
     >>> loss = loss_fn(x0, condition=cond)
@@ -238,8 +243,8 @@ class DSMLoss:
     torch.Size([])
     >>>
     >>> # Also works with score prediction + custom conversion
-    >>> loss_fn_score = DSMLoss(
-    ...     my_model, my_scheduler,
+    >>> loss_fn_score = MSEDSMLoss(
+    ...     cond_model, my_scheduler,
     ...     prediction_type="score",
     ...     score_to_x0_fn=my_scheduler.score_to_x0,
     ... )
@@ -257,6 +262,7 @@ class DSMLoss:
             [torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
         ]
         | None = None,
+        reduction: Literal["none", "mean", "sum"] = "mean",
     ) -> None:
         self.model = model
         self.noise_scheduler = noise_scheduler
@@ -276,11 +282,23 @@ class DSMLoss:
                 f"prediction_type must be 'x0' or 'score', got '{prediction_type}'."
             )
 
+        # Define the reduction callbacks
+        _reductions = {
+            "none": lambda x: x,
+            "mean": lambda x: x.mean(),
+            "sum": lambda x: x.sum(),
+        }
+        if reduction not in _reductions:
+            raise ValueError(
+                f"reduction must be 'none', 'mean', or 'sum', got '{reduction}'."
+            )
+        self._reduce = _reductions[reduction]
+
     def __call__(
         self,
         x0: Float[Tensor, " B *dims"],
         condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
-    ) -> Float[Tensor, ""]:
+    ) -> Float[Tensor, " B *dims"] | Float[Tensor, ""]:
         r"""
         Compute the denoising score matching loss.
 
@@ -296,7 +314,9 @@ class DSMLoss:
         Returns
         -------
         Tensor
-            Scalar loss value (mean over all batch elements and dimensions).
+            If ``reduction="none"``, the per-element weighted loss with same
+            shape :math:`(B, *)` as ``x0``. If ``reduction="mean"``, or
+            ``reduction="sum"``, a scalar tensor.
         """
         B = x0.shape[0]
         t = self.noise_scheduler.sample_time(B, device=x0.device, dtype=x0.dtype)
@@ -305,5 +325,161 @@ class DSMLoss:
         x0_pred = self._to_x0(prediction, x_t, t)
         loss = (x0_pred - x0) ** 2
         w = self.noise_scheduler.loss_weight(t)
-        w = w.reshape(-1, *([1] * (x0.ndim - 1)))
-        return (w * loss).mean()
+        loss = w.reshape(-1, *([1] * (x0.ndim - 1))) * loss
+        return self._reduce(loss)
+
+
+class WeightedMSEDSMLoss:
+    r"""
+    Weighted mean-squared-error denoising score matching loss.
+
+    Identical to :class:`MSEDSMLoss` but accepts an additional ``weight``
+    argument that multiplies the per-element squared error.
+
+    .. math::
+        \mathcal{L} = \mathbb{E}_{t, \boldsymbol{\epsilon}}
+        \left[ w(t) \left\| \mathbf{m} \odot
+        \left(\hat{\mathbf{x}}_0(\mathbf{x}_t, t)
+        - \mathbf{x}_0\right) \right\|^2 \right]
+
+    where :math:`\mathbf{m}` is the element-wise weight (e.g., a binary
+    mask). A common use case is masking out certain spatial regions or
+    channels of the state.
+
+    .. note::
+
+        The ``weight`` argument is **not** related to the time-dependent loss
+        weight :math:`w(t)` provided by the noise scheduler.
+
+    For more details on prediction types, expected signatures, and
+    additional examples, see :class:`MSEDSMLoss`.
+
+    Parameters
+    ----------
+    model : DiffusionModel
+        Diffusion model to train. Must satisfy the
+        :class:`~physicsnemo.diffusion.DiffusionModel` protocol.
+    noise_scheduler : NoiseScheduler
+        Noise scheduler implementing the
+        :class:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler`
+        protocol.
+    prediction_type : Literal["x0", "score"], default="x0"
+        Type of prediction the model outputs. See :class:`MSEDSMLoss`.
+    score_to_x0_fn : callable, optional
+        Callback to convert a score prediction to an
+        :math:`\hat{\mathbf{x}}_0` estimate. Required when
+        ``prediction_type="score"``.
+    reduction : {"none", "mean", "sum"}, default="mean"
+        Reduction to apply to the output: ``"none"`` returns the
+        per-element loss, ``"mean"`` the mean, ``"sum"`` the sum.
+
+    Examples
+    --------
+    Apply a spatial mask so the loss is computed only over unmasked regions:
+
+    >>> import torch
+    >>> from physicsnemo.core import Module
+    >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+    >>> from physicsnemo.diffusion.preconditioners import EDMPreconditioner
+    >>> from physicsnemo.diffusion.metrics.losses import WeightedMSEDSMLoss
+    >>>
+    >>> class UnconditionalModel(Module):
+    ...     def __init__(self):
+    ...         super().__init__()
+    ...         self.net = torch.nn.Conv2d(3, 3, 1)
+    ...     def forward(self, x, t, condition=None):
+    ...         return self.net(x)
+    >>>
+    >>> model = UnconditionalModel()
+    >>> scheduler = EDMNoiseScheduler()
+    >>> precond = EDMPreconditioner(model)
+    >>> loss_fn = WeightedMSEDSMLoss(precond, scheduler)
+    >>>
+    >>> x0 = torch.randn(4, 3, 8, 8)
+    >>> # Binary mask: zero out the left half of the spatial domain
+    >>> mask = torch.ones(4, 3, 8, 8)
+    >>> mask[:, :, :, :4] = 0.0
+    >>> loss = loss_fn(x0, weight=mask)
+    >>> loss.shape
+    torch.Size([])
+    """
+
+    def __init__(
+        self,
+        model: DiffusionModel,
+        noise_scheduler: NoiseScheduler,
+        prediction_type: Literal["x0", "score"] = "x0",
+        score_to_x0_fn: Callable[
+            [torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
+        ]
+        | None = None,
+        reduction: Literal["none", "mean", "sum"] = "mean",
+    ) -> None:
+        self.model = model
+        self.noise_scheduler = noise_scheduler
+
+        if prediction_type == "x0":
+            self._to_x0 = lambda prediction, x_t, t: prediction
+
+        elif prediction_type == "score":
+            if score_to_x0_fn is None:
+                raise ValueError(
+                    "score_to_x0_fn must be provided when prediction_type='score'."
+                )
+            self._to_x0 = score_to_x0_fn
+
+        else:
+            raise ValueError(
+                f"prediction_type must be 'x0' or 'score', got '{prediction_type}'."
+            )
+
+        # Define the reduction callbacks
+        _reductions = {
+            "none": lambda x: x,
+            "mean": lambda x: x.mean(),
+            "sum": lambda x: x.sum(),
+        }
+        if reduction not in _reductions:
+            raise ValueError(
+                f"reduction must be 'none', 'mean', or 'sum', got '{reduction}'."
+            )
+        self._reduce = _reductions[reduction]
+
+    def __call__(
+        self,
+        x0: Float[Tensor, " B *dims"],
+        weight: Float[Tensor, " B *dims"],
+        condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
+    ) -> Float[Tensor, " B *dims"] | Float[Tensor, ""]:
+        r"""
+        Compute the weighted denoising score matching loss.
+
+        Parameters
+        ----------
+        x0 : Tensor
+            Clean data of shape :math:`(B, *)` where :math:`B` is the batch
+            size and :math:`*` denotes any number of additional dimensions.
+        weight : Tensor
+            Per-element weight of shape :math:`(B, *)`, same shape as
+            ``x0``. For binary masking, use 0 for masked elements and 1
+            for active elements.
+        condition : Tensor, TensorDict, or None, optional, default=None
+            Conditioning information passed to the model. See
+            :class:`~physicsnemo.diffusion.DiffusionModel` for details.
+
+        Returns
+        -------
+        Tensor
+            If ``reduction="none"``, the per-element weighted loss with same
+            shape :math:`(B, *)` as ``x0``. If ``reduction="mean"``, or
+            ``reduction="sum"``, a scalar tensor.
+        """
+        B = x0.shape[0]
+        t = self.noise_scheduler.sample_time(B, device=x0.device, dtype=x0.dtype)
+        x_t = self.noise_scheduler.add_noise(x0, t)
+        prediction = self.model(x_t, t, condition=condition)
+        x0_pred = self._to_x0(prediction, x_t, t)
+        loss = weight * (x0_pred - x0) ** 2
+        w = self.noise_scheduler.loss_weight(t)
+        loss = w.reshape(-1, *([1] * (x0.ndim - 1))) * loss
+        return self._reduce(loss)
