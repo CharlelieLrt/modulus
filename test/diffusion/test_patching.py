@@ -16,7 +16,6 @@
 
 """Tests for diffusion patching utilities."""
 
-import random
 from typing import Tuple
 
 import pytest
@@ -292,7 +291,6 @@ class TestRandomPatching2D:
         x = make_input(INPUT_SHAPE, seed=GLOBAL_SEED, device=device)
 
         out_before = patcher.apply(x)
-        random.seed(999)
         patcher.reset_patch_indices()
         out_after = patcher.apply(x)
 
@@ -311,7 +309,6 @@ class TestRandomPatching2D:
         )
 
         gi_before = patcher.global_index(batch_size=BATCH_SIZE, device=device)
-        random.seed(999)
         patcher.reset_patch_indices()
         gi_after = patcher.global_index(batch_size=BATCH_SIZE, device=device)
 
