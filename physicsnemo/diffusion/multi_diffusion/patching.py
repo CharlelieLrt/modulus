@@ -193,12 +193,25 @@ class RandomPatching2D(BasePatching2D):
 
     Examples
     --------
+    Extract patches, re-draw random positions, then extract again:
+
     >>> import torch
     >>> from physicsnemo.diffusion.multi_diffusion import RandomPatching2D
     >>> rp = RandomPatching2D(img_shape=(16, 16), patch_shape=(8, 8), patch_num=6)
     >>> x = torch.randn(2, 3, 16, 16)
-    >>> rp.apply(x).shape  # (P*B, C, Hp, Wp)
+    >>> # First extraction: 6 patches per sample, batch of 2
+    >>> rp.apply(x).shape
     torch.Size([12, 3, 8, 8])
+    >>> # Re-draw random positions (e.g. between training steps)
+    >>> rp.reset_patch_indices()
+    >>> rp.apply(x).shape
+    torch.Size([12, 3, 8, 8])
+
+    Retrieve the global (y, x) coordinates for each patch:
+
+    >>> gi = rp.global_index()
+    >>> gi.shape  # (P, 2, Hp, Wp) — channel 0 = y, channel 1 = x
+    torch.Size([6, 2, 8, 8])
     """
 
     def __init__(
@@ -357,15 +370,27 @@ class GridPatching2D(BasePatching2D):
 
     Examples
     --------
+    Patch an image and fuse it back (roundtrip):
+
     >>> import torch
     >>> from physicsnemo.diffusion.multi_diffusion import GridPatching2D
     >>> gp = GridPatching2D(img_shape=(16, 16), patch_shape=(8, 8))
     >>> x = torch.randn(2, 3, 16, 16)
     >>> patches = gp.apply(x)
-    >>> patches.shape
+    >>> patches.shape  # (P*B, C, Hp, Wp)
     torch.Size([8, 3, 8, 8])
-    >>> gp.fuse(patches, batch_size=2).shape
+    >>> # Fuse is the inverse of apply
+    >>> reconstructed = gp.fuse(patches, batch_size=2)
+    >>> reconstructed.shape
     torch.Size([2, 3, 16, 16])
+    >>> torch.allclose(x, reconstructed)
+    True
+
+    Retrieve the global (y, x) coordinates for each patch:
+
+    >>> gi = gp.global_index()
+    >>> gi.shape  # (P, 2, Hp, Wp)
+    torch.Size([4, 2, 8, 8])
     """
 
     def __init__(
