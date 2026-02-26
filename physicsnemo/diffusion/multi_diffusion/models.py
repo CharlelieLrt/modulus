@@ -17,6 +17,7 @@
 """Multi-diffusion model wrapper for patch-based diffusion."""
 
 import warnings
+from collections import defaultdict
 from typing import Any, Dict, Literal, Tuple
 
 import numpy as np
@@ -120,12 +121,6 @@ class MultiDiffusionModel2D(Module):
     - :meth:`patch_condition`: patching / interpolation / expansion of
       the condition, depending on the configured strategy.
 
-    In addition, the wrapper exposes a public method called
-    :meth:`patch_embeddings`.
-    This method returns the global positional embedding grid decomposed into patches
-    consistent with the active patching strategy, in the
-    patch-compatible shape :math:`(P \times B, C_{PE}, H_p, W_p)`.
-
     These methods are called internally by :meth:`forward`, but can also
     be called externally for finer control (e.g., from a loss function
     that needs to add per-patch noise).
@@ -197,7 +192,7 @@ class MultiDiffusionModel2D(Module):
     Outputs
     -------
     torch.Tensor
-        If fusing is enabled (grid patching with ``fuse=True``) and, the output
+        If fusing is enabled (grid patching with ``fuse=True``), the output
         has shape :math:`(B, C, H, W)`. Otherwise the output has shape
         :math:`(P \times B, C, H_p, W_p)`.
 
@@ -238,8 +233,9 @@ class MultiDiffusionModel2D(Module):
     >>> # Training: random patching, P=6 patches of 8x8 per batch element
     >>> md_model.set_random_patching(patch_shape=(8, 8), patch_num=6)
     >>> x0 = torch.randn(2, 3, 16, 16)  # clean global state
-    >>> xt = x0 + 0.5 * torch.randn_like(x0)  # noisy global state
-    >>> t = 0.5 * torch.ones(2)
+    >>> sigma = 0.5
+    >>> xt = x0 + sigma * torch.randn_like(x0)  # noisy global state
+    >>> t = sigma * torch.ones(2)
     >>> x0_hat = md_model(xt, t)  # patched denoised estimate, shape: (P*B, C, Hp, Wp)
     >>> x0_hat.shape
     torch.Size([12, 3, 8, 8])
@@ -247,19 +243,21 @@ class MultiDiffusionModel2D(Module):
     >>> x0_patched = md_model.patch_x(x0)  # patched global state, shape: (P*B, C, Hp, Wp)
     >>> loss = ((x0_hat - x0_patched) ** 2).mean()
     >>>
-    >>> # Alternatively, one can patch x and t externally and pass them
-    >>> # with x_is_patched=True and t_is_patched=True to skip the internal patching
-    >>> x0_patched = md_model.patch_x(x0)  # patched global state, shape: (P*B, C, Hp, Wp)
-    >>> t_patched = md_model.patch_t(t)
-    >>> x0_hat = md_model(x0_patched, t_patched, x_is_patched=True, t_is_patched=True)
+    >>> # Re-draw random patch positions for the next training step
+    >>> md_model.reset_patch_indices()
+    >>> x0_hat = md_model(xt, t)
     >>> x0_hat.shape
     torch.Size([12, 3, 8, 8])
     >>>
-    >>> # Re-draw random patch positions between training steps
-    >>> md_model.set_random_patching()
+    >>> # One can also patch x and t externally
+    >>> xt_patched = md_model.patch_x(xt)
+    >>> t_patched = md_model.patch_t(t)
+    >>> x0_hat = md_model(xt_patched, t_patched, x_is_patched=True, t_is_patched=True)
+    >>> x0_hat.shape
+    torch.Size([12, 3, 8, 8])
     >>>
-    >>> # Sampling: grid patching with overlap and fusion
-    >>> md_model.eval()
+    >>> # -- Sampling: grid patching with overlap and fusion --
+    >>> _ = md_model.eval()
     >>> md_model.set_grid_patching(patch_shape=(8, 8), overlap_pix=2, fuse=True)
     >>> xN = torch.randn(2, 3, 16, 16)  # noisy global state
     >>> t = 0.5 * torch.ones(2)
@@ -283,41 +281,51 @@ class MultiDiffusionModel2D(Module):
     ...     global_spatial_shape=(16, 16),
     ...     condition_patch=True,
     ... )
-    >>> cond_md_model.set_random_patching(patch_shape=(8, 8), patch_num=6)  # 6 patches of 8x8 per batch element
+    >>>
+    >>> # Training: random patching
+    >>> cond_md_model.set_random_patching(patch_shape=(8, 8), patch_num=6)
     >>> x0 = torch.randn(2, 3, 16, 16)  # clean global state
     >>> xt = x0 + 0.5 * torch.randn_like(x0)  # noisy global state
     >>> t = 0.5 * torch.ones(2)
     >>> cond_img = torch.randn(2, 2, 16, 16)  # conditioning image
-    >>> x0_hat = cond_md_model(xt, t, condition=cond_img)  # patched denoised estimate, shape: (P*B, C, Hp, Wp)
+    >>> x0_hat = cond_md_model(xt, t, condition=cond_img)
     >>> x0_hat.shape
     torch.Size([12, 3, 8, 8])
     >>> x0_patched = cond_md_model.patch_x(x0)
     >>> loss = ((x0_hat - x0_patched) ** 2).mean()
-    # TODO-CURSOR: everything above in the examples is really great!
-    # Just one detail in example 2: we could add the same few lines as in example 1:
-    # "Alternatively, one can patch x and t externally and pass them with
-    # x_is_patched=True and t_is_patched=True to skip the internal patching"
     >>>
-    >>> # Sampling: grid patching with overlap and fusion
-    >>> cond_md_model.eval()
+    >>> # Re-draw random patch positions for the next training step
+    >>> cond_md_model.reset_patch_indices()
+    >>> x0_hat = cond_md_model(xt, t, condition=cond_img)
+    >>> x0_hat.shape
+    torch.Size([12, 3, 8, 8])
+    >>>
+    >>> # One can also patch x and t externally
+    >>> xt_patched = cond_md_model.patch_x(xt)
+    >>> t_patched = cond_md_model.patch_t(t)
+    >>> x0_hat = cond_md_model(xt_patched, t_patched,
+    ...                        condition=cond_img,
+    ...                        x_is_patched=True, t_is_patched=True)
+    >>> x0_hat.shape
+    torch.Size([12, 3, 8, 8])
+    >>>
+    >>> # -- Sampling: grid patching with overlap and fusion --
+    >>> _ = cond_md_model.eval()
     >>> cond_md_model.set_grid_patching(patch_shape=(8, 8), overlap_pix=2, fuse=True)
     >>> xN = torch.randn(2, 3, 16, 16)  # noisy global state
     >>> denoised = cond_md_model(xN, t, condition=cond_img)  # denoised global state, shape: (B, C, H, W)
     >>> denoised.shape
     torch.Size([2, 3, 16, 16])
 
-    # TODO-CURSOR: the example 2 below is great! Just one detail: can we change
-    the condition processing to interpolation instead of patching for the image
-    conditioning?
     **Example 3:** Conditional model with positional embeddings and two
-    conditioning tensors (an image patched locally and a vector repeated for
-    each patch):
+    conditioning tensors (an image interpolated to patch resolution and a
+    vector repeated for each patch):
 
     >>> class MultiCondModel(Module):
     ...     def __init__(self):
     ...         super().__init__()
-    ...         # 9 input channels: 3 (state) + 2 (image conditioning) + 4 (positional embedding)
-    ...         self.net = torch.nn.Conv2d(10, 3, 1)
+    ...         # 9 input channels: 3 (state) + 2 (interpolated image) + 4 (positional embedding)
+    ...         self.net = torch.nn.Conv2d(9, 3, 1)
     ...         self.vec_proj = torch.nn.Linear(5, 3 * 8 * 8)
     ...     def forward(self, x, t, condition=None):
     ...         # Wrapped model is designed to consume the conditioning
@@ -334,7 +342,7 @@ class MultiDiffusionModel2D(Module):
     ...     global_spatial_shape=(16, 16),
     ...     positional_embedding="sinusoidal",
     ...     channels_positional_embedding=4,
-    ...     condition_patch={"image": True},
+    ...     condition_interp={"image": True},
     ... )
     >>>
     >>> # Training: random patching
@@ -346,18 +354,29 @@ class MultiDiffusionModel2D(Module):
     ...     "image": torch.randn(2, 2, 16, 16),
     ...     "vector": torch.randn(2, 5),
     ... }, batch_size=[2])
-    >>> x0_hat = mc_md_model(xt, t, condition=cond)  # patched denoised estimate, shape: (P*B, C, Hp, Wp)
+    >>> x0_hat = mc_md_model(xt, t, condition=cond)
     >>> x0_hat.shape
     torch.Size([12, 3, 8, 8])
     >>> x0_patched = mc_md_model.patch_x(x0)
     >>> loss = ((x0_hat - x0_patched) ** 2).mean()
     >>>
-    # TODO-CURSOR: same comment as for example 2. Everything is great here,
-    # we could just add the same few lines as in example 1:
-    # "Alternatively, one can patch x and t externally and pass them with
-    # x_is_patched=True and t_is_patched=True to skip the internal patching"
-    >>> # Sampling: grid patching with overlap and fusion
-    >>> mc_md_model.eval()
+    >>> # Re-draw random patch positions for the next training step
+    >>> mc_md_model.reset_patch_indices()
+    >>> x0_hat = mc_md_model(xt, t, condition=cond)
+    >>> x0_hat.shape
+    torch.Size([12, 3, 8, 8])
+    >>>
+    >>> # One can also patch x and t externally
+    >>> xt_patched = mc_md_model.patch_x(xt)
+    >>> t_patched = mc_md_model.patch_t(t)
+    >>> x0_hat = mc_md_model(xt_patched, t_patched,
+    ...                      condition=cond,
+    ...                      x_is_patched=True, t_is_patched=True)
+    >>> x0_hat.shape
+    torch.Size([12, 3, 8, 8])
+    >>>
+    >>> # -- Sampling: grid patching with overlap and fusion --
+    >>> _ = mc_md_model.eval()
     >>> mc_md_model.set_grid_patching(patch_shape=(8, 8), overlap_pix=2, fuse=True)
     >>> xN = torch.randn(2, 3, 16, 16)  # noisy global state
     >>> denoised = mc_md_model(xN, t, condition=cond)  # denoised global state, shape: (B, C, H, W)
@@ -380,11 +399,32 @@ class MultiDiffusionModel2D(Module):
         self.model = model
         self.global_spatial_shape = tuple(global_spatial_shape)
         self._patching: RandomPatching2D | GridPatching2D | None = None
+        self._patching_type: Literal["random", "grid"] | None = None
         self._fuse: bool = False
-        self._random_patch_shape: Tuple[int, int] | None = None
-        self._random_patch_num: int | None = None
-        self._condition_patch = condition_patch
-        self._condition_interp = condition_interp
+        # Normalise condition flags to defaultdict for uniform access
+        if not isinstance(condition_patch, (bool, dict)):
+            raise TypeError(
+                f"condition_patch must be bool or Dict[str, bool], "
+                f"got {type(condition_patch).__name__}."
+            )
+        if not isinstance(condition_interp, (bool, dict)):
+            raise TypeError(
+                f"condition_interp must be bool or Dict[str, bool], "
+                f"got {type(condition_interp).__name__}."
+            )
+        self._condition_has_per_key_flags = isinstance(
+            condition_patch, dict
+        ) or isinstance(condition_interp, dict)
+        self._condition_patch: defaultdict[str, bool] = (
+            defaultdict(lambda: condition_patch)
+            if isinstance(condition_patch, bool)
+            else defaultdict(lambda: False, condition_patch)
+        )
+        self._condition_interp: defaultdict[str, bool] = (
+            defaultdict(lambda: condition_interp)
+            if isinstance(condition_interp, bool)
+            else defaultdict(lambda: False, condition_interp)
+        )
 
         # Positional embedding
         if positional_embedding is not None:
@@ -419,7 +459,7 @@ class MultiDiffusionModel2D(Module):
                         grids.append(fn(gx * freq))
                         grids.append(fn(gy * freq))
                 grid = torch.from_numpy(np.stack(grids, axis=0)).float()
-                self.register_buffer("pos_embd", grid)
+                self.register_buffer("pos_embd", grid, persistent=False)
             else:
                 raise ValueError(
                     f"positional_embedding must be 'learnable', "
@@ -430,15 +470,28 @@ class MultiDiffusionModel2D(Module):
             self.pos_embd = None
 
     # ------------------------------------------------------------------
+    # Properties for condition pre-processing flags
+    # ------------------------------------------------------------------
+    @property
+    def condition_patch(self) -> bool | Dict[str, bool]:
+        """Whether conditioning tensors are patched."""
+        return self._condition_patch
+
+    @property
+    def condition_interp(self) -> bool | Dict[str, bool]:
+        """Whether conditioning tensors are interpolated to patch resolution."""
+        return self._condition_interp
+
+    # ------------------------------------------------------------------
     # Patching strategy configuration
     # ------------------------------------------------------------------
 
     def set_random_patching(
         self,
-        patch_shape: Tuple[int, int] | None = None,
-        patch_num: int | None = None,
+        patch_shape: Tuple[int, int],
+        patch_num: int,
     ) -> None:
-        r"""Configure random patching for training.
+        r"""Configure random patching.
 
         After calling this method, the forward pass decomposes each input
         sample into ``patch_num`` randomly placed patches of size
@@ -446,16 +499,14 @@ class MultiDiffusionModel2D(Module):
         :math:`P \times B`. This is typically used during training. Random
         patches cannot be fused back to the global resolution.
 
-        Calling this method again re-draws the random patch positions. If
-        arguments are omitted on a subsequent call, the values from the
-        previous call are reused. Both ``patch_shape`` and ``patch_num``
-        must be provided on the first call.
+        To re-draw random patch positions between training
+        steps, call :meth:`reset_patch_indices`.
 
         Parameters
         ----------
-        patch_shape : Tuple[int, int], optional
+        patch_shape : Tuple[int, int]
             Height and width :math:`(H_p, W_p)` of each patch.
-        patch_num : int, optional
+        patch_num : int
             Number of patches :math:`P` to extract per sample.
 
         Examples
@@ -473,24 +524,33 @@ class MultiDiffusionModel2D(Module):
         >>> md.set_random_patching(patch_shape=(8, 8), patch_num=4)
         >>> md(torch.randn(2, 3, 16, 16), torch.rand(2)).shape
         torch.Size([8, 3, 8, 8])
-        >>> md.set_random_patching()  # re-draw patch positions, same parameters
-        >>> md.set_random_patching(patch_num=6)  # re-draw patch positions, with 6 patches per batch element
+        >>> md.reset_patch_indices()  # re-draw positions for next step
+        >>> md(torch.randn(2, 3, 16, 16), torch.rand(2)).shape
+        torch.Size([8, 3, 8, 8])
         """
-        if patch_shape is not None:
-            self._random_patch_shape = patch_shape
-        if patch_num is not None:
-            self._random_patch_num = patch_num
-        if self._random_patch_shape is None or self._random_patch_num is None:
-            raise ValueError(
-                "patch_shape and patch_num must be provided on the first "
-                "call to set_random_patching()."
-            )
         self._patching = RandomPatching2D(
             img_shape=self.global_spatial_shape,
-            patch_shape=self._random_patch_shape,
-            patch_num=self._random_patch_num,
+            patch_shape=patch_shape,
+            patch_num=patch_num,
         )
+        self._patching_type = "random"
         self._fuse = False
+
+    def reset_patch_indices(self) -> None:
+        r"""Re-draw random patch positions for the current random patching
+        strategy.
+
+        Raises
+        ------
+        RuntimeError
+            If the current patching strategy is not random patching.
+        """
+        if self._patching_type != "random":
+            raise RuntimeError(
+                "reset_patch_indices() is only available when random "
+                "patching is active. Call set_random_patching() first."
+            )
+        self._patching.reset_patch_indices()
 
     def set_grid_patching(
         self,
@@ -541,6 +601,7 @@ class MultiDiffusionModel2D(Module):
             overlap_pix=overlap_pix,
             boundary_pix=boundary_pix,
         )
+        self._patching_type = "grid"
         self._fuse = fuse
 
     # ------------------------------------------------------------------
@@ -629,8 +690,8 @@ class MultiDiffusionModel2D(Module):
         ``condition_interp``: patched, interpolated, or simply repeated along
         the batch dimension (default).
 
-        Positional embeddings are **not** injected by this method; use
-        :meth:`patch_embeddings` to obtain them separately.
+        Positional embeddings are **not** injected by this method; they are
+        handled internally by :meth:`forward`.
 
         Parameters
         ----------
@@ -688,34 +749,60 @@ class MultiDiffusionModel2D(Module):
         P = self._patching.patch_num
 
         if isinstance(condition, Tensor):
-            if isinstance(self._condition_patch, dict) or isinstance(
-                self._condition_interp, dict
-            ):
+            if self._condition_has_per_key_flags:
                 raise ValueError(
                     "condition_patch and condition_interp must be bool (not "
                     "dict) when condition is a plain Tensor. Use a TensorDict "
                     "for per-key control."
                 )
+            do_patch = self._condition_patch[""]
+            do_interp = self._condition_interp[""]
+            if not torch.compiler.is_compiling():
+                if do_patch and condition.ndim == 4:
+                    if tuple(condition.shape[2:]) != self.global_spatial_shape:
+                        raise ValueError(
+                            f"condition_patch=True requires spatial dims "
+                            f"{tuple(condition.shape[2:])} to match "
+                            f"global_spatial_shape "
+                            f"{self.global_spatial_shape}."
+                        )
             return self._process_condition_tensor(
-                condition,
-                do_patch=self._condition_patch,
-                do_interp=self._condition_interp,
-                P=P,
+                condition, do_patch=do_patch, do_interp=do_interp, P=P
             )
 
         if isinstance(condition, TensorDict):
             B = condition.batch_size[0]
+            if not torch.compiler.is_compiling():
+                cond_keys = set(condition.keys())
+                extra = set(self._condition_patch) - cond_keys
+                if extra:
+                    raise ValueError(
+                        f"condition_patch has keys {extra} not present "
+                        f"in condition. Available keys: {cond_keys}."
+                    )
+                extra = set(self._condition_interp) - cond_keys
+                if extra:
+                    raise ValueError(
+                        f"condition_interp has keys {extra} not present "
+                        f"in condition. Available keys: {cond_keys}."
+                    )
             result = {}
             for key in condition.keys():
-                # TODO-CURSOR: this is is probably not strict
-                # enough. We want to raise an error if the condition_patch or
-                # condition_interp has any key that is not in condition.
-                cp = self._condition_patch
-                ci = self._condition_interp
-                do_patch = cp.get(key, False) if isinstance(cp, dict) else cp
-                do_interp = ci.get(key, False) if isinstance(ci, dict) else ci
+                do_patch = self._condition_patch[key]
+                do_interp = self._condition_interp[key]
+                tensor = condition[key]
+                if not torch.compiler.is_compiling():
+                    if do_patch and tensor.ndim == 4:
+                        if tuple(tensor.shape[2:]) != self.global_spatial_shape:
+                            raise ValueError(
+                                f"condition_patch=True for key '{key}' "
+                                f"requires spatial dims "
+                                f"{tuple(tensor.shape[2:])} to match "
+                                f"global_spatial_shape "
+                                f"{self.global_spatial_shape}."
+                            )
                 result[key] = self._process_condition_tensor(
-                    condition[key], do_patch, do_interp, P
+                    tensor, do_patch, do_interp, P
                 )
             return TensorDict(result, batch_size=[P * B])
 
@@ -724,88 +811,6 @@ class MultiDiffusionModel2D(Module):
             f"got {type(condition).__name__}."
         )
 
-    def patch_embeddings(
-        self, batch_size: int
-    ) -> Float[Tensor, "P_times_B C_PE Hp Wp"]:
-        r"""Extract positional-embedding patches.
-
-        Returns the positional embedding grid decomposed into patches
-        consistent with the active patching strategy, in the
-        patch-compatible layout with shape :math:`(P \times B, C_{PE}, H_p, W_p)`.
-
-        Parameters
-        ----------
-        batch_size : int
-            Original batch size :math:`B` (before patching).
-
-        Returns
-        -------
-        Tensor
-            Patched positional embeddings of shape
-            :math:`(P \times B, C_{PE}, H_p, W_p)`.
-
-        Raises
-        ------
-        RuntimeError
-            If no patching strategy or positional embedding is configured.
-
-        Examples
-        --------
-        >>> import torch
-        >>> from physicsnemo.core import Module
-        >>> from physicsnemo.diffusion.multi_diffusion import MultiDiffusionModel2D
-        >>> class M(Module):
-        ...     def __init__(self):
-        ...         super().__init__()
-        ...         self.net = torch.nn.Conv2d(3, 3, 1)
-        ...     def forward(self, x, t, condition=None):
-        ...         return self.net(x)
-        >>> md = MultiDiffusionModel2D(
-        ...     M(), global_spatial_shape=(16, 16),
-        ...     positional_embedding="sinusoidal",
-        ...     channels_positional_embedding=4,
-        ... )
-        >>> md.set_random_patching(patch_shape=(8, 8), patch_num=6)
-        >>> pe = md.patch_embeddings(batch_size=2)
-        >>> pe.shape  # (P*B, C_PE, Hp, Wp)
-        torch.Size([12, 4, 8, 8])
-        """
-        if not torch.compiler.is_compiling():
-            if self._patching is None:
-                raise RuntimeError(
-                    "No patching strategy set. Call set_random_patching() "
-                    "or set_grid_patching() first."
-                )
-            if self.pos_embd is None:
-                raise RuntimeError(
-                    "No positional embedding configured. Set "
-                    "positional_embedding in the constructor."
-                )
-        pos_embd = self.pos_embd  # (C_PE, H, W)
-
-        if isinstance(self._patching, RandomPatching2D):
-            # Global-index-based extraction for random patching
-            # TODO-CURSOR: that looks fine to me, but please double-check in
-            # song_unet.py, in the method positional_embedding_indexing to make
-            # sure that the logic is right. In particular look at the tensor
-            # shapes written in the comments there, and make sure we have the
-            # same here. Just a sanity check.
-            global_index = self._patching.global_index(
-                1, pos_embd.device
-            )  # (P, 2, Hp, Wp)
-            P = global_index.shape[0]
-            Hp, Wp = global_index.shape[2], global_index.shape[3]
-            idx = global_index.permute(1, 0, 2, 3).reshape(2, -1)
-            selected = pos_embd[:, idx[0], idx[1]]  # (C_PE, P*Hp*Wp)
-            selected = selected.reshape(-1, P, Hp, Wp).permute(1, 0, 2, 3)
-            return selected.repeat_interleave(batch_size, dim=0)
-
-        # Embedding-selector approach for grid patching
-        pos_embd_expanded = pos_embd.unsqueeze(0).expand(
-            batch_size, -1, -1, -1
-        )  # (B, C_PE, H, W)
-        return self._patching.apply(pos_embd_expanded)
-
     def fuse(
         self,
         input: Float[Tensor, "P_times_B C Hp Wp"],
@@ -813,8 +818,7 @@ class MultiDiffusionModel2D(Module):
     ) -> Float[Tensor, "B C H W"]:
         r"""Fuse patches back into a full-resolution image.
 
-        Only supported when :meth:`set_grid_patching` has been called and the current
-        patching strategy is grid patching.
+        Only supported when :meth:`set_grid_patching` has been called.
         Random patches cannot be fused because their positions may overlap
         arbitrarily.
 
@@ -838,11 +842,6 @@ class MultiDiffusionModel2D(Module):
 
         Examples
         --------
-        # TODO-CURSOR: this example is just fine, but I think we could make it
-        even better by showing that self.fuse is basically the reverse of
-        self.patch_x. Maybe in addition of what we already have in the example,
-        add a simple patch_x followed by fuse on an arbitrary rand tensor to
-        show that they are inverses of each other.
         >>> import torch
         >>> from physicsnemo.core import Module
         >>> from physicsnemo.diffusion.multi_diffusion import MultiDiffusionModel2D
@@ -853,19 +852,16 @@ class MultiDiffusionModel2D(Module):
         ...     def forward(self, x, t, condition=None):
         ...         return self.net(x)
         >>> md = MultiDiffusionModel2D(M(), global_spatial_shape=(16, 16))
-        >>> md.set_grid_patching(patch_shape=(8, 8), fuse=False)  # deactivate fusion in the forward pass
-        >>> x_patched = md.patch_x(torch.randn(2, 3, 16, 16))
-        >>> md.fuse(x_patched, batch_size=2).shape  # fuse patches back into a full-resolution image
-        torch.Size([2, 3, 16, 16])
+        >>> md.set_grid_patching(patch_shape=(8, 8))
+        >>> x = torch.randn(2, 3, 16, 16)
+        >>> x_patched = md.patch_x(x)
+        >>> torch.allclose(md.fuse(x_patched, batch_size=2), x)
+        True
         """
-        if self._patching is None:
-            raise RuntimeError(
-                "No patching strategy set. Call set_grid_patching() first."
-            )
-        if not isinstance(self._patching, GridPatching2D):
+        if self._patching_type != "grid":
             raise RuntimeError(
                 "Fusing is only supported with grid patching. "
-                "Random patches cannot be fused back into a full image."
+                "Call set_grid_patching() first."
             )
         return self._patching.fuse(input, batch_size=batch_size)
 
@@ -887,7 +883,7 @@ class MultiDiffusionModel2D(Module):
         **model_kwargs: Any,
     ) -> Float[Tensor, "P_times_B C Hp Wp"] | Float[Tensor, "B C H W"]:
         # No patching strategy: warn and pass through
-        if self._patching is None:
+        if self._patching_type is None:
             if not torch.compiler.is_compiling():
                 warnings.warn(
                     "No patching strategy set on MultiDiffusionModel2D. "
@@ -935,7 +931,9 @@ class MultiDiffusionModel2D(Module):
             condition = self.patch_condition(condition)
             # Inject positional embeddings into condition
             if self.pos_embd is not None:
-                pos_embd_patched = self.patch_embeddings(B)
+                pos_embd_patched = self._patching.apply(
+                    self.pos_embd.unsqueeze(0).expand(B, -1, -1, -1)
+                )  # (P*B, C_PE, Hp, Wp)
                 PB = P * B
                 if condition is None:
                     condition = TensorDict(
@@ -980,21 +978,12 @@ class MultiDiffusionModel2D(Module):
                 "for the same condition key. Use one or the other."
             )
 
-        is_spatial = tensor.ndim == 4
-
-        if (do_patch or do_interp) and not is_spatial:
-            # TODO-CURSOR: actually this should be an error, not a warning!
-            # Patching or interpolation cannot be apllied to a tensor that is
-            # not 4D.
-            if not torch.compiler.is_compiling():
-                warnings.warn(
-                    f"condition_patch={do_patch} or "
-                    f"condition_interp={do_interp} is set for a "
-                    f"{tensor.ndim}D tensor. Only 4D tensors (B, C, H, W) "
-                    f"can be patched or interpolated. "
-                    f"Falling back to batch dimension expansion.",
-                    stacklevel=4,
-                )
+        if (do_patch or do_interp) and tensor.ndim != 4:
+            raise ValueError(
+                f"condition_patch={do_patch} or "
+                f"condition_interp={do_interp} requires a 4D tensor "
+                f"(B, C, H, W), got {tensor.ndim}D."
+            )
 
         if do_patch:
             return self._patching.apply(tensor)
