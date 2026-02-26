@@ -62,13 +62,13 @@ class BasePatching2D(torch.nn.Module, ABC):
         self.img_shape = img_shape
         self.patch_shape = tuple(min(p, i) for p, i in zip(patch_shape, img_shape))
 
-    @abstractmethod
     def forward(
         self, input: Float[Tensor, "B C H W"], **kwargs
     ) -> Float[Tensor, "P_times_B C Hp Wp"]:
-        r"""Forward pass implementing the patching operation."""
-        pass
+        r"""Forward pass. Delegates to :meth:`apply` by default."""
+        return self.apply(input, **kwargs)
 
+    @abstractmethod
     def apply(
         self,
         input: Float[Tensor, "B C H W"],
@@ -77,23 +77,23 @@ class BasePatching2D(torch.nn.Module, ABC):
     ) -> Float[Tensor, "P_times_B C Hp Wp"]:
         r"""Apply the patching operation to a batch of full images.
 
+        Subclasses **must** override this method.
+
         Parameters
         ----------
         input : Tensor
             Batch of full images of shape :math:`(B, C, H, W)`.
         *args : tuple
-            Positional arguments forwarded to :meth:`forward`.
+            Additional positional arguments.
         **kwargs : dict
-            Keyword arguments forwarded to :meth:`forward`.
+            Additional keyword arguments.
 
         Returns
         -------
         Tensor
             Patched tensor of shape :math:`(P \times B, C, H_p, W_p)`.
         """
-        if isinstance(input, Tensor):
-            return self(input, *args, **kwargs)
-        return super().apply(input)
+        pass
 
     def fuse(
         self, input: Float[Tensor, "P_times_B C Hp Wp"], **kwargs
@@ -124,9 +124,10 @@ class BasePatching2D(torch.nn.Module, ABC):
     ) -> Int[Tensor, "P 2 Hp Wp"]:
         r"""Return the global :math:`(y, x)` grid coordinates for each patch.
 
-        The result is cached as an internal buffer for performance. For
-        :class:`RandomPatching2D`, the cache is refreshed whenever
-        :meth:`~RandomPatching2D.reset_patch_indices` is called.
+        Returns a **new tensor** (clone) each time, so the caller owns the
+        result and it will not be mutated by subsequent calls to
+        :meth:`~RandomPatching2D.reset_patch_indices`. For zero-copy access
+        to the underlying buffer, use ``self._global_index`` directly.
 
         Parameters
         ----------
@@ -142,7 +143,9 @@ class BasePatching2D(torch.nn.Module, ABC):
             Integer tensor of shape :math:`(P, 2, H_p, W_p)`.
             Channel 0 holds y-coordinates, channel 1 holds x-coordinates.
         """
-        return self._global_index
+        if hasattr(self, "_global_index") and self._global_index is not None:
+            return self._global_index.clone()
+        return self._compute_global_index()
 
     def _compute_global_index(self) -> Int[Tensor, "P 2 Hp Wp"]:
         r"""Compute the global-index tensor from current patch positions.
