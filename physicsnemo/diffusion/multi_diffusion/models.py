@@ -899,10 +899,15 @@ class MultiDiffusionModel2D(Module):
                     )
                 elif isinstance(condition, TensorDict):
                     condition["positional_embedding"] = pos_embd
+                elif isinstance(condition, Tensor):
+                    condition = TensorDict(
+                        {"condition": condition, "positional_embedding": pos_embd},
+                        batch_size=[B],
+                    )
                 else:
                     raise ValueError(
                         "When positional embeddings are configured, condition "
-                        "must be a TensorDict or None, got "
+                        "must be a Tensor, TensorDict, or None, got "
                         f"{type(condition).__name__}."
                     )
             return self.model(x, t, condition=condition, **model_kwargs)
@@ -929,25 +934,31 @@ class MultiDiffusionModel2D(Module):
             t = self.patch_t(t)
         if not condition_is_patched:
             condition = self.patch_condition(condition)
-            # Inject positional embeddings into condition
-            if self.pos_embd is not None:
-                pos_embd_patched = self._patching.apply(
-                    self.pos_embd.unsqueeze(0).expand(B, -1, -1, -1)
-                )  # (P*B, C_PE, Hp, Wp)
-                PB = P * B
-                if condition is None:
-                    condition = TensorDict(
-                        {"positional_embedding": pos_embd_patched},
-                        batch_size=[PB],
-                    )
-                elif isinstance(condition, TensorDict):
-                    condition["positional_embedding"] = pos_embd_patched
-                else:
-                    raise ValueError(
-                        "When positional embeddings are configured, condition "
-                        "must be a TensorDict or None, got "
-                        f"{type(condition).__name__}."
-                    )
+
+        # Positional embeddings are always injected (internal to the wrapper)
+        if self.pos_embd is not None:
+            pos_embd_patched = self._patching.apply(
+                self.pos_embd.unsqueeze(0).expand(B, -1, -1, -1)
+            )  # (P*B, C_PE, Hp, Wp)
+            PB = P * B
+            if condition is None:
+                condition = TensorDict(
+                    {"positional_embedding": pos_embd_patched},
+                    batch_size=[PB],
+                )
+            elif isinstance(condition, TensorDict):
+                condition["positional_embedding"] = pos_embd_patched
+            elif isinstance(condition, Tensor):
+                condition = TensorDict(
+                    {"condition": condition, "positional_embedding": pos_embd_patched},
+                    batch_size=[PB],
+                )
+            else:
+                raise ValueError(
+                    "When positional embeddings are configured, condition "
+                    "must be a Tensor, TensorDict, or None, got "
+                    f"{type(condition).__name__}."
+                )
 
         output = self.model(x, t, condition=condition, **model_kwargs)
 
