@@ -400,6 +400,7 @@ class TestRandomPatching2D:
     def test_apply_torch_compile(self, device):
         """apply() is compatible with torch.compile."""
         torch._dynamo.reset()
+        torch._dynamo.config.error_on_recompile = True
         patcher = RandomPatching2D(
             img_shape=(IMG_H, IMG_W), patch_shape=(8, 12), patch_num=4
         )
@@ -408,7 +409,7 @@ class TestRandomPatching2D:
         def apply_fn(tensor):
             return patcher.apply(tensor)
 
-        compiled_fn = torch.compile(apply_fn, fullgraph=False)
+        compiled_fn = torch.compile(apply_fn, fullgraph=True)
 
         out_eager = patcher.apply(x)
         out_compiled = compiled_fn(x)
@@ -730,6 +731,7 @@ class TestGridPatching2D:
     def test_apply_torch_compile(self, device):
         """apply() is compatible with torch.compile."""
         torch._dynamo.reset()
+        torch._dynamo.config.error_on_recompile = True
         patcher = GridPatching2D(
             img_shape=(IMG_H, IMG_W),
             patch_shape=(16, 16),
@@ -741,7 +743,7 @@ class TestGridPatching2D:
         def apply_fn(tensor):
             return patcher.apply(tensor)
 
-        compiled_fn = torch.compile(apply_fn, fullgraph=False)
+        compiled_fn = torch.compile(apply_fn, fullgraph=True)
 
         out_eager = patcher.apply(x)
         out_compiled = compiled_fn(x)
@@ -751,6 +753,7 @@ class TestGridPatching2D:
     def test_fuse_torch_compile(self, device):
         """fuse() is compatible with torch.compile."""
         torch._dynamo.reset()
+        torch._dynamo.config.error_on_recompile = True
         patcher = GridPatching2D(
             img_shape=(IMG_H, IMG_W),
             patch_shape=(16, 16),
@@ -763,7 +766,7 @@ class TestGridPatching2D:
         def fuse_fn(tensor):
             return patcher.fuse(tensor, batch_size=BATCH_SIZE)
 
-        compiled_fn = torch.compile(fuse_fn, fullgraph=False)
+        compiled_fn = torch.compile(fuse_fn, fullgraph=True)
 
         out_eager = patcher.fuse(patches, batch_size=BATCH_SIZE)
         out_compiled = compiled_fn(patches)
