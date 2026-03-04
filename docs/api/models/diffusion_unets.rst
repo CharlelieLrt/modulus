@@ -7,7 +7,7 @@ This page documents the UNet family of backbone architectures for diffusion
 models.  These are built-in architectures specialized for diffusion on
 structured 2D domains (images, spatial fields).  For other domains or
 architectures, see the :ref:`DiT backbone <dit_model>`, or use any model from
-the :doc:`PhysicsNeMo model zoo </api_models>` or external libraries as
+the :doc:`PhysicsNeMo model zoo <../../api_models>` or external libraries as
 described in :ref:`Model Backbones <diffusion_model_backbones>`.
 
 All models on this page are based on the
@@ -258,15 +258,16 @@ outputs.
     might however be produced by such an autoregressive/rollout model.
 
 .. note::
+
    - The ``SongUNetPosLtEmbd`` model cannot be scaled to very long lead-time
-    horizons (controlled by the ``lead_time_steps`` parameter). This is because
-    the lead-time embeddings are represented by a grid of learnable parameters of
-    shape ``(lead_time_steps, C_LT, res, res)``. For very long lead-time, the
-    size of this grid of embeddings becomes prohibitively large.
+     horizons (controlled by the ``lead_time_steps`` parameter). This is because
+     the lead-time embeddings are represented by a grid of learnable parameters of
+     shape ``(lead_time_steps, C_LT, res, res)``. For very long lead-time, the
+     size of this grid of embeddings becomes prohibitively large.
    - In a given input batch ``x``, the associated lead-times might be not necessarily
-    consecutive or in order. The do not even need to originate from the same forecast
-    trajectory. For example, the lead-time labels might be ``[0, 1, 2]`` instead of ``[2, 0, 1]``,
-    or even ``[2, 2, 1]``.
+     consecutive or in order. They do not even need to originate from the same forecast
+     trajectory. For example, the lead-time labels might be ``[0, 1, 2]`` instead of
+     ``[2, 0, 1]``, or even ``[2, 2, 1]``.
 
 
 Positional Embeddings (SongUNetPosEmbd)

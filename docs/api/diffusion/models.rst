@@ -14,7 +14,7 @@ signature differs, a thin adapter or wrapper is needed to bridge the gap (see
 
 PhysicsNeMo ships two families of architectures specialized for diffusion
 (UNets and DiT), but the framework is not restricted to them.  Any model from
-the :doc:`PhysicsNeMo model zoo </api_models>` --- such as
+the :doc:`PhysicsNeMo model zoo <../../api_models>` --- such as
 :class:`~physicsnemo.models.mlp.FullyConnected`,
 :class:`~physicsnemo.models.fno.FNO`, or graph neural networks --- can be used
 as a backbone, either directly or as a building block inside a larger model.
