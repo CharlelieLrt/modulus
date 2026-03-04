@@ -52,21 +52,24 @@ available via
 which computes the FID from precomputed Inception-v3 statistics.
 
 
+API Reference
+-------------
+
 :code:`MSEDSMLoss`
--------------------
+~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.metrics.losses.MSEDSMLoss
     :members:
     :exclude-members: __init__
 
 :code:`WeightedMSEDSMLoss`
-----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.metrics.losses.WeightedMSEDSMLoss
     :members:
     :exclude-members: __init__
 
 :code:`calculate_fid_from_inception_stats`
--------------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: physicsnemo.diffusion.metrics.fid.calculate_fid_from_inception_stats

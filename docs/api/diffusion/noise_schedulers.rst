@@ -107,15 +107,18 @@ the box:
   for heavy-tailed data.
 
 
+API Reference
+-------------
+
 :code:`NoiseScheduler`
------------------------
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.noise_schedulers.NoiseScheduler
     :members:
     :exclude-members: __init__
 
 :code:`LinearGaussianNoiseScheduler`
--------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler
     :show-inheritance:
@@ -123,7 +126,7 @@ the box:
     :exclude-members: __init__
 
 :code:`EDMNoiseScheduler`
---------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.noise_schedulers.EDMNoiseScheduler
     :show-inheritance:
@@ -131,7 +134,7 @@ the box:
     :exclude-members: __init__
 
 :code:`VENoiseScheduler`
--------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.noise_schedulers.VENoiseScheduler
     :show-inheritance:
@@ -139,7 +142,7 @@ the box:
     :exclude-members: __init__
 
 :code:`VPNoiseScheduler`
--------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.noise_schedulers.VPNoiseScheduler
     :show-inheritance:
@@ -147,7 +150,7 @@ the box:
     :exclude-members: __init__
 
 :code:`IDDPMNoiseScheduler`
-----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.noise_schedulers.IDDPMNoiseScheduler
     :show-inheritance:
@@ -155,7 +158,7 @@ the box:
     :exclude-members: __init__
 
 :code:`StudentTEDMNoiseScheduler`
-----------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.noise_schedulers.StudentTEDMNoiseScheduler
     :show-inheritance:

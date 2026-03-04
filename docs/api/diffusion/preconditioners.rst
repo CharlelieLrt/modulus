@@ -121,8 +121,11 @@ signatures (e.g., ``SongUNet``, ``DiT``) to the
 :class:`~physicsnemo.diffusion.DiffusionModel` interface.
 
 
+API Reference
+-------------
+
 :code:`BaseAffinePreconditioner`
----------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.preconditioners.BaseAffinePreconditioner
     :show-inheritance:
@@ -130,7 +133,7 @@ signatures (e.g., ``SongUNet``, ``DiT``) to the
     :exclude-members: forward
 
 :code:`EDMPreconditioner`
---------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.preconditioners.EDMPreconditioner
     :show-inheritance:
@@ -138,7 +141,7 @@ signatures (e.g., ``SongUNet``, ``DiT``) to the
     :exclude-members: forward
 
 :code:`VEPreconditioner`
--------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.preconditioners.VEPreconditioner
     :show-inheritance:
@@ -146,7 +149,7 @@ signatures (e.g., ``SongUNet``, ``DiT``) to the
     :exclude-members: forward
 
 :code:`VPPreconditioner`
--------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.preconditioners.VPPreconditioner
     :show-inheritance:
@@ -154,7 +157,7 @@ signatures (e.g., ``SongUNet``, ``DiT``) to the
     :exclude-members: forward
 
 :code:`IDDPMPreconditioner`
-----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.diffusion.preconditioners.IDDPMPreconditioner
     :show-inheritance:

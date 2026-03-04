@@ -449,20 +449,29 @@ be combined by passing a list to
 :class:`~physicsnemo.diffusion.guidance.DPSDenoiser`.
 
 
+API Reference
+-------------
+
+Sample Entry Point
+~~~~~~~~~~~~~~~~~~
+
 :code:`sample`
----------------
+^^^^^^^^^^^^^^
 
 .. autofunction:: physicsnemo.diffusion.samplers.sample
 
+Solvers
+~~~~~~~
+
 :code:`Solver`
----------------
+^^^^^^^^^^^^^^
 
 .. autoclass:: physicsnemo.diffusion.samplers.solvers.Solver
     :members:
     :exclude-members: __init__
 
 :code:`EulerSolver`
---------------------
+^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: physicsnemo.diffusion.samplers.solvers.EulerSolver
     :show-inheritance:
@@ -470,7 +479,7 @@ be combined by passing a list to
     :exclude-members: __init__
 
 :code:`HeunSolver`
--------------------
+^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: physicsnemo.diffusion.samplers.solvers.HeunSolver
     :show-inheritance:
@@ -478,7 +487,7 @@ be combined by passing a list to
     :exclude-members: __init__
 
 :code:`EDMStochasticEulerSolver`
----------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: physicsnemo.diffusion.samplers.solvers.EDMStochasticEulerSolver
     :show-inheritance:
@@ -486,22 +495,25 @@ be combined by passing a list to
     :exclude-members: __init__
 
 :code:`EDMStochasticHeunSolver`
---------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: physicsnemo.diffusion.samplers.solvers.EDMStochasticHeunSolver
     :show-inheritance:
     :members:
     :exclude-members: __init__
 
+Guidance
+~~~~~~~~
+
 :code:`DPSGuidance`
----------------------
+^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: physicsnemo.diffusion.guidance.DPSGuidance
     :members:
     :exclude-members: __init__
 
 :code:`DPSDenoiser`
----------------------
+^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: physicsnemo.diffusion.guidance.DPSDenoiser
     :show-inheritance:
@@ -509,7 +521,7 @@ be combined by passing a list to
     :exclude-members: __init__
 
 :code:`ModelConsistencyDPSGuidance`
--------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: physicsnemo.diffusion.guidance.ModelConsistencyDPSGuidance
     :show-inheritance:
@@ -517,7 +529,7 @@ be combined by passing a list to
     :exclude-members: __init__
 
 :code:`DataConsistencyDPSGuidance`
-------------------------------------
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: physicsnemo.diffusion.guidance.DataConsistencyDPSGuidance
     :show-inheritance:

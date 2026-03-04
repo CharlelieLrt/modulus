@@ -288,8 +288,11 @@ informed of its position in the global domain.
     embeddings are specifically desired.
 
 
+API Reference
+-------------
+
 :code:`SongUNet`
------------------
+~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.models.diffusion_unets.SongUNet
     :show-inheritance:
@@ -297,7 +300,7 @@ informed of its position in the global domain.
     :exclude-members: forward
 
 :code:`DhariwalUNet`
----------------------
+~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.models.diffusion_unets.DhariwalUNet
     :show-inheritance:
@@ -305,7 +308,7 @@ informed of its position in the global domain.
     :exclude-members: forward
 
 :code:`SongUNetPosEmbd`
-------------------------
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.models.diffusion_unets.SongUNetPosEmbd
     :show-inheritance:
@@ -313,7 +316,7 @@ informed of its position in the global domain.
     :exclude-members: forward
 
 :code:`SongUNetPosLtEmbd`
---------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: physicsnemo.models.diffusion_unets.SongUNetPosLtEmbd
     :show-inheritance:
