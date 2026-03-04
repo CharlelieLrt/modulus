@@ -221,29 +221,23 @@ that handles the appropriate conversions in its
 :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser` method.
 
 
-API Reference
--------------
-
 :code:`DiffusionModel`
-~~~~~~~~~~~~~~~~~~~~~~
+-----------------------
 
 .. autoclass:: physicsnemo.diffusion.DiffusionModel
-    :show-inheritance:
     :members:
     :exclude-members: __init__
 
 :code:`Predictor`
-~~~~~~~~~~~~~~~~~
+------------------
 
 .. autoclass:: physicsnemo.diffusion.Predictor
-    :show-inheritance:
     :members:
     :exclude-members: __init__
 
 :code:`Denoiser`
-~~~~~~~~~~~~~~~~
+-----------------
 
 .. autoclass:: physicsnemo.diffusion.Denoiser
-    :show-inheritance:
     :members:
     :exclude-members: __init__

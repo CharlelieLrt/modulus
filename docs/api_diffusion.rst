@@ -1,5 +1,5 @@
-PhysicsNeMo Diffusion Framework
-================================
+PhysicsNeMo Diffusion
+=====================
 
 .. currentmodule:: physicsnemo.diffusion
 

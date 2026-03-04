@@ -228,36 +228,39 @@ Example: Conditional Sampling
 For conditional generation (e.g., super-resolution), the model backbone
 processes both the noisy latent state and the conditioning input.  A common
 pattern is to concatenate the conditioning image along the channel dimension
-using :class:`~physicsnemo.diffusion.utils.ConcatConditionWrapper`.  At
-sampling time, the conditioning is bound into the predictor (:math:`P`) via
-``functools.partial``.
+inside a thin adapter.  At sampling time, the conditioning is bound into the
+predictor (:math:`P`) via ``functools.partial``.
 
 .. code-block:: python
 
     import torch
     from functools import partial
-    from tensordict import TensorDict
+    from physicsnemo.core import Module
     from physicsnemo.models.diffusion_unets import SongUNet
-    from physicsnemo.diffusion.utils import ConcatConditionWrapper
     from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
     from physicsnemo.diffusion.preconditioners import EDMPreconditioner
     from physicsnemo.diffusion.samplers import sample
 
     C_x, C_cond, res = 3, 3, 64   # Image channels, conditioning channels, resolution
 
-    # Backbone: SongUNet with ConcatConditionWrapper for channel concatenation
-    # in_channels = C_x + C_cond because the conditioning image is concatenated
-    unet = SongUNet(
-        img_resolution=res,
-        in_channels=C_x + C_cond,
-        out_channels=C_x,
-        label_dim=0,
-        model_channels=64,
-        channel_mult=[1, 2, 2],
-        num_blocks=2,
-    )
-    backbone = ConcatConditionWrapper(unet)
+    # Backbone: SongUNet wrapped with an adapter that concatenates the
+    # conditioning image along the channel dimension
+    class ConditionalUNet(Module):
+        def __init__(self):
+            super().__init__()
+            self.net = SongUNet(
+                img_resolution=res,
+                in_channels=C_x + C_cond,
+                out_channels=C_x,
+                model_channels=64,
+                channel_mult=[1, 2, 2],
+                num_blocks=2,
+            )
+        def forward(self, x, t, condition=None):
+            x_cat = torch.cat([x, condition], dim=1)
+            return self.net(x_cat, noise_labels=t, class_labels=None)
 
+    backbone = ConditionalUNet()
     scheduler = EDMNoiseScheduler()
     precond = EDMPreconditioner(backbone, sigma_data=0.5)
     # ... train with MSEDSMLoss(precond, scheduler, condition=...) ...
@@ -265,12 +268,11 @@ sampling time, the conditioning is bound into the predictor (:math:`P`) via
     # --- Sampling ---
     precond.eval()
 
-    # Build conditioning TensorDict
-    low_res = torch.randn(4, C_cond, res, res)  # Low-resolution conditioning
-    condition = TensorDict({"cond_concat": low_res}, batch_size=[4])
+    # Conditioning image (e.g., low-resolution input for super-resolution)
+    low_res = torch.randn(4, C_cond, res, res)
 
     # Bind condition into the predictor "P"
-    x0_predictor = partial(precond, condition=condition)
+    x0_predictor = partial(precond, condition=low_res)
 
     # Convert to denoiser "D" and sample
     denoiser = scheduler.get_denoiser(x0_predictor=x0_predictor)
@@ -447,29 +449,20 @@ be combined by passing a list to
 :class:`~physicsnemo.diffusion.guidance.DPSDenoiser`.
 
 
-API Reference
--------------
-
-Sample Entry Point
-~~~~~~~~~~~~~~~~~~
-
 :code:`sample`
-^^^^^^^^^^^^^^
+---------------
 
 .. autofunction:: physicsnemo.diffusion.samplers.sample
 
-Solvers
-~~~~~~~
-
 :code:`Solver`
-^^^^^^^^^^^^^^
+---------------
 
 .. autoclass:: physicsnemo.diffusion.samplers.solvers.Solver
     :members:
     :exclude-members: __init__
 
 :code:`EulerSolver`
-^^^^^^^^^^^^^^^^^^^
+--------------------
 
 .. autoclass:: physicsnemo.diffusion.samplers.solvers.EulerSolver
     :show-inheritance:
@@ -477,7 +470,7 @@ Solvers
     :exclude-members: __init__
 
 :code:`HeunSolver`
-^^^^^^^^^^^^^^^^^^
+-------------------
 
 .. autoclass:: physicsnemo.diffusion.samplers.solvers.HeunSolver
     :show-inheritance:
@@ -485,7 +478,7 @@ Solvers
     :exclude-members: __init__
 
 :code:`EDMStochasticEulerSolver`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+---------------------------------
 
 .. autoclass:: physicsnemo.diffusion.samplers.solvers.EDMStochasticEulerSolver
     :show-inheritance:
@@ -493,25 +486,22 @@ Solvers
     :exclude-members: __init__
 
 :code:`EDMStochasticHeunSolver`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+--------------------------------
 
 .. autoclass:: physicsnemo.diffusion.samplers.solvers.EDMStochasticHeunSolver
     :show-inheritance:
     :members:
     :exclude-members: __init__
 
-Guidance
-~~~~~~~~
-
 :code:`DPSGuidance`
-^^^^^^^^^^^^^^^^^^^^
+---------------------
 
 .. autoclass:: physicsnemo.diffusion.guidance.DPSGuidance
     :members:
     :exclude-members: __init__
 
 :code:`DPSDenoiser`
-^^^^^^^^^^^^^^^^^^^^
+---------------------
 
 .. autoclass:: physicsnemo.diffusion.guidance.DPSDenoiser
     :show-inheritance:
@@ -519,7 +509,7 @@ Guidance
     :exclude-members: __init__
 
 :code:`ModelConsistencyDPSGuidance`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+-------------------------------------
 
 .. autoclass:: physicsnemo.diffusion.guidance.ModelConsistencyDPSGuidance
     :show-inheritance:
@@ -527,7 +517,7 @@ Guidance
     :exclude-members: __init__
 
 :code:`DataConsistencyDPSGuidance`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+------------------------------------
 
 .. autoclass:: physicsnemo.diffusion.guidance.DataConsistencyDPSGuidance
     :show-inheritance:
