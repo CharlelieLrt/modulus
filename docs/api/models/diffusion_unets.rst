@@ -25,7 +25,7 @@ All models on this page are based on the
     See the :ref:`adapter examples <diffusion_unet_adapter_example>` below.
 
 
-.. _diffusion_architecture_backbones:
+.. _diffusion_unet_api:
 
 SongUNet --- The Primary Backbone
 ---------------------------------

@@ -33,7 +33,7 @@ training data is (relatively) limited.  However, they are less flexible than
 transformers and do not scale as favorably to very large datasets and domains.
 
 For complete API documentation, parameter descriptions, and usage examples,
-see the :ref:`Diffusion UNets API reference <diffusion_architecture_backbones>`.
+see the :ref:`Diffusion UNets API reference <diffusion_unet_api>`.
 
 
 Diffusion Transformer (DiT)
@@ -42,8 +42,16 @@ Diffusion Transformer (DiT)
 The Diffusion Transformer (DiT) is a Vision Transformer backbone for diffusion
 models.  It operates on image patches via a patchify embedding, processes
 tokens with a sequence of transformer blocks conditioned through adaptive
-layer normalization (adaLN-Zero), and reconstructs the output via an unpatchify
-step.
+layer normalization, and reconstructs the output via an unpatchify step.
+
+Compared to UNets, DiT has fewer inductive biases: it does not assume locality
+or multi-scale structure.  This makes it more flexible---for instance,
+conditioning can be injected through customizable tokenization operators rather
+than being limited to channel concatenation or class embeddings.  DiT
+architectures also tend to scale more favorably with increasing amounts of
+training data.
+
+For complete API documentation, see the :ref:`DiT API reference <dit_model>`.
 
 .. _backbone_adapters:
 
