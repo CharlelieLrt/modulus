@@ -79,7 +79,7 @@ A complete sampling workflow involves these steps:
    - **With guidance** --- first instantiate one or more
      :class:`~physicsnemo.diffusion.guidance.DPSGuidance` objects, then
      combine them with the predictor using
-     :class:`~physicsnemo.diffusion.guidance.DPSDenoiser` to obtain a
+     :class:`~physicsnemo.diffusion.guidance.DPSScorePredictor` to obtain a
      guided score-predictor.  Finally, pass this guided score-predictor to
      :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`.
 
@@ -289,7 +289,7 @@ DPS (Diffusion Posterior Sampling) guidance steers the sampling toward
 satisfying observation constraints.  Guidance modifies the **predictor**
 :math:`P` in the :ref:`sampling equation <diffusion_sampling_equation>`:
 the guidance objects are combined with the x0-predictor into a guided
-score-predictor via :class:`~physicsnemo.diffusion.guidance.DPSDenoiser`,
+score-predictor via :class:`~physicsnemo.diffusion.guidance.DPSScorePredictor`,
 and then converted to a denoiser :math:`D` via the noise scheduler.
 
 .. code-block:: python
@@ -297,7 +297,7 @@ and then converted to a denoiser :math:`D` via the noise scheduler.
     import torch
     from functools import partial
     from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
-    from physicsnemo.diffusion.guidance import DPSDenoiser, DataConsistencyDPSGuidance
+    from physicsnemo.diffusion.guidance import DPSScorePredictor, DataConsistencyDPSGuidance
     from physicsnemo.diffusion.samplers import sample
 
     scheduler = EDMNoiseScheduler()
@@ -312,7 +312,7 @@ and then converted to a denoiser :math:`D` via the noise scheduler.
     guidance = DataConsistencyDPSGuidance(mask=mask, y=y_obs, std_y=0.1)
 
     # Combine predictor + guidance into a guided score-predictor
-    guided_score_predictor = DPSDenoiser(
+    guided_score_predictor = DPSScorePredictor(
         x0_predictor=x0_predictor,
         x0_to_score_fn=scheduler.x0_to_score,
         guidances=guidance,
@@ -429,7 +429,7 @@ predictors *before* converting them into a
 :class:`~physicsnemo.diffusion.Denoiser` :math:`D`.  Concretely, guidance
 objects implement the :class:`~physicsnemo.diffusion.guidance.DPSGuidance`
 protocol and are combined with an x0-predictor into a guided score-predictor
-via :class:`~physicsnemo.diffusion.guidance.DPSDenoiser`.  The resulting
+via :class:`~physicsnemo.diffusion.guidance.DPSScorePredictor`.  The resulting
 score-predictor is then passed to the noise scheduler's
 :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`
 factory to obtain a denoiser :math:`D` for sampling.  The sampler and solver
@@ -446,7 +446,7 @@ Custom guidances can be defined by implementing the
 :class:`~physicsnemo.diffusion.guidance.DPSGuidance` protocol---any callable
 with the signature ``(x, t, x_0) -> guidance_term``.  Multiple guidances can
 be combined by passing a list to
-:class:`~physicsnemo.diffusion.guidance.DPSDenoiser`.
+:class:`~physicsnemo.diffusion.guidance.DPSScorePredictor`.
 
 
 API Reference
@@ -512,10 +512,10 @@ Guidance
     :members:
     :exclude-members: __init__
 
-:code:`DPSDenoiser`
+:code:`DPSScorePredictor`
 ^^^^^^^^^^^^^^^^^^^^
 
-.. autoclass:: physicsnemo.diffusion.guidance.DPSDenoiser
+.. autoclass:: physicsnemo.diffusion.guidance.DPSScorePredictor
     :show-inheritance:
     :members:
     :exclude-members: __init__
