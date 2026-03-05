@@ -71,7 +71,7 @@ training and inference.
      - Patch-based model wrapper and losses
      - Patch-based denoiser and guidance
 
-The :ref:`noise scheduler <diffusion_noise_schedulers>` is the single
+The :ref:`noise scheduler <diffusion_noise_schedulers>` is a particularly central
 component that is used in *both* stages.  Its role loosely parallels that of
 the `Scheduler <https://huggingface.co/docs/diffusers/api/schedulers/overview>`_
 in HuggingFace Diffusers, which similarly encapsulates the noise schedule and
@@ -84,6 +84,13 @@ solver.
 
 Design Philosophy: Layered Customization
 -----------------------------------------
+
+Diffusion models are used across a wide spectrum of applications in scientific
+machine learning and physics-AI, by users with very different needs: diffusion
+experts who require full control over the forward process, the solver, or the
+guidance mechanism, and domain experts in science and engineering who use
+diffusion as a tool and need reliable, easy-to-use components.  The framework
+is designed to serve both audiences.
 
 A central design principle of the framework is to offer multiple levels of
 customization, so that users can choose the trade-off between convenience and
@@ -167,6 +174,8 @@ is essential.
     :math:`\hat{\mathbf{x}}_0`, score
     :math:`\nabla_{\mathbf{x}} \log p(\mathbf{x})`, noise
     :math:`\boldsymbol{\epsilon}`, or velocity :math:`\mathbf{v}`.
+    Which target the model predicts depends on the training objective and
+    the choice of preconditioner.
 
 **Predictor** (:class:`Predictor`)
     The interface for trained models during **inference**.  A
@@ -175,6 +184,14 @@ is essential.
     obtained from a :class:`DiffusionModel` by binding the conditioning via
     ``functools.partial``, but it can be anything: an x0-predictor, a
     score-predictor, a guidance-augmented predictor, or any combination.
+    The type of prediction a predictor returns depends on how the underlying
+    model was trained.  Importantly, not all predictors originate from a
+    trained model: DPS-style :ref:`guidance <diffusion_guidance>` predictors
+    are computed on the fly during sampling and always produce a score.
+    Although all predictors share the same ``(x, t) -> prediction`` signature,
+    it is the user's responsibility to know what kind of prediction is
+    returned and to use it accordingly (e.g., passing an x0-predictor vs. a
+    score-predictor to the noise scheduler's ``get_denoiser`` factory).
 
 **Denoiser** (:class:`Denoiser`)
     The update function consumed by
@@ -190,9 +207,20 @@ These three types form a pipeline:
 
     Training:   data  ->  NoiseScheduler.add_noise  ->  DiffusionModel  ->  Loss
 
-    Inference:  DiffusionModel  ->  partial(...)  ->  Predictor
-                  Predictor  ->  NoiseScheduler.get_denoiser  ->  Denoiser
-                  Denoiser  ->  Solver.step  (inside sample loop)  ->  samples
+    Inference:  DiffusionModel  ->  partial(...) / closure  ->  Predictor
+                Predictor  ->  (optional: + Guidance)       ->  Predictor
+                Predictor  ->  (optional: x0 <-> score)     ->  Predictor
+                Predictor  ->  NoiseScheduler.get_denoiser  ->  Denoiser
+                Denoiser  ->  Solver.step  (sample loop)    ->  samples
+
+In the inference pipeline, ``partial(...)`` binds the conditioning into the
+predictor (a closure or wrapper function achieves the same result).
+:ref:`Guidance <diffusion_guidance>` is optionally composed at the predictor
+level---for example, DPS guidance combines an x0-predictor with observation
+constraints to produce a guided score-predictor.  When the predictor type does
+not match what the denoiser factory expects (e.g., the model was trained as an
+x0-predictor but guidance produces a score), the noise scheduler can convert
+between the two via ``x0_to_score`` / ``score_to_x0``.
 
 
 Prediction Types
