@@ -8,8 +8,8 @@ Introduction
 The PhysicsNeMo diffusion framework provides a modular, composable toolkit for
 building, training, and sampling from diffusion models.  It is designed for
 scientists and engineers who want to apply diffusion-based generative modeling
-to real-world problems---from weather forecasting and climate downscaling to
-geophysical inversion and materials design---while remaining flexible enough for
+to real-world problems, from weather forecasting and climate downscaling to
+geophysical inversion and materials design, while remaining flexible enough for
 research-level experimentation.
 
 Diffusion models learn to generate data by reversing a gradual noising process.
@@ -17,23 +17,23 @@ During training, the model sees data that has been corrupted by varying amounts
 of noise, and it learns to predict the clean data (or, equivalently, the noise
 or the score) from the corrupted version.  At inference time, the model starts
 from pure noise and iteratively removes it, step by step, to produce a new
-sample.  This simple recipe turns out to be remarkably powerful: diffusion
-models achieve state-of-the-art results in image generation, and are
+sample.  
+
+This basic recipe turns out to be remarkably powerful. Diffusion models achieve state-of-the-art results in image generation, and, therefore, are
 increasingly used for scientific applications where the goal is to sample from
 complex, high-dimensional distributions conditioned on physical observations
 or constraints.
 
 The framework is organized around a small number of clearly defined
 abstractions.  Each abstraction maps to a specific role in the diffusion
-pipeline, and the abstractions compose naturally: a
-:ref:`noise scheduler <diffusion_noise_schedulers>` controls the forward and
-reverse processes, a :ref:`model backbone <diffusion_model_backbones>` implements the
-neural network, a :ref:`preconditioner <diffusion_preconditioners>` rescales
-model inputs and outputs for stable training, a
-:ref:`loss function <diffusion_metrics>` defines the training objective, a
-:ref:`sampler <diffusion_samplers>` generates new data at inference time, and
-:ref:`guidance <diffusion_guidance>` steers the sampling toward desired
-properties.
+pipeline and the abstractions compose naturally. The abstractions include: 
+
+* a :ref:`noise scheduler <diffusion_noise_schedulers>` to control the forward and reverse processes 
+* a :ref:`model backbone <diffusion_model_backbones>` to implement the neural network 
+* a :ref:`preconditioner <diffusion_preconditioners>` to rescale model inputs and outputs for stable training 
+* a :ref:`loss function <diffusion_metrics>` to define the training objective 
+* a :ref:`sampler <diffusion_samplers>` to generate new data at inference time 
+* a :ref:`guidance <diffusion_guidance>` to steer the sampling toward desired properties
 
 
 Framework Components at a Glance
@@ -61,7 +61,7 @@ training and inference.
    * - :ref:`Losses <diffusion_metrics>`
      - Denoising score matching objective
      -
-   * - :ref:`Samplers & solvers <diffusion_samplers>`
+   * - :ref:`Samplers and solvers <diffusion_samplers>`
      -
      - Numerically integrate the reverse process
    * - :ref:`Guidance <diffusion_guidance>`
@@ -86,23 +86,24 @@ Design Philosophy: Layered Customization
 -----------------------------------------
 
 Diffusion models are used across a wide spectrum of applications in scientific
-machine learning and physics-AI, by users with very different needs: diffusion
-experts who require full control over the forward process, the solver, or the
-guidance mechanism, and domain experts in science and engineering who use
-diffusion as a tool and need reliable, easy-to-use components.  The framework
-is designed to serve both audiences.
+machine learning and physics-AI, by users with very different needs, for example: 
+
+* diffusion experts who require full control over the forward process, the solver, or the guidance mechanism
+* domain experts in science and engineering who use diffusion as a tool and need reliable, easy-to-use components  
+
+The framework is designed to serve both audiences.
 
 A central design principle of the framework is to offer multiple levels of
 customization, so that users can choose the trade-off between convenience and
 flexibility that best fits their needs.  Not every abstraction exposes all
-levels---the exact set depends on the component---but the underlying philosophy
+levels, the exact set depends on the component, but the underlying philosophy
 is consistent throughout:
 
 **Protocols (maximum flexibility).**
 Where appropriate, an abstraction defines a minimal *protocol* (a set of
 method signatures with no implementation).  Any object that satisfies the
 protocol can be used within the framework.  This is the right level when you
-want to drop in a fully custom component---for instance, a noise scheduler for
+want to drop in a fully custom component, for instance, a noise scheduler for
 a non-Gaussian forward process, or a custom solver.
 
 .. code-block:: python
@@ -125,7 +126,7 @@ Some components provide abstract base classes that implement shared logic.
 Subclasses only override a few methods to define their variant.  For example,
 :class:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler`
 handles noise injection, score conversion, and denoiser construction for any
-linear-Gaussian schedule---you just define :math:`\alpha(t)`, :math:`\sigma(t)`,
+linear-Gaussian schedule. You just define :math:`\alpha(t)`, :math:`\sigma(t)`,
 and the discretization.
 
 .. code-block:: python
@@ -181,16 +182,16 @@ is essential.
     The interface for trained models during **inference**.  A
     :class:`Predictor` is a callable ``(x, t) -> prediction`` that does not
     require conditioning as a separate argument.  A predictor is typically
-    obtained from a :class:`DiffusionModel` by binding the conditioning via
+    obtained from a :class:`DiffusionModel` by binding the conditioning using
     ``functools.partial``, but it can be anything: an x0-predictor, a
     score-predictor, a guidance-augmented predictor, or any combination.
     The type of prediction a predictor returns depends on how the underlying
     model was trained.  Importantly, not all predictors originate from a
-    trained model: DPS-style :ref:`guidance <diffusion_guidance>` predictors
+    trained model. For example, DPS-style :ref:`guidance <diffusion_guidance>` predictors
     are computed on the fly during sampling and always produce a score.
     Although all predictors share the same ``(x, t) -> prediction`` signature,
-    it is the user's responsibility to know what kind of prediction is
-    returned and to use it accordingly (e.g., passing an x0-predictor vs. a
+    it is your responsibility to know what kind of prediction is
+    returned and to use it accordingly (for example, passing an x0-predictor versus a
     score-predictor to the noise scheduler's ``get_denoiser`` factory).
 
 **Denoiser** (:class:`Denoiser`)
@@ -199,7 +200,7 @@ is essential.
     obtained from a predictor using the noise scheduler's
     :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`
     factory.  For more details on how the denoiser fits in the sampling
-    loop, see the :ref:`samplers documentation <diffusion_samplers>`.
+    loop, refer to the :ref:`samplers documentation <diffusion_samplers>`.
 
 These three types form a pipeline:
 
@@ -218,7 +219,7 @@ predictor (a closure or wrapper function achieves the same result).
 :ref:`Guidance <diffusion_guidance>` is optionally composed at the predictor
 level---for example, DPS guidance combines an x0-predictor with observation
 constraints to produce a guided score-predictor.  When the predictor type does
-not match what the denoiser factory expects (e.g., the model was trained as an
+not match what the denoiser factory expects (for example, the model was trained as an
 x0-predictor but guidance produces a score), the noise scheduler can convert
 between the two via ``x0_to_score`` / ``score_to_x0``.
 
