@@ -5,9 +5,10 @@ Metrics and Losses
 
 .. currentmodule:: physicsnemo.diffusion.metrics
 
-This module provides two categories of tools: **training losses** for learning
-diffusion models, and **evaluation metrics** for measuring the quality of
-generated samples.
+This module provides two categories of tools: 
+
+* **training losses** for learning diffusion models
+* **evaluation metrics** for measuring the quality of generated samples
 
 
 Training Losses
@@ -22,7 +23,7 @@ time sampling, noise injection, and loss weighting.
 MSE-based DSM loss and supports both x0-predictor and score-predictor
 training.  :class:`~physicsnemo.diffusion.metrics.losses.WeightedMSEDSMLoss`
 extends it with an element-wise weight tensor for masking specific spatial
-regions or channels (e.g., land vs. ocean in weather applications).
+regions or channels (for example, land versus ocean in weather applications).
 
 .. code-block:: python
 
@@ -46,8 +47,8 @@ Evaluation Metrics
 ------------------
 
 The framework provides evaluation metrics for assessing the quality of
-generated samples.  Currently, the Fréchet Inception Distance (FID) is
-available via
+generated samples. The Fréchet Inception Distance (FID) is
+available using
 :func:`~physicsnemo.diffusion.metrics.fid.calculate_fid_from_inception_stats`,
 which computes the FID from precomputed Inception-v3 statistics.
 
