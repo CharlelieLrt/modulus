@@ -16,7 +16,6 @@
 
 """Tests for diffusion patching utilities."""
 
-import random
 from typing import Tuple
 
 import pytest
@@ -292,7 +291,6 @@ class TestRandomPatching2D:
         x = make_input(INPUT_SHAPE, seed=GLOBAL_SEED, device=device)
 
         out_before = patcher.apply(x)
-        random.seed(999)
         patcher.reset_patch_indices()
         out_after = patcher.apply(x)
 
@@ -311,7 +309,6 @@ class TestRandomPatching2D:
         )
 
         gi_before = patcher.global_index(batch_size=BATCH_SIZE, device=device)
-        random.seed(999)
         patcher.reset_patch_indices()
         gi_after = patcher.global_index(batch_size=BATCH_SIZE, device=device)
 
@@ -411,7 +408,7 @@ class TestRandomPatching2D:
         def apply_fn(tensor):
             return patcher.apply(tensor)
 
-        compiled_fn = torch.compile(apply_fn, fullgraph=False)
+        compiled_fn = torch.compile(apply_fn, fullgraph=True)
 
         out_eager = patcher.apply(x)
         out_compiled = compiled_fn(x)
@@ -750,7 +747,7 @@ class TestGridPatching2D:
         def apply_fn(tensor):
             return patcher.apply(tensor)
 
-        compiled_fn = torch.compile(apply_fn, fullgraph=False)
+        compiled_fn = torch.compile(apply_fn, fullgraph=True)
 
         out_eager = patcher.apply(x)
         out_compiled = compiled_fn(x)
@@ -775,7 +772,7 @@ class TestGridPatching2D:
         def fuse_fn(tensor):
             return patcher.fuse(tensor, batch_size=BATCH_SIZE)
 
-        compiled_fn = torch.compile(fuse_fn, fullgraph=False)
+        compiled_fn = torch.compile(fuse_fn, fullgraph=True)
 
         out_eager = patcher.fuse(patches, batch_size=BATCH_SIZE)
         out_compiled = compiled_fn(patches)
