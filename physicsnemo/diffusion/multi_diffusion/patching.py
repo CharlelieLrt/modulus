@@ -246,17 +246,15 @@ class RandomPatching2D(BasePatching2D):
             self.patch_indices, Tensor
         )
         device = self.patch_indices.device if has_buffer else None
-        dtype = self.patch_indices.dtype if has_buffer else torch.long
 
+        max_y = self.img_shape[0] - self.patch_shape[0]
+        max_x = self.img_shape[1] - self.patch_shape[1]
         new_indices = torch.tensor(
             [
-                (
-                    random.randint(0, self.img_shape[0] - self.patch_shape[0]),
-                    random.randint(0, self.img_shape[1] - self.patch_shape[1]),
-                )
+                (random.randint(0, max_y), random.randint(0, max_x))
                 for _ in range(self.patch_num)
             ],
-            dtype=dtype,
+            dtype=torch.long,
             device=device,
         )
 

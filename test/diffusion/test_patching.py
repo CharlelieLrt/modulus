@@ -408,7 +408,7 @@ class TestRandomPatching2D:
         def apply_fn(tensor):
             return patcher.apply(tensor)
 
-        compiled_fn = torch.compile(apply_fn, fullgraph=False)
+        compiled_fn = torch.compile(apply_fn, fullgraph=True)
 
         out_eager = patcher.apply(x)
         out_compiled = compiled_fn(x)
@@ -747,7 +747,7 @@ class TestGridPatching2D:
         def apply_fn(tensor):
             return patcher.apply(tensor)
 
-        compiled_fn = torch.compile(apply_fn, fullgraph=False)
+        compiled_fn = torch.compile(apply_fn, fullgraph=True)
 
         out_eager = patcher.apply(x)
         out_compiled = compiled_fn(x)
@@ -772,7 +772,7 @@ class TestGridPatching2D:
         def fuse_fn(tensor):
             return patcher.fuse(tensor, batch_size=BATCH_SIZE)
 
-        compiled_fn = torch.compile(fuse_fn, fullgraph=False)
+        compiled_fn = torch.compile(fuse_fn, fullgraph=True)
 
         out_eager = patcher.fuse(patches, batch_size=BATCH_SIZE)
         out_compiled = compiled_fn(patches)
