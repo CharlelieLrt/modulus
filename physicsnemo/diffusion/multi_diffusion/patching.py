@@ -249,6 +249,12 @@ class RandomPatching2D(BasePatching2D):
 
         max_y = self.img_shape[0] - self.patch_shape[0]
         max_x = self.img_shape[1] - self.patch_shape[1]
+        # TODO: use torch.randint instead of random.randint to create
+        # patch indices directly on right device. Note: this will break
+        # non-regression tests because torch.randint and random.randint do not
+        # use the same random number generation process. But for an object taht
+        # is deliberately designed to be random, breaking these non-regression
+        # tests might not be a problem.
         new_indices = torch.tensor(
             [
                 (random.randint(0, max_y), random.randint(0, max_x))
