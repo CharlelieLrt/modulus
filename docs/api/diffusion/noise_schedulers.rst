@@ -53,9 +53,9 @@ Role in Inference (Sampling)
 
 During sampling, the noise scheduler provides:
 
-1. **Time-step schedule** via :meth:`~NoiseScheduler.timesteps`.
-2. **Initial latent state** via :meth:`~NoiseScheduler.init_latents`.
-3. **Denoiser factory** via :meth:`~NoiseScheduler.get_denoiser`.
+- **Time-step schedule** via :meth:`~NoiseScheduler.timesteps`.
+- **Initial latent state** via :meth:`~NoiseScheduler.init_latents`.
+- **Denoiser factory** via :meth:`~NoiseScheduler.get_denoiser`.
 
 .. code-block:: python
 
@@ -82,29 +82,33 @@ Following the framework's
 :ref:`design philosophy <diffusion_introduction>`, noise schedulers are
 available at three levels:
 
-**Protocol** (:class:`NoiseScheduler`) --- The minimal interface.  Any object
-that implements the six required methods can be used as a noise scheduler.
-This is the right choice for fully custom forward processes (e.g.,
-non-Gaussian, non-linear, discrete).
+- **Protocol** (:class:`NoiseScheduler`): The minimal interface.  Any object
+  that implements the six required methods can be used as a noise scheduler.
+  This is the right choice for fully custom forward processes (for example,
+  non-Gaussian, non-linear, discrete).
 
-**Abstract base class** (:class:`LinearGaussianNoiseScheduler`) --- For the
-common family of linear-Gaussian forward processes of the form
-:math:`\mathbf{x}(t) = \alpha(t)\,\mathbf{x}_0 + \sigma(t)\,\boldsymbol{\epsilon}`.
-This base class implements noise injection, score conversion, and denoiser
-construction.  Subclasses only need to define the schedule-specific quantities:
-:math:`\alpha(t)`, :math:`\sigma(t)`, their derivatives, the inverse mapping,
-and the discretization.
+- **Abstract base class** (:class:`LinearGaussianNoiseScheduler`): For the
+  common family of linear-Gaussian forward processes of the form
+  :math:`\mathbf{x}(t) = \alpha(t)\,\mathbf{x}_0 + \sigma(t)\,\boldsymbol{\epsilon}`.
+  This base class implements noise injection, score conversion, and denoiser
+  construction.  Subclasses only need to define the schedule-specific quantities:
 
-**Ready-to-use schedules** --- Five concrete implementations that work out of
-the box:
+  - the signal coefficient :math:`\alpha(t)`
+  - the noise level :math:`\sigma(t)`
+  - their time derivatives :math:`\dot{\alpha}(t)` and :math:`\dot{\sigma}(t)`
+  - the inverse mapping :math:`\sigma^{-1}(\sigma) = t` from noise level back to time
+  - the discretization of the diffusion time grid
 
-- :class:`EDMNoiseScheduler` --- :math:`\alpha(t)=1`,
-  :math:`\sigma(t)=t`.  The recommended default for most applications.
-- :class:`VENoiseScheduler` --- Variance Exploding schedule.
-- :class:`VPNoiseScheduler` --- Variance Preserving schedule.
-- :class:`IDDPMNoiseScheduler` --- Improved DDPM schedule.
-- :class:`StudentTEDMNoiseScheduler` --- EDM variant with Student-t noise
-  for heavy-tailed data.
+- **Ready-to-use schedules**: Five concrete implementations that work out of
+  the box:
+
+  - :class:`EDMNoiseScheduler` --- :math:`\alpha(t)=1`,
+    :math:`\sigma(t)=t`.  The recommended default for most applications.
+  - :class:`VENoiseScheduler` --- Variance Exploding schedule.
+  - :class:`VPNoiseScheduler` --- Variance Preserving schedule.
+  - :class:`IDDPMNoiseScheduler` --- Improved DDPM schedule.
+  - :class:`StudentTEDMNoiseScheduler` --- EDM variant with Student-t noise
+    for heavy-tailed data.
 
 
 API Reference

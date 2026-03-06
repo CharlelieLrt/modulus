@@ -117,7 +117,7 @@ factory, and in sampling:
 
 See the :class:`BaseAffinePreconditioner` docstring for additional examples,
 including how to write thin wrappers to adapt backbones with non-standard
-signatures (e.g., ``SongUNet``, ``DiT``) to the
+signatures (for example, ``SongUNet``, ``DiT``) to the
 :class:`~physicsnemo.diffusion.DiffusionModel` interface.
 
 

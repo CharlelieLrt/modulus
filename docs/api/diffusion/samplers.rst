@@ -90,7 +90,7 @@ A complete sampling workflow involves these steps:
    equation) by instantiating a
    :class:`~physicsnemo.diffusion.samplers.solvers.Solver` (see
    :ref:`Available Solvers <diffusion_available_solvers>`), or simply pass a
-   built-in string key (e.g., ``"heun"``) to :func:`sample`.
+   built-in string key (for example, ``"heun"``) to :func:`sample`.
 
 6. **Call** :func:`sample` to run the reverse diffusion loop.
 
@@ -107,8 +107,8 @@ wrapped with a thin adapter to match the
 preconditioning.
 
 The noise scheduler must generally be consistent between training and
-sampling---in particular, the same schedule *family* (e.g., EDM, VP)
-should be used.  Schedule parameters (e.g., ``sigma_min``, ``rho``) can
+sampling---in particular, the same schedule *family* (for example, EDM, VP)
+should be used.  Schedule parameters (for example, ``sigma_min``, ``rho``) can
 be adjusted at sampling time for experimentation, but the model was
 optimized for the training schedule, so large deviations may degrade
 sample quality.
@@ -225,7 +225,7 @@ wrapped with a thin adapter to match the
 Example: Conditional Sampling
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For conditional generation (e.g., super-resolution), the model backbone
+For conditional generation (for example, super-resolution), the model backbone
 processes both the noisy latent state and the conditioning input.  A common
 pattern is to concatenate the conditioning image along the channel dimension
 inside a thin adapter.  At sampling time, the conditioning is bound into the
@@ -268,7 +268,7 @@ predictor (:math:`P`) via ``functools.partial``.
     # --- Sampling ---
     precond.eval()
 
-    # Conditioning image (e.g., low-resolution input for super-resolution)
+    # Conditioning image (for example, low-resolution input for super-resolution)
     low_res = torch.randn(4, C_cond, res, res)
 
     # Bind condition into the predictor "P"

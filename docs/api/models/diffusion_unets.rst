@@ -186,7 +186,7 @@ lead-time information.
 PhysicsNeMo provides a specialized architecture
 :class:`~physicsnemo.models.diffusion_unets.SongUNetPosLtEmbd` that implements
 lead-time aware models.  It extends ``SongUNet`` with learnable positional
-embeddings and lead-time embeddings: in its forward pass, the model uses the
+embeddings and lead-time embeddings. In its forward pass, the model uses the
 ``lead_time_label`` parameter to retrieve the associated lead-time embeddings
 and conditions the diffusion process on those with a channel-wise concatenation
 to the latent state before the first UNet block.
@@ -252,13 +252,11 @@ outputs.
     out = model(x_cond, noise_labels, class_labels, lead_time_label=lead_time_label)
 
 .. note::
-    The ``SongUNetPosLtEmbd`` *is not* an autoregressive model that performs a rollout
-    to produce future predictions. From the point of view of the ``SongUNetPosLtEmbd``,
-    the lead-time information is *frozen*. The lead-time dependent latent state :math:`\mathbf{x}`
-    might however be produced by such an autoregressive/rollout model.
 
-.. note::
-
+   - The ``SongUNetPosLtEmbd`` *is not* an autoregressive model that performs a rollout
+     to produce future predictions. From the point of view of the ``SongUNetPosLtEmbd``,
+     the lead-time information is *frozen*. The lead-time dependent latent state :math:`\mathbf{x}`
+     might however be produced by such an autoregressive or rollout model.
    - The ``SongUNetPosLtEmbd`` model cannot be scaled to very long lead-time
      horizons (controlled by the ``lead_time_steps`` parameter). This is because
      the lead-time embeddings are represented by a grid of learnable parameters of
