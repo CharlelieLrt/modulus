@@ -245,6 +245,33 @@ def save_checkpoint(
         valid index, by default None
     metadata : Optional[Dict[str, Any]], optional
         Additional metadata to save, by default None
+
+    Examples
+    --------
+    Save a single PhysicsNeMo model together with optimizer and scheduler state:
+
+    >>> import tempfile, os, torch
+    >>> from physicsnemo.utils.checkpoint import save_checkpoint
+    >>> from physicsnemo.models.mlp import FullyConnected
+    >>> model = FullyConnected(in_features=32, out_features=64)
+    >>> optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    >>> scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
+    >>> with tempfile.TemporaryDirectory() as tmpdir:
+    ...     save_checkpoint(tmpdir, models=model, optimizer=optimizer,
+    ...                     scheduler=scheduler, epoch=0)
+    ...     # Verify that checkpoint files were created
+    ...     any(f.endswith('.mdlus') for f in os.listdir(tmpdir))
+    True
+
+    Save multiple models at once:
+
+    >>> model_a = FullyConnected(in_features=32, out_features=64)
+    >>> model_b = FullyConnected(in_features=64, out_features=10)
+    >>> with tempfile.TemporaryDirectory() as tmpdir:
+    ...     save_checkpoint(tmpdir, models=[model_a, model_b], epoch=0)
+    ...     mdlus_files = [f for f in os.listdir(tmpdir) if f.endswith('.mdlus')]
+    ...     len(mdlus_files)
+    2
     """
     protocol = fsspec.utils.get_protocol(path)
     fs = fsspec.filesystem(protocol)
@@ -361,6 +388,30 @@ def load_checkpoint(
     -------
     int
         Loaded epoch
+
+    Examples
+    --------
+    Save and then restore a model and optimizer from a checkpoint:
+
+    >>> import tempfile, torch
+    >>> from physicsnemo.utils.checkpoint import save_checkpoint, load_checkpoint
+    >>> from physicsnemo.models.mlp import FullyConnected
+    >>> model = FullyConnected(in_features=32, out_features=64)
+    >>> optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    >>> with tempfile.TemporaryDirectory() as tmpdir:
+    ...     save_checkpoint(tmpdir, models=model, optimizer=optimizer, epoch=0)
+    ...     epoch = load_checkpoint(tmpdir, models=model, optimizer=optimizer)
+    ...     epoch
+    0
+
+    Load a specific epoch:
+
+    >>> with tempfile.TemporaryDirectory() as tmpdir:
+    ...     save_checkpoint(tmpdir, models=model, epoch=0)
+    ...     save_checkpoint(tmpdir, models=model, epoch=1)
+    ...     epoch = load_checkpoint(tmpdir, models=model, epoch=0)
+    ...     epoch
+    0
     """
     fs = fsspec.filesystem(fsspec.utils.get_protocol(path))
     # Check if checkpoint directory exists
