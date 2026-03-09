@@ -115,49 +115,18 @@ PhysicsNeMo module.
             x = self.dec1(x2)
             return self.final(x)
 
-Now we show this model rewritten in PhysicsNeMo. First, let us subclass the model from
-:class:`~physicsnemo.core.module.Module` instead of ``torch.nn.Module``. The
-:class:`~physicsnemo.core.module.Module` class acts like a direct replacement for the
-``torch.nn.Module`` and provides additional functionality for
-:ref:`saving and loading checkpoints <saving-and-loading-physicsnemo-models>`,
-:ref:`model registry <physicsnemo-model-registry>`, and more.
-Refer to the :ref:`API docs <modules-api-reference>` of
-:class:`~physicsnemo.core.module.Module` for further details.
+
+To turn this into a PhysicsNeMo model, the only required change is to inherit
+from :class:`~physicsnemo.core.module.Module` instead of ``torch.nn.Module``:
 
 .. code:: python
 
     import physicsnemo
-    import torch.nn as nn
 
-    class UNet(physicsnemo.Module):  # inherit from physicsnemo.Module
+    class UNet(physicsnemo.Module):  # the only change
         def __init__(self, in_channels=1, out_channels=1):
             super().__init__()
-
-            self.enc1 = self.conv_block(in_channels, 64)
-            self.enc2 = self.conv_block(64, 128)
-
-            self.dec1 = self.upconv_block(128, 64)
-            self.final = nn.Conv2d(64, out_channels, kernel_size=1)
-
-        def conv_block(self, in_channels, out_channels):
-            return nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, 3, padding=1),
-                nn.ReLU(inplace=True),
-                nn.MaxPool2d(2)
-            )
-
-        def upconv_block(self, in_channels, out_channels):
-            return nn.Sequential(
-                nn.ConvTranspose2d(in_channels, out_channels, 2, stride=2),
-                nn.Conv2d(out_channels, out_channels, 3, padding=1),
-                nn.ReLU(inplace=True)
-            )
-
-        def forward(self, x):
-            x1 = self.enc1(x)
-            x2 = self.enc2(x1)
-            x = self.dec1(x2)
-            return self.final(x)
+            # ... same code as above ...
 
 
 .. _physicsnemo-models-from-torch:
