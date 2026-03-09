@@ -248,7 +248,7 @@ def save_checkpoint(
 
     Examples
     --------
-    Save a single PhysicsNeMo model together with optimizer and scheduler state:
+    Save a model together with optimizer and scheduler state:
 
     >>> import tempfile, os, torch
     >>> from physicsnemo.utils.checkpoint import save_checkpoint
@@ -258,20 +258,19 @@ def save_checkpoint(
     >>> scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
     >>> with tempfile.TemporaryDirectory() as tmpdir:
     ...     save_checkpoint(tmpdir, models=model, optimizer=optimizer,
-    ...                     scheduler=scheduler, epoch=0)
-    ...     # Verify that checkpoint files were created
-    ...     any(f.endswith('.mdlus') for f in os.listdir(tmpdir))
-    True
+    ...                     scheduler=scheduler, epoch=1)
+    ...     sorted(f for f in os.listdir(tmpdir))
+    ['FullyConnected.0.1.mdlus', 'checkpoint.0.1.pt']
 
-    Save multiple models at once:
+    Save at multiple epochs with additional metadata:
 
-    >>> model_a = FullyConnected(in_features=32, out_features=64)
-    >>> model_b = FullyConnected(in_features=64, out_features=10)
     >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     save_checkpoint(tmpdir, models=[model_a, model_b], epoch=0)
-    ...     mdlus_files = [f for f in os.listdir(tmpdir) if f.endswith('.mdlus')]
-    ...     len(mdlus_files)
-    2
+    ...     save_checkpoint(tmpdir, models=model, optimizer=optimizer, epoch=1,
+    ...                     metadata={"loss": 0.42, "experiment": "run_01"})
+    ...     save_checkpoint(tmpdir, models=model, optimizer=optimizer, epoch=2,
+    ...                     metadata={"loss": 0.31, "experiment": "run_01"})
+    ...     sorted(f for f in os.listdir(tmpdir))
+    ['FullyConnected.0.1.mdlus', 'FullyConnected.0.2.mdlus', 'checkpoint.0.1.pt', 'checkpoint.0.2.pt']
     """
     protocol = fsspec.utils.get_protocol(path)
     fs = fsspec.filesystem(protocol)
@@ -391,27 +390,36 @@ def load_checkpoint(
 
     Examples
     --------
-    Save and then restore a model and optimizer from a checkpoint:
+    Save and then restore a model, optimizer, and scheduler from a checkpoint:
 
     >>> import tempfile, torch
     >>> from physicsnemo.utils.checkpoint import save_checkpoint, load_checkpoint
     >>> from physicsnemo.models.mlp import FullyConnected
     >>> model = FullyConnected(in_features=32, out_features=64)
     >>> optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    >>> scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10)
     >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     save_checkpoint(tmpdir, models=model, optimizer=optimizer, epoch=0)
-    ...     epoch = load_checkpoint(tmpdir, models=model, optimizer=optimizer)
+    ...     save_checkpoint(tmpdir, models=model, optimizer=optimizer,
+    ...                     scheduler=scheduler, epoch=1)
+    ...     epoch = load_checkpoint(tmpdir, models=model, optimizer=optimizer,
+    ...                             scheduler=scheduler)
     ...     epoch
-    0
+    1
 
-    Load a specific epoch:
+    Load a specific epoch and retrieve saved metadata:
 
     >>> with tempfile.TemporaryDirectory() as tmpdir:
-    ...     save_checkpoint(tmpdir, models=model, epoch=0)
-    ...     save_checkpoint(tmpdir, models=model, epoch=1)
-    ...     epoch = load_checkpoint(tmpdir, models=model, epoch=0)
+    ...     save_checkpoint(tmpdir, models=model, optimizer=optimizer, epoch=1,
+    ...                     metadata={"loss": 0.42, "experiment": "run_01"})
+    ...     save_checkpoint(tmpdir, models=model, optimizer=optimizer, epoch=2,
+    ...                     metadata={"loss": 0.31, "experiment": "run_01"})
+    ...     meta = {}
+    ...     epoch = load_checkpoint(tmpdir, models=model, optimizer=optimizer,
+    ...                             epoch=1, metadata_dict=meta)
     ...     epoch
-    0
+    1
+    >>> meta["loss"]
+    0.42
     """
     fs = fsspec.filesystem(fsspec.utils.get_protocol(path))
     # Check if checkpoint directory exists
