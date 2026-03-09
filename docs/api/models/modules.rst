@@ -11,16 +11,18 @@ Basics
 
 PhysicsNeMo contains its own Module class for constructing neural networks. This class
 is built on top of PyTorch's ``nn.Module`` and can be used interchangeably within the
-PyTorch ecosystem. Using PhysicsNeMo modules allows you to leverage various features
-aimed at improving performance and ease of use. These features include, but are
-not limited to, automatic mixed-precision, CUDA Graphs, and easy
-:ref:`checkpointing <saving-and-loading-physicsnemo-models>`.
+PyTorch ecosystem. Using PhysicsNeMo modules allows you to leverage several features
+aimed at improving ease of use, including:
 
-In addition, PhysicsNeMo ships a collection of optimized model architectures (see
-:ref:`model-zoo`) that can be used off-the-shelf or composed into
-larger models with minimal boilerplate code. These architectures benefit from
-performance optimizations that are baked into the PhysicsNeMo package.
+- Portable :ref:`checkpointing <saving-and-loading-physicsnemo-models>` via
+  ``.mdlus`` files.
+- A global :ref:`model registry <physicsnemo-model-registry>` for discovering
+  and retrieving model classes by name.
+- :ref:`Backward compatibility <backward-compatibility>` tooling for evolving
+  model classes without breaking existing checkpoints.
 
+In addition, PhysicsNeMo ships a :ref:`model zoo <model-zoo>` of optimized
+architectures that can be used off-the-shelf or composed into larger models.
 We discuss each of these features in the following sections. For the full
 programmatic interface, see the :ref:`modules-api-reference` section at the
 bottom of this page.
@@ -35,6 +37,7 @@ PhysicsNeMo ships several optimized, customizable and easy-to-use model architec
 These include general-purpose models like Fourier Neural Operators (FNOs),
 ResNet, and Graph Neural Networks (GNNs) as well as domain-specific models like
 Deep Learning Weather Prediction (DLWP) and Spherical Fourier Neural Operators (SFNO).
+Many of these architectures include built-in performance optimizations.
 
 For a list of currently available models, please refer to the `models on GitHub <https://github.com/NVIDIA/physicsnemo/tree/main/physicsnemo/models>`_.
 
@@ -74,9 +77,9 @@ How to Write Your Own PhysicsNeMo Model
 
 There are a few different ways to construct a PhysicsNeMo model. If you are a seasoned
 PyTorch user, the easiest way would be to write your model using the optimized layers and
-utilities from PhysicsNeMo or Pytorch. Let's take a look at a simple example of a UNet model
-first showing a simple PyTorch implementation and then a PhysicsNeMo implementation that
-supports CUDA Graphs and Automatic Mixed-Precision.
+utilities from PhysicsNeMo or PyTorch. Let's take a look at a simple example of a UNet model
+first showing a simple PyTorch implementation and then the same model rewritten as a
+PhysicsNeMo module.
 
 .. code:: python
 
@@ -121,28 +124,14 @@ Now we show this model rewritten in PhysicsNeMo. First, let us subclass the mode
 Refer to the :ref:`API docs <modules-api-reference>` of
 :class:`~physicsnemo.core.module.Module` for further details.
 
-Additionally, we add a :class:`~physicsnemo.core.meta.ModelMetaData` dataclass
-to capture the optimizations that this model supports. In this case we enable
-CUDA Graphs and Automatic Mixed-Precision.
-
 .. code:: python
 
-    from dataclasses import dataclass
     import physicsnemo
     import torch.nn as nn
-    from physicsnemo.core.meta import ModelMetaData  # metadata for optimization hints
-
-    @dataclass
-    class UNetMetaData(ModelMetaData):
-        # Optimization
-        jit: bool = True
-        cuda_graphs: bool = True
-        amp_cpu: bool = True
-        amp_gpu: bool = True
 
     class UNet(physicsnemo.Module):  # inherit from physicsnemo.Module
         def __init__(self, in_channels=1, out_channels=1):
-            super(UNet, self).__init__(meta=UNetMetaData())  # pass metadata
+            super().__init__()
 
             self.enc1 = self.conv_block(in_channels, 64)
             self.enc2 = self.conv_block(64, 128)
@@ -170,15 +159,6 @@ CUDA Graphs and Automatic Mixed-Precision.
             x = self.dec1(x2)
             return self.final(x)
 
-.. note::
-    The :class:`~physicsnemo.core.meta.ModelMetaData` and
-    :class:`~physicsnemo.core.module.Module` do not make the model
-    support CUDA Graphs, AMP, etc. optimizations automatically. The user is responsible
-    for writing model code that enables each of these optimizations.
-    Models in the PhysicsNeMo :ref:`model zoo <model-zoo>` are
-    written to support many of these optimizations and checked against PhysicsNeMo's
-    CI to ensure that they work correctly.
-
 
 .. _physicsnemo-models-from-torch:
 
@@ -192,10 +172,8 @@ PhysicsNeMo features. To do this, use the
 
 .. code:: python
 
-    from dataclasses import dataclass
     import physicsnemo
     import torch.nn as nn
-    from physicsnemo.core.meta import ModelMetaData
 
     class TorchModel(nn.Module):
         def __init__(self):
@@ -207,38 +185,31 @@ PhysicsNeMo features. To do this, use the
             x = self.conv1(x)
             return self.conv2(x)
 
-    @dataclass
-    class ConvMetaData(ModelMetaData):
-        # Optimization
-        jit: bool = True
-        cuda_graphs: bool = True
-        amp_cpu: bool = True
-        amp_gpu: bool = True
-
     # from_torch returns a *class* (not an instance).
     # By default, the new class name matches the PyTorch class name ('TorchModel').
-    PhysicsNeMoModel = physicsnemo.Module.from_torch(TorchModel, meta=ConvMetaData())
+    PhysicsNeMoModel = physicsnemo.Module.from_torch(TorchModel)
     PhysicsNeMoModel.__name__  # 'TorchModel'
 
     # You can override the class name with the ``name`` parameter.
-    PhysicsNeMoModel = physicsnemo.Module.from_torch(
-        TorchModel, meta=ConvMetaData(), name="MyConvNet"
-    )
+    PhysicsNeMoModel = physicsnemo.Module.from_torch(TorchModel, name="MyConvNet")
     PhysicsNeMoModel.__name__  # 'MyConvNet'
 
     # Once instantiated, the result is a PhysicsNeMo Module whose class name
     # is the one specified above.
     model = PhysicsNeMoModel()
 
-To be able to later load this model with
-:meth:`~physicsnemo.core.module.Module.from_checkpoint`, the class must be
-registered in the :ref:`model registry <physicsnemo-model-registry>` by
-passing ``register=True``:
+Optionally, you can register the converted class in the
+:ref:`model registry <physicsnemo-model-registry>` by passing
+``register=True``. This is useful if you later want to load the model from a
+checkpoint by name, but it is not strictly required —
+:meth:`~physicsnemo.core.module.Module.from_checkpoint` can also resolve the
+class by its module path. You can achieve the same result by calling
+:meth:`~physicsnemo.core.registry.ModelRegistry.register` directly.
 
 .. code:: python
 
     PhysicsNeMoModel = physicsnemo.Module.from_torch(
-        TorchModel, meta=ConvMetaData(), name="MyConvNet", register=True
+        TorchModel, name="MyConvNet", register=True
     )
 
 **Importing Models from Third-Party Libraries**
@@ -250,7 +221,6 @@ The same approach works for models defined in third-party libraries such as
 .. code:: python
 
     import physicsnemo
-    from physicsnemo.core.meta import ModelMetaData
     import timm
 
     # Load a pre-trained model from timm
@@ -258,7 +228,7 @@ The same approach works for models defined in third-party libraries such as
 
     # Convert to a PhysicsNeMo Module class
     PNMResNet = physicsnemo.Module.from_torch(
-        TimmResNet, meta=ModelMetaData(), name="TimmResNet18", register=True
+        TimmResNet, name="TimmResNet18", register=True
     )
 
     # Instantiate as a PhysicsNeMo model
@@ -279,11 +249,11 @@ knowing its class or constructor arguments ahead of time.
 
 There are two ways to load from a ``.mdlus`` checkpoint:
 
-- **Into an already instantiated model** --- Use
+- **Into an already instantiated model**: use
    :meth:`~physicsnemo.core.module.Module.save` and
    :meth:`~physicsnemo.core.module.Module.load`, just like a regular PyTorch
    ``nn.Module``. This only transfers the weights (``state_dict``).
-- **Instantiate and load in one step** --- Use
+- **Instantiate and load in one step**: use
    :meth:`~physicsnemo.core.module.Module.from_checkpoint`. This resolves the
    class, creates the instance from the saved constructor arguments, and loads
    the weights. When the class is known ahead of time, calling
@@ -384,11 +354,10 @@ directly:
 
     import torch
     import physicsnemo
-    from physicsnemo.core.meta import ModelMetaData
 
     class EncoderModule(physicsnemo.Module):
         def __init__(self, input_size, hidden_size):
-            super().__init__(meta=ModelMetaData())
+            super().__init__()
             self.encoder = torch.nn.Linear(input_size, hidden_size)
             self.input_size = input_size
             self.hidden_size = hidden_size
@@ -398,7 +367,7 @@ directly:
 
     class DecoderModule(physicsnemo.Module):
         def __init__(self, hidden_size, output_size):
-            super().__init__(meta=ModelMetaData())
+            super().__init__()
             self.decoder = torch.nn.Linear(hidden_size, output_size)
             self.hidden_size = hidden_size
             self.output_size = output_size
@@ -408,7 +377,7 @@ directly:
 
     class AutoEncoder(physicsnemo.Module):
         def __init__(self, encoder, decoder):
-            super().__init__(meta=ModelMetaData())
+            super().__init__()
             self.encoder = encoder
             self.decoder = decoder
 
@@ -436,7 +405,6 @@ PyTorch modules must be converted:
 
     import torch.nn as nn
     import physicsnemo
-    from physicsnemo.core.meta import ModelMetaData
 
     # Define PyTorch modules
     class TorchEncoder(nn.Module):
@@ -460,17 +428,13 @@ PyTorch modules must be converted:
             return self.decoder(x)
 
     # Convert to PhysicsNeMo modules
-    PNMEncoder = physicsnemo.Module.from_torch(
-        TorchEncoder, meta=ModelMetaData()
-    )
-    PNMDecoder = physicsnemo.Module.from_torch(
-        TorchDecoder, meta=ModelMetaData()
-    )
+    PNMEncoder = physicsnemo.Module.from_torch(TorchEncoder)
+    PNMDecoder = physicsnemo.Module.from_torch(TorchDecoder)
 
     # Define top-level model
     class AutoEncoder(physicsnemo.Module):
         def __init__(self, encoder, decoder):
-            super().__init__(meta=ModelMetaData())
+            super().__init__()
             self.encoder = encoder
             self.decoder = decoder
 
@@ -497,7 +461,7 @@ You cannot directly pass a ``torch.nn.Module`` instance to a
     # This will NOT work and raise an error during save/load:
     class AutoEncoder(physicsnemo.Module):
         def __init__(self, encoder):
-            super().__init__(meta=ModelMetaData())
+            super().__init__()
             self.encoder = encoder  # encoder is a torch.nn.Module
 
     torch_encoder = TorchEncoder(input_size=64, hidden_size=32)
@@ -514,23 +478,23 @@ You cannot directly pass a ``torch.nn.Module`` instance to a
 Backward Compatibility
 ----------------------
 
-When evolving a model class over time --- for example, renaming the class,
-adding or removing constructor arguments --- you may still need to load
+When evolving a model class over time, for example, renaming the class,
+adding or removing constructor arguments, you may still need to load
 checkpoints that were saved with an older version of the class. PhysicsNeMo
 provides a versioning and argument-mapping system for this purpose.
 
 The key ingredients are:
 
-- **``__model_checkpoint_version__``** --- A version string (e.g. ``"0.2.0"``)
+- **``__model_checkpoint_version__``**: A version string (e.g. ``"0.2.0"``)
   on each :class:`~physicsnemo.core.module.Module` subclass. This is saved into
   every ``.mdlus`` file and compared at load time.
-- **``__supported_model_checkpoint_version__``** --- A dict mapping older
+- **``__supported_model_checkpoint_version__``**: A dict mapping older
   version strings to warning messages. If the checkpoint version is in this
   dict, loading proceeds (with a warning) instead of raising an error.
-- **``_backward_compat_arg_mapper``** --- A classmethod that transforms
+- **``_backward_compat_arg_mapper``**: A classmethod that transforms
   constructor arguments from an older version into the format expected by the
   current version.
-- **``_overridable_args``** and **``override_args``** --- Allow callers of
+- **``_overridable_args``** and **``override_args``**: Allow callers of
   :meth:`~physicsnemo.core.module.Module.from_checkpoint` to override specific
   constructor arguments at load time. Only arguments listed in
   ``_overridable_args`` can be overridden.
@@ -543,13 +507,12 @@ checkpoints exist:
 .. code:: python
 
     import physicsnemo
-    from physicsnemo.core.meta import ModelMetaData
 
     class MyModel(physicsnemo.Module):
         __model_checkpoint_version__ = "0.1.0"
 
         def __init__(self, img_channels, hidden_dim=64):
-            super().__init__(meta=ModelMetaData())
+            super().__init__()
             self.img_channels = img_channels
             self.hidden_dim = hidden_dim
             # ... model layers ...
@@ -588,7 +551,7 @@ load old checkpoints:
             return args
 
         def __init__(self, in_channels):
-            super().__init__(meta=ModelMetaData())
+            super().__init__()
             self.in_channels = in_channels
             # ... updated model layers ...
 
@@ -648,7 +611,7 @@ You can also register classes automatically when defining them by passing
 
     class MyModel(physicsnemo.Module, register=True):
         def __init__(self, hidden_dim=64):
-            super().__init__(meta=ModelMetaData())
+            super().__init__()
             self.hidden_dim = hidden_dim
 
         def forward(self, x):
@@ -696,7 +659,7 @@ registry by adding an entry point to your ``toml`` file:
    # mypackage/models.py
 
    import torch.nn as nn
-   from physicsnemo.core import Module, ModelMetaData
+   from physicsnemo.core import Module
 
    class MyModel(nn.Module):
        def __init__(self):
@@ -708,7 +671,7 @@ registry by adding an entry point to your ``toml`` file:
            x = self.conv1(x)
            return self.conv2(x)
 
-   MyPhysicsNeMoModel = Module.from_torch(MyModel, meta=ModelMetaData())
+   MyPhysicsNeMoModel = Module.from_torch(MyModel)
 
 
 Once this package is installed, you can access the model via the PhysicsNeMo model
