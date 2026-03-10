@@ -174,7 +174,7 @@ class MultiDiffusionMSEDSMLoss:
     ...         self.net = torch.nn.Conv2d(12, 3, 1)
     ...     def forward(self, x, t, condition=None):
     ...         img = condition["image"]
-    ...         # The wrapped model is designed to extract the postional embeddings
+    ...         # The wrapped model is designed to extract the positional embeddings
     ...         # from the condition TensorDict
     ...         pe = condition["positional_embedding"]
     ...         return self.net(torch.cat([x, img, pe], dim=1))
@@ -392,7 +392,7 @@ class MultiDiffusionWeightedMSEDSMLoss:
     ...         self.net = torch.nn.Conv2d(12, 3, 1)
     ...     def forward(self, x, t, condition=None):
     ...         img = condition["image"]
-    ...         # The wrapped model is designed to extract the postional embeddings
+    ...         # The wrapped model is designed to extract the positional embeddings
     ...         # from the condition TensorDict
     ...         pe = condition["positional_embedding"]
     ...         return self.net(torch.cat([x, img, pe], dim=1))
