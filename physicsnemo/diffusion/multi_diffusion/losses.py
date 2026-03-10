@@ -70,7 +70,15 @@ class MultiDiffusionMSEDSMLoss:
 
     The model **must** have a random patching strategy configured via
     :meth:`~MultiDiffusionModel2D.set_random_patching` before using this
-    loss. Patch positions are automatically re-drawn at every call.
+    loss.
+
+    .. note::
+
+        By default, each call to the loss **re-draws random patch positions**
+        via :meth:`~MultiDiffusionModel2D.reset_patch_indices`. This ensures
+        that every training step uses a fresh set of patches. Pass
+        ``reset_patch_indices=False`` to the call to disable this behaviour
+        (e.g., when patch positions are managed externally).
 
     .. note::
 
@@ -238,6 +246,7 @@ class MultiDiffusionMSEDSMLoss:
         self,
         x0: Float[Tensor, "B C H W"],
         condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
+        reset_patch_indices: bool = True,
     ) -> Float[Tensor, "P_times_B C Hp Wp"] | Float[Tensor, ""]:
         r"""Compute the multi-diffusion denoising score matching loss.
 
@@ -248,6 +257,10 @@ class MultiDiffusionMSEDSMLoss:
         condition : Tensor, TensorDict, or None, optional, default=None
             Conditioning information at global resolution (batch size
             :math:`B`).
+        reset_patch_indices : bool, default=True
+            If ``True``, re-draw random patch positions before computing
+            the loss. Set to ``False`` when patch positions are managed
+            externally.
 
         Returns
         -------
@@ -255,8 +268,8 @@ class MultiDiffusionMSEDSMLoss:
             If ``reduction="none"``, the per-element weighted loss of shape
             :math:`(P \times B, C, H_p, W_p)`. Otherwise a scalar tensor.
         """
-        # Re-draw random patch positions
-        self.model.reset_patch_indices()
+        if reset_patch_indices:
+            self.model.reset_patch_indices()
 
         # Patch x0 and sample per-patch noise
         x0_patched = self._compiled_patch_x(x0)  # (P*B, C, Hp, Wp)
@@ -300,6 +313,12 @@ class MultiDiffusionWeightedMSEDSMLoss:
     The model **must** have a random patching strategy configured via
     :meth:`~MultiDiffusionModel2D.set_random_patching` before using this
     loss.
+
+    .. note::
+
+        By default, each call to the loss **re-draws random patch positions**
+        via :meth:`~MultiDiffusionModel2D.reset_patch_indices`. Pass
+        ``reset_patch_indices=False`` to the call to disable this.
 
     .. note::
 
@@ -451,6 +470,7 @@ class MultiDiffusionWeightedMSEDSMLoss:
         x0: Float[Tensor, "B C H W"],
         weight: Float[Tensor, "B C H W"],
         condition: Float[Tensor, " B *cond_dims"] | TensorDict | None = None,
+        reset_patch_indices: bool = True,
     ) -> Float[Tensor, "P_times_B C Hp Wp"] | Float[Tensor, ""]:
         r"""Compute the weighted multi-diffusion DSM loss.
 
@@ -463,6 +483,10 @@ class MultiDiffusionWeightedMSEDSMLoss:
             ``x0``. Patched automatically alongside :math:`\mathbf{x}_0`.
         condition : Tensor, TensorDict, or None, optional, default=None
             Conditioning information at global resolution.
+        reset_patch_indices : bool, default=True
+            If ``True``, re-draw random patch positions before computing
+            the loss. Set to ``False`` when patch positions are managed
+            externally.
 
         Returns
         -------
@@ -477,8 +501,8 @@ class MultiDiffusionWeightedMSEDSMLoss:
                     f"x0 shape {tuple(x0.shape)}."
                 )
 
-        # Re-draw random patch positions
-        self.model.reset_patch_indices()
+        if reset_patch_indices:
+            self.model.reset_patch_indices()
 
         # Patch x0 and weight, then sample per-patch noise
         x0_patched = self._compiled_patch_x(x0)  # (P*B, C, Hp, Wp)
