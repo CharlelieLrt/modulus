@@ -19,11 +19,9 @@ import csv
 import os
 import shutil
 import sys
-import time as pytime
 from datetime import timedelta
 
 import numpy as np
-import xarray as xr
 import zarr
 from earth2studio.data import HRRR, HRRR_FX
 from loguru import logger
@@ -267,8 +265,8 @@ async def main():
     init_zarr_store(store, time, hrrr_variables)
 
     # Set start time
-    start_date = np.datetime64("2023-08-01T00:00:00")
-    end_date = np.datetime64("2024-01-01T00:00:00")
+    start_date = np.datetime64("2021-01-01T00:00:00")
+    end_date = np.datetime64("2021-06-01T00:00:00")
     sidx = np.where(time == start_date)[0][0]
     eidx = np.where(time == end_date)[0][0]
     step = 24 * 5  # 5-day batches (in hours)
@@ -281,12 +279,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-# start_date = np.datetime64("2024-04-01T00:00:00")
-# end_date = np.datetime64("2024-06-01T00:00:00")
-# sidx = np.where(time == start_date)[0][0]
-# eidx = np.where(time == end_date)[0][0]
-
-# # pull_hrrr_data(root, time[sidx:eidx+1], hrrr_variables, batch_size=12)
-# pull_hrrr_fx_data(root, time[sidx:eidx+1], hrrr_fx_variables, batch_size=12)

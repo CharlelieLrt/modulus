@@ -15,7 +15,6 @@
 # limitations under the License.
 
 import csv
-import os
 from collections import defaultdict
 from typing import Dict, List, Tuple
 

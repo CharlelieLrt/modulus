@@ -22,21 +22,24 @@ import numpy as np
 import torch
 import zarr
 from data import HRRRSurfaceDataset
-from nn import HRRRSurfaceDiffusionNet
+from tensordict import TensorDict
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data import DataLoader
 
-# TODO: replace with updated APIs once refactor is complete
-from utils import EDMLoss, EDMPreconditioner
-
-from physicsnemo.diffusion.multi_diffusion import RandomPatching2D
+from physicsnemo.core import Module
+from physicsnemo.diffusion.multi_diffusion import (
+    MultiDiffusionModel2D,
+    MultiDiffusionMSEDSMLoss,
+)
+from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+from physicsnemo.diffusion.preconditioners import EDMPreconditioner
+from physicsnemo.diffusion.utils import ConcatConditionWrapper
 from physicsnemo.diffusion.utils.utils import InfiniteSampler
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.distributed.utils import reduce_loss
-
-# TODO: update with base DiffusionUNet once refactor is complete
-from physicsnemo.models.diffusion_unets import SongUNetPosEmbd
+from physicsnemo.models.diffusion_unets import SongUNet
+from physicsnemo.nn import PositionalEmbedding
 from physicsnemo.utils import load_checkpoint, save_checkpoint
 from physicsnemo.utils.logging import PythonLogger, RankZeroLoggingWrapper
 
@@ -48,6 +51,59 @@ torch._dynamo.config.suppress_errors = False
 torch._logging.set_logs(recompiles=True, graph_breaks=True)
 
 
+class HRRRBackbone(Module):
+    """Backbone wrapping SongUNet via ConcatConditionWrapper with temporal
+    embedding for the HRRR surface diffusion model.
+
+    This wrapper sits between the preconditioner and the raw SongUNet backbone.
+    It consumes a TensorDict condition produced by MultiDiffusionModel2D and:
+    1. Embeds the scalar temporal conditioning via a learnable PositionalEmbedding.
+    2. Merges spatial conditioning with positional embeddings (from the
+       multi-diffusion wrapper) into a single concatenation tensor.
+    3. Delegates to ConcatConditionWrapper which concatenates the spatial data
+       to x and routes the temporal embedding vector to SongUNet's class_labels.
+
+    Parameters
+    ----------
+    unet : SongUNet
+        Plain SongUNet backbone (without positional embeddings).
+    time_embed_channels : int
+        Dimensionality of the temporal embedding vector. Must match
+        the ``label_dim`` of the SongUNet backbone.
+    """
+
+    def __init__(self, unet: SongUNet, time_embed_channels: int):
+        super().__init__()
+        self.concat_wrapper = ConcatConditionWrapper(unet)
+        self.time_embedding = PositionalEmbedding(
+            num_channels=time_embed_channels,
+            max_positions=365,
+            endpoint=True,
+            learnable=True,
+        )
+
+    def forward(self, x, t, condition=None, **model_kwargs):
+        if condition is None:
+            raise ValueError(
+                "HRRRBackbone requires a TensorDict condition with keys "
+                "'cond_concat' and 'cond_time'."
+            )
+
+        cond_time = condition["cond_time"]
+        ct_embed = self.time_embedding(cond_time.squeeze(-1))
+
+        cond_concat = condition["cond_concat"]
+        if "positional_embedding" in condition:
+            pos_embd = condition["positional_embedding"]
+            cond_concat = torch.cat([cond_concat, pos_embd], dim=1)
+
+        inner_cond = TensorDict(
+            {"cond_concat": cond_concat, "cond_vec": ct_embed},
+            batch_size=[x.shape[0]],
+        )
+        return self.concat_wrapper(x, t, condition=inner_cond, **model_kwargs)
+
+
 def main():
     # Configuration
     img_resolution = [1059, 1799]
@@ -55,6 +111,7 @@ def main():
     num_condition_channels = 3
     batch_size_per_gpu = 1
     num_patches_per_sample = 4
+    patch_shape = (448, 448)
     load_checkpoint_from_file = False
     checkpoint_dir = "./checkpoints"
     max_training_samples = 10000000
@@ -62,7 +119,7 @@ def main():
     validation_frequency = 1000
     num_validation_samples = 100
     logging_frequency = 1000
-    use_apex = True
+    use_apex = False
 
     # Initialize distributed environment
     DistributedManager.initialize()
@@ -74,42 +131,38 @@ def main():
     logger.logger.addHandler(logging.StreamHandler())
     rank_zero_logger = RankZeroLoggingWrapper(logger, dist)
 
-    # Setup patching
-    patching = RandomPatching2D(
-        img_shape=img_resolution,
-        patch_shape=(448, 448),
-        patch_num=num_patches_per_sample,
-    )
-
-    # Setup model
+    # ---- Model hierarchy ----
+    # SongUNet -> ConcatConditionWrapper (via HRRRBackbone)
+    #          -> EDMPreconditioner -> MultiDiffusionModel2D
     channel_mult = [1, 2, 2, 2, 2]
     num_grid_channels, time_embed_channels = 20, 8
-    model_backbone = HRRRSurfaceDiffusionNet(
-        img_resolution=img_resolution,
-        in_channels=img_channels
-        + num_condition_channels
-        + num_grid_channels
-        + time_embed_channels,
+
+    unet = SongUNet(
+        img_resolution=list(patch_shape),
+        in_channels=img_channels + num_condition_channels + num_grid_channels,
         out_channels=img_channels,
-        condition_channels=num_condition_channels,
-        time_embed_channels=time_embed_channels,
-        N_grid_channels=num_grid_channels,
-        gridtype="learnable",
+        label_dim=time_embed_channels,
         model_channels=128,
         channel_mult=channel_mult,
-        attn_resolutions=[img_resolution[0] >> len(channel_mult)],
+        attn_resolutions=[patch_shape[0] >> len(channel_mult)],
         use_apex_gn=use_apex,
     )
-    model = (
-        (
-            EDMPreconditioner(
-                model=model_backbone,
-                sigma_data=1.0,
-            )
-        )
-        .to(dist.device)
-        .to(memory_format=torch.channels_last)
+
+    backbone = HRRRBackbone(unet, time_embed_channels=time_embed_channels)
+    preconditioner = EDMPreconditioner(backbone, sigma_data=1.0)
+
+    md_model = MultiDiffusionModel2D(
+        model=preconditioner,
+        global_spatial_shape=(img_resolution[0], img_resolution[1]),
+        positional_embedding="learnable",
+        channels_positional_embedding=num_grid_channels,
+        condition_patch={"cond_concat": True},
     )
+    md_model.set_random_patching(
+        patch_shape=patch_shape, patch_num=num_patches_per_sample
+    )
+
+    model = md_model.to(dist.device).to(memory_format=torch.channels_last)
     rank_zero_logger.info(f"Training model with {model.num_parameters()} parameters.")
 
     # Setup DDP for multi-GPU training
@@ -141,7 +194,7 @@ def main():
         },
     )
     time_coord = root["time"][:]
-    sidx = np.where(time_coord == np.datetime64("2023-01-01T00:00:00"))[0][0]
+    sidx = np.where(time_coord == np.datetime64("2021-01-01T00:00:00"))[0][0]
     eidx = np.where(time_coord == np.datetime64("2024-12-31T23:00:00"))[0][0]
     time_idx = np.arange(sidx, eidx)
     dataset = HRRRSurfaceDataset(
@@ -166,7 +219,7 @@ def main():
     num_training_samples = len(dataset)
 
     sidx = np.where(time_coord == np.datetime64("2025-01-01T00:00:00"))[0][0]
-    eidx = np.where(time_coord == np.datetime64("2025-06-01T00:00:00"))[0][0]
+    eidx = np.where(time_coord == np.datetime64("2025-12-31T00:00:00"))[0][0]
     time_idx = np.arange(sidx, eidx, 25)
     dataset = HRRRSurfaceDataset(
         "s3://hrrr-surface-sda/zarr-v2",
@@ -189,12 +242,10 @@ def main():
     )
 
     # Create loss function with multi-diffusion support
-    loss_fn = EDMLoss(
+    noise_scheduler = EDMNoiseScheduler(P_mean=-0.8, P_std=1.6, sigma_data=1.0)
+    loss_fn = MultiDiffusionMSEDSMLoss(
         model=model,
-        P_mean=-0.8,
-        P_std=1.6,
-        sigma_data=1.0,
-        patching=patching,
+        noise_scheduler=noise_scheduler,
     )
 
     # Initialize optimizer
@@ -263,14 +314,17 @@ def main():
         cond_spatial = cond_spatial.to(dist.device, non_blocking=True).to(
             memory_format=torch.channels_last
         )
+        cond_time = cond_time.to(dist.device, non_blocking=True).float()
         batch_size = x.shape[0]
+
+        condition = TensorDict(
+            {"cond_concat": cond_spatial, "cond_time": cond_time},
+            batch_size=[batch_size],
+        )
 
         # Forward pass
         optimizer.zero_grad(**({} if use_apex else {"set_to_none": True}))
-        loss = loss_fn(
-            x,
-            {"cond_spatial": cond_spatial, "cond_time": cond_time},
-        ).mean()
+        loss = loss_fn(x, condition=condition)
 
         # Backward pass and optimize
         loss.backward()
@@ -324,12 +378,14 @@ def main():
                     cs = cs.to(dist.device, non_blocking=True).to(
                         memory_format=torch.channels_last
                     )
+                    ct = ct.to(dist.device, non_blocking=True).float()
                     batch_size = x.shape[0]
 
-                    val_loss = loss_fn(
-                        x,
-                        {"cond_spatial": cs, "cond_time": ct},
-                    ).mean()
+                    val_condition = TensorDict(
+                        {"cond_concat": cs, "cond_time": ct},
+                        batch_size=[batch_size],
+                    )
+                    val_loss = loss_fn(x, condition=val_condition)
                     mean_val_loss = reduce_loss(
                         val_loss.item() * batch_size, dst_rank=0
                     )
