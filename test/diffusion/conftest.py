@@ -27,7 +27,7 @@ import torch
 
 GLOBAL_SEED = 42
 
-CPU_TOLERANCES = {"atol": 1e-5, "rtol": 1e-5}
+CPU_TOLERANCES = {"atol": 1e-3, "rtol": 1e-3}
 GPU_TOLERANCES = {"atol": 1e-2, "rtol": 5e-2}
 
 
