@@ -64,8 +64,8 @@ def main():
     img_resolution = [1059, 1799]
     img_channels = 16
     num_condition_channels = 3
-    batch_size_per_gpu = 1
-    num_patches_per_sample = 4
+    batch_size_per_gpu = 8
+    num_patches_per_sample = 8
     patch_shape = (448, 448)
     load_checkpoint_from_file = args.load_checkpoint
     checkpoint_dir = args.checkpoint_dir
@@ -130,6 +130,17 @@ def main():
     # Compile model
     model = torch.compile(model)
 
+    # Determine resume point for the data sampler
+    current_samples_trained = 0
+    if load_checkpoint_from_file:
+        metadata = {}
+        load_checkpoint(checkpoint_dir, metadata_dict=metadata)
+        current_samples_trained = metadata.get("current_samples_trained", 0)
+        rank_zero_logger.info(
+            f"Resuming from samples trained: {current_samples_trained}"
+        )
+    sampler_start_idx = current_samples_trained // num_patches_per_sample
+
     # Create data loaders
     # Needs zarr 3.0
     root = zarr.open_group(
@@ -155,10 +166,16 @@ def main():
     train_iter = DataLoader(
         dataset,
         batch_size=batch_size_per_gpu,
-        sampler=InfiniteSampler(dataset=dataset, shuffle=True),
+        sampler=InfiniteSampler(
+            dataset=dataset,
+            shuffle=True,
+            rank=dist.rank,
+            num_replicas=dist.world_size,
+            start_idx=sampler_start_idx,
+        ),
         num_workers=8,
-        pin_memory=False,
-        drop_last=False,
+        pin_memory=True,
+        drop_last=True,
         timeout=0,
         prefetch_factor=4,
         persistent_workers=False,
@@ -168,7 +185,7 @@ def main():
     sidx = np.where(time_coord == np.datetime64("2025-01-01T00:00:00"))[0][0]
     eidx = np.where(time_coord == np.datetime64("2025-12-31T00:00:00"))[0][0]
     time_idx = np.arange(sidx, eidx, 25)
-    dataset = HRRRSurfaceDataset(
+    val_dataset = HRRRSurfaceDataset(
         "s3://hrrr-surface-sda/zarr-v2",
         time_idx,
         storage_options={
@@ -177,14 +194,19 @@ def main():
         },
     )
     val_iter = DataLoader(
-        dataset,
+        val_dataset,
         batch_size=batch_size_per_gpu,
-        sampler=InfiniteSampler(dataset=dataset, shuffle=False),
-        num_workers=2,
-        pin_memory=False,
-        drop_last=False,
+        sampler=InfiniteSampler(
+            dataset=val_dataset,
+            shuffle=True,
+            rank=dist.rank,
+            num_replicas=dist.world_size,
+        ),
+        num_workers=8,
+        pin_memory=True,
+        drop_last=True,
         timeout=0,
-        prefetch_factor=2,
+        prefetch_factor=4,
         persistent_workers=False,
     )
 
@@ -217,22 +239,15 @@ def main():
         eta_min=5e-6,
     )
 
-    # Load checkpoint if requested
-    current_samples_trained = 0
+    # Load optimizer/scheduler state from checkpoint
     if dist.world_size > 1:
         torch.distributed.barrier()
     if load_checkpoint_from_file:
-        metadata = {"current_samples_trained": current_samples_trained}
         load_checkpoint(
             checkpoint_dir,
             optimizer=optimizer,
             scheduler=scheduler,
             device=dist.device,
-            metadata_dict=metadata,
-        )
-        current_samples_trained = metadata["current_samples_trained"]
-        rank_zero_logger.info(
-            f"Resumed from samples trained: {current_samples_trained}"
         )
 
     # Training loop (batch-based with InfiniteSampler)
@@ -243,6 +258,7 @@ def main():
     n_loss_running_mean = 1
 
     total_batch_size = batch_size_per_gpu * dist.world_size * num_patches_per_sample
+    rank_zero_logger.info(f"Total batch size: {total_batch_size}")
 
     # Counters for periodic tasks
     samples_since_scheduler_update = 0
