@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import asyncio
 import csv
 import datetime
 import os
@@ -119,40 +118,31 @@ class HRRRSurfaceDataset(Dataset):
     def __len__(self):
         return self.idx.shape[0]
 
-    async def _zarr_read(
-        self,
-        root,
-        array_name: str,
-        array_idx: int,
-        time_idx: int,
-        data_arrays: np.array,
-    ):
-        arr = await root.get(array_name)
-        arr = await arr.getitem((time_idx, slice(None), slice(None)))
-        if array_name in self.LOG_VARIABLES:
-            data_arrays[array_idx] = np.log(arr + self.EPSILON)
-        else:
-            data_arrays[array_idx] = arr
+    def _get_root(self):
+        if not hasattr(self, "_root_cache"):
+            self._root_cache = zarr.open_group(
+                store=self.zarr_url, mode="r", storage_options=self.storage_options
+            )
+        return self._root_cache
 
-    async def _get_array(self, idx):
-        root = await zarr.api.asynchronous.open_group(
-            self.zarr_url, mode="r", storage_options=self.storage_options
-        )
-
+    def _get_array(self, idx):
+        root = self._get_root()
         time_idx = self.idx[idx]
         data_arrays = np.empty(
             (len(self.VARIABLES), self.grid_lat.shape[0], self.grid_lat.shape[1])
         )
-        jobs = []
-        for i, t in enumerate(self.VARIABLES):
-            jobs.append(self._zarr_read(root, t, i, time_idx, data_arrays))
-        await asyncio.gather(*jobs)
+        for i, var in enumerate(self.VARIABLES):
+            arr = root[var][time_idx, :, :]
+            if var in self.LOG_VARIABLES:
+                data_arrays[i] = np.log(arr + self.EPSILON)
+            else:
+                data_arrays[i] = arr
         return data_arrays
 
     def __getitem__(self, idx):
         time_idx = self.idx[idx]
         time_stamp = self.time_array[time_idx]
-        data_arrays = asyncio.run(self._get_array(idx))
+        data_arrays = self._get_array(idx)
 
         target = torch.Tensor(data_arrays)
         target = (target - self.target_means) / self.target_stds
