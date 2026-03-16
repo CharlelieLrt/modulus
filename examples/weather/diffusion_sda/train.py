@@ -163,22 +163,24 @@ def main():
             "profile": "physicsnemo",
         },
     )
-    train_iter = DataLoader(
-        dataset,
-        batch_size=batch_size_per_gpu,
-        sampler=InfiniteSampler(
-            dataset=dataset,
-            shuffle=True,
-            rank=dist.rank,
-            num_replicas=dist.world_size,
-            start_idx=sampler_start_idx,
-        ),
-        num_workers=8,
-        pin_memory=True,
-        drop_last=True,
-        timeout=0,
-        prefetch_factor=4,
-        persistent_workers=False,
+    train_iter = iter(
+        DataLoader(
+            dataset,
+            batch_size=batch_size_per_gpu,
+            sampler=InfiniteSampler(
+                dataset=dataset,
+                shuffle=True,
+                rank=dist.rank,
+                num_replicas=dist.world_size,
+                start_idx=sampler_start_idx,
+            ),
+            num_workers=8,
+            pin_memory=True,
+            drop_last=True,
+            timeout=0,
+            prefetch_factor=4,
+            persistent_workers=False,
+        )
     )
     num_training_samples = len(dataset)
 
@@ -193,21 +195,23 @@ def main():
             "profile": "physicsnemo",
         },
     )
-    val_iter = DataLoader(
-        val_dataset,
-        batch_size=batch_size_per_gpu,
-        sampler=InfiniteSampler(
-            dataset=val_dataset,
-            shuffle=True,
-            rank=dist.rank,
-            num_replicas=dist.world_size,
-        ),
-        num_workers=8,
-        pin_memory=True,
-        drop_last=True,
-        timeout=0,
-        prefetch_factor=4,
-        persistent_workers=False,
+    val_iter = iter(
+        DataLoader(
+            val_dataset,
+            batch_size=batch_size_per_gpu,
+            sampler=InfiniteSampler(
+                dataset=val_dataset,
+                shuffle=True,
+                rank=dist.rank,
+                num_replicas=dist.world_size,
+            ),
+            num_workers=8,
+            pin_memory=True,
+            drop_last=True,
+            timeout=0,
+            prefetch_factor=4,
+            persistent_workers=False,
+        )
     )
 
     # Create loss function with multi-diffusion support
