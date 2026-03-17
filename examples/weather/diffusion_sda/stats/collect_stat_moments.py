@@ -35,7 +35,7 @@ def pick_random_index_for_day(time: np.ndarray, day: np.datetime64) -> int:
 def compute_stats_for_index(
     root: zarr.group, variables: List[str], idx: int
 ) -> List[Tuple[str, float, float]]:
-    """Compute nanmean and nanstd for each variable at time index idx."""
+    """Compute spatial sum and sum-of-squares for each variable at time index idx."""
     results: List[Tuple[str, float, float]] = []
     print(f"Fetching times for index {idx}")
     for var in variables:
@@ -97,14 +97,14 @@ def main() -> None:
         stats = compute_stats_for_index(root, variables, idx)
         with open(output_path, "a", newline="") as f:
             writer = csv.writer(f)
-            for var, mean_val, std_val in stats:
+            for var, sum_x, sum_x2 in stats:
                 writer.writerow(
                     [
                         str(day),
                         np.datetime_as_string(ts, unit="s"),
                         var,
-                        f"{mean_val:.16g}",
-                        f"{std_val:.16g}",
+                        f"{sum_x:.16g}",
+                        f"{sum_x2:.16g}",
                     ]
                 )
 

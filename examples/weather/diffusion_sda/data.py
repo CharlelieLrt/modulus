@@ -82,7 +82,8 @@ class HRRRSurfaceDataset(Dataset):
         if np.any(out_of_bounds_mask):
             invalid_values = np.unique(self.idx[out_of_bounds_mask])
             raise IndexError(
-                "time_indices contain out-of-bounds values for zarr_root['time']"
+                f"time_indices contain out-of-bounds values for zarr_root['time'] "
+                f"(n_time={n_time}): {invalid_values}"
             )
 
         # Load normalization stats and log-scaling flags from summary_stats.csv
