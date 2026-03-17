@@ -305,13 +305,13 @@ def main():
 
         mean_loss = reduce_loss(loss.item() * batch_size, dst_rank=0)
 
-        # Update running mean of loss
+        # Update running mean of loss (only meaningful on rank 0)
         if dist.rank == 0:
             loss_running_mean += (
                 mean_loss / total_batch_size - loss_running_mean
             ) / n_loss_running_mean
             n_loss_running_mean += 1
-            current_samples_trained += total_batch_size
+        current_samples_trained += total_batch_size
 
         # Update scheduler periodically
         samples_since_scheduler_update += total_batch_size
