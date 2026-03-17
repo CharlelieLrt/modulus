@@ -98,6 +98,7 @@ def main():
         num_grid_channels=num_grid_channels,
         time_embed_channels=time_embed_channels,
         use_apex_gn=use_apex,
+        amp_mode=True,
     )
     preconditioner = EDMPreconditioner(backbone, sigma_data=1.0)
 

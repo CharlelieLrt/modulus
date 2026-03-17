@@ -60,6 +60,10 @@ class HRRRUnconditionalUNet(Module):
         Per-level channel multipliers, by default ``[1, 2, 2, 2, 2]``.
     use_apex_gn : bool, optional
         Whether to use Apex fused group-norm kernels, by default ``False``.
+    amp_mode : bool, optional
+        Whether mixed-precision (AMP) training is enabled, by default ``False``.
+        Propagated to the internal
+        :class:`~physicsnemo.models.diffusion_unets.SongUNet`.
 
     Forward
     -------
@@ -90,7 +94,8 @@ class HRRRUnconditionalUNet(Module):
         model_channels: int = 128,
         channel_mult: List[int] = [1, 2, 2, 2, 2],
         use_apex_gn: bool = False,
-    ):
+        amp_mode: bool = False,
+    ) -> None:
         super().__init__()
         self.unet = SongUNet(
             img_resolution=list(img_resolution),
@@ -101,6 +106,7 @@ class HRRRUnconditionalUNet(Module):
             channel_mult=channel_mult,
             attn_resolutions=[img_resolution[0] >> len(channel_mult)],
             use_apex_gn=use_apex_gn,
+            amp_mode=amp_mode,
         )
         self.time_embedding = PositionalEmbedding(
             num_channels=time_embed_channels,
