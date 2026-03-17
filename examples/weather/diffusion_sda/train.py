@@ -64,8 +64,8 @@ def main():
     img_resolution = [1059, 1799]
     img_channels = 16
     num_condition_channels = 3
-    batch_size_per_gpu = 8
-    num_patches_per_sample = 8
+    batch_size_per_gpu = 1
+    num_patches_per_sample = 4
     patch_shape = (448, 448)
     load_checkpoint_from_file = args.load_checkpoint
     checkpoint_dir = args.checkpoint_dir
@@ -74,7 +74,7 @@ def main():
     validation_frequency = 1000
     num_validation_samples = 100
     logging_frequency = 1000
-    use_apex = False
+    use_apex = True
 
     # Set seeds for reproducibility
     seed = 1234
