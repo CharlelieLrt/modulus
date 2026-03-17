@@ -16,7 +16,6 @@
 
 import argparse
 import importlib
-import logging
 import random
 import time
 
@@ -88,8 +87,6 @@ def main():
 
     # Setup logging
     logger = PythonLogger("main")
-    logger.logger.setLevel("INFO")
-    logger.logger.addHandler(logging.StreamHandler())
     rank_zero_logger = RankZeroLoggingWrapper(logger, dist)
 
     # Setup model
@@ -297,7 +294,8 @@ def main():
 
         # Forward pass
         optimizer.zero_grad(**({} if use_apex else {"set_to_none": True}))
-        loss = loss_fn(x, condition=condition)
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            loss = loss_fn(x, condition=condition)
 
         # Backward pass and optimize
         loss.backward()
@@ -358,7 +356,8 @@ def main():
                         {"cond_concat": cs, "cond_time": ct},
                         batch_size=[batch_size],
                     )
-                    val_loss = loss_fn(x, condition=val_condition)
+                    with torch.autocast("cuda", dtype=torch.bfloat16):
+                        val_loss = loss_fn(x, condition=val_condition)
                     mean_val_loss = reduce_loss(
                         val_loss.item() * batch_size, dst_rank=0
                     )
