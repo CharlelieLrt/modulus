@@ -85,7 +85,7 @@ class HRRRSurfaceDataset(Dataset):
                 "time_indices contain out-of-bounds values for zarr_root['time']"
             )
 
-        # Load normalization stats from stats.csv (stores variance, not std)
+        # Load normalization stats and log-scaling flags from summary_stats.csv
         stats_csv = os.path.join(os.path.dirname(__file__), stats_csv)
         means = []
         stds = []
@@ -186,8 +186,13 @@ if __name__ == "__main__":
 
     time_idx = np.arange(sidx, eidx)
 
-    dataset = HRRRSurfaceDataset(root, time_idx)
-    cond, target = dataset[30]
+    dataset = HRRRSurfaceDataset(
+        "s3://hrrr-surface-sda/zarr-v2",
+        time_idx,
+        storage_options={"endpoint_url": "https://pdx.s8k.io"},
+    )
+    target, cond_spatial, cond_time = dataset[30]
 
-    print(cond.shape)
-    print(target)
+    print(target.shape)
+    print(cond_spatial.shape)
+    print(cond_time)
