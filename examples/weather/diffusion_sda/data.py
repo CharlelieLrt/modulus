@@ -78,13 +78,14 @@ class HRRRSurfaceDataset(Dataset):
             store=self.zarr_url, mode="r", storage_options=self.storage_options
         )
         n_time = _root["time"].size
-        if np.any((self.idx < 0) | (self.idx >= n_time)):
+        out_of_bounds_mask = (self.idx < 0) | (self.idx >= n_time)
+        if np.any(out_of_bounds_mask):
             invalid_values = np.unique(self.idx[out_of_bounds_mask])
             raise IndexError(
                 "time_indices contain out-of-bounds values for zarr_root['time']"
             )
 
-        # Load normalization stats and log-scaling flags from summary_stats.csv
+        # Load normalization stats from stats.csv (stores variance, not std)
         stats_csv = os.path.join(os.path.dirname(__file__), stats_csv)
         means = []
         stds = []
@@ -94,14 +95,14 @@ class HRRRSurfaceDataset(Dataset):
             for row in reader:
                 var = row.get("variable")
                 mu = float(row.get("mean", "nan"))
-                sd = float(row.get("std", "nan"))
-                stats_map[var] = (mu, sd)
+                variance = float(row.get("variance", "nan"))
+                stats_map[var] = (mu, variance)
 
-        # Order based on VARIABLES
+        # Order based on VARIABLES; convert variance -> std
         for var in self.VARIABLES:
-            mu, sd = stats_map[var]
+            mu, variance = stats_map[var]
             means.append(mu)
-            stds.append(sd)
+            stds.append(np.sqrt(variance))
 
         # Instance-level overrides for normalization and log variables
         self.target_means = (

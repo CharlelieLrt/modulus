@@ -34,13 +34,13 @@ def read_daily_stats(csv_path: str) -> Dict[str, List[Tuple[float, float]]]:
     return grouped
 
 
-def pooled_mean_std(
+def pooled_mean_variance(
     entries: List[Tuple[float, float]], n_per_entry: int
 ) -> Tuple[float, float, int]:
-    """Compute pooled mean/std across entries with equal sample size per entry.
+    """Compute pooled mean/variance across entries with equal sample size per entry.
 
-    - entries: list of (mean_i, std_i) where each statistic was computed over n_per_entry samples
-    - returns: (mean, std, total_samples)
+    - entries: list of (sum_x_i, sum_x2_i) where each statistic was computed over n_per_entry samples
+    - returns: (mean, variance, total_samples)
     """
     if not entries:
         return float("nan"), float("nan"), 0
@@ -51,11 +51,9 @@ def pooled_mean_std(
     k = int(len(entries))
     total_n = n * k
 
-    # Mean
     mu = np.sum(x) / total_n
-    # Standard dev
-    std = np.sum(x2) / total_n - mu**2
-    return mu, std, total_n
+    variance = np.sum(x2) / total_n - mu**2
+    return mu, variance, total_n
 
 
 def main() -> None:
@@ -70,16 +68,18 @@ def main() -> None:
     out_path = "stats.csv"
     with open(out_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["variable", "log_scale", "n_samples", "mean", "std", "eps"])
+        writer.writerow(
+            ["variable", "log_scale", "n_samples", "mean", "variance", "eps"]
+        )
         for var, stats in sorted(grouped.items()):
-            mu, sd, total_n = pooled_mean_std(stats, n_grid)
+            mu, var_val, total_n = pooled_mean_variance(stats, n_grid)
             writer.writerow(
                 [
                     var,
                     (var in ["tp", "aerot"]),
                     f"{total_n:.16g}",
                     f"{mu:.16g}",
-                    f"{sd:.16g}",
+                    f"{var_val:.16g}",
                     1e-8,
                 ]
             )
