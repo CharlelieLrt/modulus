@@ -150,13 +150,20 @@ class BasePatching2D(torch.nn.Module, ABC):
     def _compute_global_index(self) -> Int[Tensor, "P 2 Hp Wp"]:
         r"""Compute the global-index tensor from current patch positions.
 
+        The ``global_index`` tensor is created and computed on the same device
+        as ``patch_indices`` (if the buffer exists) to avoid cross-device
+        indexing errors.
+
         Returns
         -------
         Tensor
             Integer tensor of shape :math:`(P, 2, H_p, W_p)`.
         """
-        Ny = torch.arange(self.img_shape[0]).int()
-        Nx = torch.arange(self.img_shape[1]).int()
+        device = None
+        if hasattr(self, "patch_indices") and isinstance(self.patch_indices, Tensor):
+            device = self.patch_indices.device
+        Ny = torch.arange(self.img_shape[0], device=device).int()
+        Nx = torch.arange(self.img_shape[1], device=device).int()
         grid = torch.stack(torch.meshgrid(Ny, Nx, indexing="ij"), dim=0).unsqueeze(
             0
         )  # (1, 2, H, W)
@@ -240,7 +247,8 @@ class RandomPatching2D(BasePatching2D):
     def reset_patch_indices(self) -> None:
         r"""Re-draw random upper-left corner positions for all patches.
 
-        Also refreshes the cached ``_global_index`` buffer.
+        The cached ``_global_index`` buffer is invalidated and will be
+        lazily recomputed on the next call to :meth:`global_index`.
         """
         has_buffer = hasattr(self, "patch_indices") and isinstance(
             self.patch_indices, Tensor
@@ -252,7 +260,7 @@ class RandomPatching2D(BasePatching2D):
         # TODO: use torch.randint instead of random.randint to create
         # patch indices directly on right device. Note: this will break
         # non-regression tests because torch.randint and random.randint do not
-        # use the same random number generation process. But for an object taht
+        # use the same random number generation process. But for an object that
         # is deliberately designed to be random, breaking these non-regression
         # tests might not be a problem.
         new_indices = torch.tensor(
@@ -269,16 +277,41 @@ class RandomPatching2D(BasePatching2D):
         else:
             self.register_buffer("patch_indices", new_indices, persistent=False)
 
-        # Refresh cached global index
-        new_global_index = self._compute_global_index()
-        if (
-            hasattr(self, "_global_index")
-            and isinstance(self._global_index, Tensor)
-            and new_global_index.shape == self._global_index.shape
-        ):
-            self._global_index.copy_(new_global_index)
-        else:
-            self.register_buffer("_global_index", new_global_index, persistent=False)
+        self._global_index_needs_update = True
+
+    def global_index(
+        self, batch_size: int = 1, device: Union[torch.device, str] = "cpu"
+    ) -> Int[Tensor, "P 2 Hp Wp"]:
+        r"""Return global :math:`(y, x)` grid coordinates for each patch.
+        Recomputes lazily if patch positions have changed since the last call.
+
+        Parameters
+        ----------
+        batch_size : int, default=1
+            Kept for backward compatibility. Ignored.
+        device : Union[torch.device, str], default="cpu"
+            Kept for backward compatibility. The buffer follows the module
+            device (use ``.to(device)`` to move the module).
+
+        Returns
+        -------
+        Tensor
+            Integer tensor of shape :math:`(P, 2, H_p, W_p)`.
+        """
+        if self._global_index_needs_update:
+            new_global_index = self._compute_global_index()
+            if (
+                hasattr(self, "_global_index")
+                and isinstance(self._global_index, Tensor)
+                and new_global_index.shape == self._global_index.shape
+            ):
+                self._global_index.copy_(new_global_index)
+            else:
+                self.register_buffer(
+                    "_global_index", new_global_index, persistent=False
+                )
+            self._global_index_needs_update = False
+        return self._global_index.clone()
 
     def forward(
         self,
