@@ -223,6 +223,7 @@ def main():
     loss_fn = MultiDiffusionMSEDSMLoss(
         model=model,
         noise_scheduler=noise_scheduler,
+        compile_patching=False,
     )
 
     # Initialize optimizer
