@@ -17,6 +17,7 @@
 import argparse
 import importlib
 import logging
+import random
 import time
 
 import numpy as np
@@ -75,6 +76,11 @@ def main():
     num_validation_samples = 100
     logging_frequency = 1000
     use_apex = False
+
+    # Set seeds for reproducibility
+    seed = 1234
+    random.seed(seed)
+    torch.manual_seed(seed)
 
     # Initialize distributed environment
     DistributedManager.initialize()
