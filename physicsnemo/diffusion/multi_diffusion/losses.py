@@ -52,17 +52,27 @@ def _unwrap_multi_diffusion(model: torch.nn.Module) -> MultiDiffusionModel2D:
 
 
 class _CompiledPatchX:
-    """Cached ``torch.compile``-d wrapper around
+    """Optionally compiled wrapper around
     :meth:`~MultiDiffusionModel2D.patch_x`.
 
-    A separate compiled graph is cached per unique tensor signature
-    (shape, dtype, device) so that calls with different shapes do not
-    trigger recompilation.
+    When ``compile=True`` (default), a separate ``torch.compile``-d graph is
+    cached per unique tensor signature (shape, dtype, device) so that calls
+    with different shapes do not trigger recompilation.
+
+    When ``compile=False``, ``patch_x`` is called in eager mode.
     """
 
-    def __init__(self, model: MultiDiffusionModel2D, *, maxsize: int = 8) -> None:
+    def __init__(
+        self,
+        model: MultiDiffusionModel2D,
+        *,
+        compile: bool = True,
+        maxsize: int = 8,
+    ) -> None:
         self._model = model
-        self._cache = lru_cache(maxsize=maxsize)(self._compile_for_sig)
+        self._compile = compile
+        if compile:
+            self._cache = lru_cache(maxsize=maxsize)(self._compile_for_sig)
 
     @staticmethod
     def _sig(t: Tensor) -> Tuple:
@@ -76,6 +86,8 @@ class _CompiledPatchX:
         return torch.compile(self._patch_x)
 
     def __call__(self, x: Tensor) -> Tensor:
+        if not self._compile:
+            return self._model.patch_x(x)
         fn = self._cache(self._sig(x))
         return fn(self._model, x)
 
@@ -128,6 +140,8 @@ class MultiDiffusionMSEDSMLoss:
         ``prediction_type="score"``.
     reduction : Literal["none", "mean", "sum"], default="mean"
         Reduction applied to the output.
+    compile_patching : bool, default=True
+        Whether to ``torch.compile`` the patching operation.
 
     Examples
     --------
@@ -234,11 +248,14 @@ class MultiDiffusionMSEDSMLoss:
         ]
         | None = None,
         reduction: Literal["none", "mean", "sum"] = "mean",
+        compile_patching: bool = True,
     ) -> None:
         self.model = model
         self._md_model = _unwrap_multi_diffusion(model)
         self.noise_scheduler = noise_scheduler
-        self._compiled_patch_x = _CompiledPatchX(self._md_model)
+        self._compiled_patch_x = _CompiledPatchX(
+            self._md_model, compile=compile_patching
+        )
 
         if prediction_type == "x0":
             self._to_x0 = lambda prediction, x_t, t: prediction
@@ -368,6 +385,8 @@ class MultiDiffusionWeightedMSEDSMLoss:
         :math:`\hat{\mathbf{x}}_0` estimate.
     reduction : {"none", "mean", "sum"}, default="mean"
         Reduction applied to the output.
+    compile_patching : bool, default=True
+        Whether to ``torch.compile`` the patching operation.
 
     Examples
     --------
@@ -458,11 +477,14 @@ class MultiDiffusionWeightedMSEDSMLoss:
         ]
         | None = None,
         reduction: Literal["none", "mean", "sum"] = "mean",
+        compile_patching: bool = True,
     ) -> None:
         self.model = model
         self._md_model = _unwrap_multi_diffusion(model)
         self.noise_scheduler = noise_scheduler
-        self._compiled_patch_x = _CompiledPatchX(self._md_model)
+        self._compiled_patch_x = _CompiledPatchX(
+            self._md_model, compile=compile_patching
+        )
 
         if prediction_type == "x0":
             self._to_x0 = lambda prediction, x_t, t: prediction
