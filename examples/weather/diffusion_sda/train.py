@@ -116,6 +116,12 @@ def main():
     model = md_model.to(dist.device).to(memory_format=torch.channels_last)
     rank_zero_logger.info(f"Training model with {model.num_parameters()} parameters.")
 
+    if load_checkpoint_from_file:
+        load_checkpoint(checkpoint_dir, models=model)
+
+    # Compile inner model before DDP (recommended by PyTorch docs)
+    model = torch.compile(model)
+
     # Setup DDP for multi-GPU training
     if dist.world_size > 1:
         model = DistributedDataParallel(
@@ -128,11 +134,6 @@ def main():
             gradient_as_bucket_view=True,
             static_graph=True,
         )
-    if load_checkpoint_from_file:
-        load_checkpoint(checkpoint_dir, models=model)
-
-    # Compile model
-    model = torch.compile(model)
 
     # Determine resume point for the data sampler
     current_samples_trained = 0
@@ -223,7 +224,6 @@ def main():
     loss_fn = MultiDiffusionMSEDSMLoss(
         model=model,
         noise_scheduler=noise_scheduler,
-        compile_patching=False,
     )
 
     # Initialize optimizer
