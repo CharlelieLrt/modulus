@@ -16,6 +16,7 @@
 
 import argparse
 import importlib
+import logging
 import random
 import time
 
@@ -87,6 +88,8 @@ def main():
 
     # Setup logging
     logger = PythonLogger("main")
+    logger.logger.setLevel(logging.INFO)
+    logger.logger.addHandler(logging.StreamHandler())
     rank_zero_logger = RankZeroLoggingWrapper(logger, dist)
 
     # Setup model
