@@ -17,7 +17,6 @@
 """Utilities for multi-diffusion (patching and fusion)."""
 
 import math
-import random
 import warnings
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Union
@@ -244,11 +243,20 @@ class RandomPatching2D(BasePatching2D):
         self._patch_num = value
         self.reset_patch_indices()
 
-    def reset_patch_indices(self) -> None:
+    def reset_patch_indices(
+        self,
+        *,
+        generator: torch.Generator | None = None,
+    ) -> None:
         r"""Re-draw random upper-left corner positions for all patches.
 
         The cached ``_global_index`` buffer is invalidated and will be
         lazily recomputed on the next call to :meth:`global_index`.
+
+        Parameters
+        ----------
+        generator : torch.Generator, optional
+            Pseudo-random number generator for reproducible sampling.
         """
         has_buffer = hasattr(self, "patch_indices") and isinstance(
             self.patch_indices, Tensor
@@ -257,20 +265,24 @@ class RandomPatching2D(BasePatching2D):
 
         max_y = self.img_shape[0] - self.patch_shape[0]
         max_x = self.img_shape[1] - self.patch_shape[1]
-        # TODO: use torch.randint instead of random.randint to create
-        # patch indices directly on right device. Note: this will break
-        # non-regression tests because torch.randint and random.randint do not
-        # use the same random number generation process. But for an object that
-        # is deliberately designed to be random, breaking these non-regression
-        # tests might not be a problem.
-        new_indices = torch.tensor(
-            [
-                (random.randint(0, max_y), random.randint(0, max_x))
-                for _ in range(self.patch_num)
-            ],
+
+        py = torch.randint(
+            0,
+            max_y + 1,
+            (self.patch_num,),
             dtype=torch.long,
             device=device,
+            generator=generator,
         )
+        px = torch.randint(
+            0,
+            max_x + 1,
+            (self.patch_num,),
+            dtype=torch.long,
+            device=device,
+            generator=generator,
+        )
+        new_indices = torch.stack([py, px], dim=1)
 
         if has_buffer and new_indices.shape == self.patch_indices.shape:
             self.patch_indices.copy_(new_indices)
