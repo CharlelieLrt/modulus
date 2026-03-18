@@ -319,23 +319,28 @@ class RandomPatching2D(BasePatching2D):
         additional_input: Optional[Float[Tensor, "B C_add H_add W_add"]] = None,
     ) -> Float[Tensor, "P_times_B C_out Hp Wp"]:
         r"""Extract random patches from the input tensor."""
-        B = input.shape[0]
+        B, C, H, W = input.shape
         Hp, Wp = self.patch_shape
         P = self.patch_num
+        K = Hp * Wp
 
-        # Unfold creates a view of all stride-1 patches (no copy)
-        patches = input.unfold(2, Hp, 1).unfold(3, Wp, 1)
-        # patches: (B, C, H-Hp+1, W-Wp+1, Hp, Wp)
-
-        # Gather the P patches at stored random positions
         py = self.patch_indices[:, 0]  # (P,)
         px = self.patch_indices[:, 1]  # (P,)
-        gathered = patches[:, :, py, px]  # (B, C, P, Hp, Wp)
 
-        # Reorder to patch-major layout
-        out = gathered.permute(2, 0, 1, 3, 4).reshape(
-            P * B, -1, Hp, Wp
-        )  # (P*B, C, Hp, Wp)
+        dy = torch.arange(Hp, device=input.device)
+        dx = torch.arange(Wp, device=input.device)
+        base = (py * W + px).reshape(P, 1, 1)  # (P, 1, 1)
+        rel = (dy[:, None] * W + dx[None, :]).reshape(1, 1, K)  # (1, 1, K)
+        idx = (base + rel).expand(P, B, K)  # (P, B, Hp*Wp)
+
+        x_flat = input.reshape(B, C, H * W)  # (B, C, HW)
+        gathered = torch.gather(
+            x_flat.unsqueeze(0).expand(P, B, C, H * W),
+            dim=3,
+            index=idx.unsqueeze(2).expand(P, B, C, K),
+        )  # (P, B, C, Hp*Wp)
+
+        out = gathered.reshape(P * B, C, Hp, Wp)
 
         if input.is_contiguous(memory_format=torch.channels_last):
             out = out.to(memory_format=torch.channels_last)
