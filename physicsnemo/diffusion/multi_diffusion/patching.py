@@ -17,7 +17,6 @@
 """Utilities for multi-diffusion (patching and fusion)."""
 
 import math
-import random
 import warnings
 from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Union
@@ -244,11 +243,20 @@ class RandomPatching2D(BasePatching2D):
         self._patch_num = value
         self.reset_patch_indices()
 
-    def reset_patch_indices(self) -> None:
+    def reset_patch_indices(
+        self,
+        *,
+        generator: torch.Generator | None = None,
+    ) -> None:
         r"""Re-draw random upper-left corner positions for all patches.
 
         The cached ``_global_index`` buffer is invalidated and will be
         lazily recomputed on the next call to :meth:`global_index`.
+
+        Parameters
+        ----------
+        generator : torch.Generator, optional
+            Pseudo-random number generator for reproducible sampling.
         """
         has_buffer = hasattr(self, "patch_indices") and isinstance(
             self.patch_indices, Tensor
@@ -257,20 +265,24 @@ class RandomPatching2D(BasePatching2D):
 
         max_y = self.img_shape[0] - self.patch_shape[0]
         max_x = self.img_shape[1] - self.patch_shape[1]
-        # TODO: use torch.randint instead of random.randint to create
-        # patch indices directly on right device. Note: this will break
-        # non-regression tests because torch.randint and random.randint do not
-        # use the same random number generation process. But for an object that
-        # is deliberately designed to be random, breaking these non-regression
-        # tests might not be a problem.
-        new_indices = torch.tensor(
-            [
-                (random.randint(0, max_y), random.randint(0, max_x))
-                for _ in range(self.patch_num)
-            ],
+
+        py = torch.randint(
+            0,
+            max_y + 1,
+            (self.patch_num,),
             dtype=torch.long,
             device=device,
+            generator=generator,
         )
+        px = torch.randint(
+            0,
+            max_x + 1,
+            (self.patch_num,),
+            dtype=torch.long,
+            device=device,
+            generator=generator,
+        )
+        new_indices = torch.stack([py, px], dim=1)
 
         if has_buffer and new_indices.shape == self.patch_indices.shape:
             self.patch_indices.copy_(new_indices)
@@ -319,23 +331,28 @@ class RandomPatching2D(BasePatching2D):
         additional_input: Optional[Float[Tensor, "B C_add H_add W_add"]] = None,
     ) -> Float[Tensor, "P_times_B C_out Hp Wp"]:
         r"""Extract random patches from the input tensor."""
-        B = input.shape[0]
+        B, C, H, W = input.shape
         Hp, Wp = self.patch_shape
         P = self.patch_num
+        K = Hp * Wp
 
-        # Unfold creates a view of all stride-1 patches (no copy)
-        patches = input.unfold(2, Hp, 1).unfold(3, Wp, 1)
-        # patches: (B, C, H-Hp+1, W-Wp+1, Hp, Wp)
-
-        # Gather the P patches at stored random positions
         py = self.patch_indices[:, 0]  # (P,)
         px = self.patch_indices[:, 1]  # (P,)
-        gathered = patches[:, :, py, px]  # (B, C, P, Hp, Wp)
 
-        # Reorder to patch-major layout
-        out = gathered.permute(2, 0, 1, 3, 4).reshape(
-            P * B, -1, Hp, Wp
-        )  # (P*B, C, Hp, Wp)
+        dy = torch.arange(Hp, device=input.device)
+        dx = torch.arange(Wp, device=input.device)
+        base = (py * W + px).reshape(P, 1, 1)  # (P, 1, 1)
+        rel = (dy[:, None] * W + dx[None, :]).reshape(1, 1, K)  # (1, 1, K)
+        idx = (base + rel).expand(P, B, K)  # (P, B, Hp*Wp)
+
+        x_flat = input.reshape(B, C, H * W)  # (B, C, HW)
+        gathered = torch.gather(
+            x_flat.unsqueeze(0).expand(P, B, C, H * W),
+            dim=3,
+            index=idx.unsqueeze(2).expand(P, B, C, K),
+        )  # (P, B, C, Hp*Wp)
+
+        out = gathered.reshape(P * B, C, Hp, Wp)
 
         if input.is_contiguous(memory_format=torch.channels_last):
             out = out.to(memory_format=torch.channels_last)
