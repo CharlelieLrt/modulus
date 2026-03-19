@@ -66,7 +66,7 @@ def main():
     img_channels = 16
     num_condition_channels = 3
     batch_size_per_gpu = 1
-    num_patches_per_sample = 1
+    num_patches_per_sample = 4
     patch_shape = (448, 448)
     load_checkpoint_from_file = args.load_checkpoint
     checkpoint_dir = args.checkpoint_dir
