@@ -136,6 +136,9 @@ class HRRRSurfaceDataset(Dataset):
         for i, var in enumerate(self.VARIABLES):
             arr = root[var][time_idx, :, :]
             if var in self.LOG_VARIABLES:
+                # Replace NaN with 0 before log transform — missing
+                # precipitation/aerosol is treated as zero.
+                arr = np.where(np.isnan(arr), 0.0, arr)
                 data_arrays[i] = np.log(arr + self.EPSILON)
             else:
                 data_arrays[i] = arr
