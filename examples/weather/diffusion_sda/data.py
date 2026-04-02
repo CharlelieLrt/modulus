@@ -117,6 +117,9 @@ class HRRRSurfaceDataset(Dataset):
         self.grid_lon = _root["lon"][:]
         self.time_array = _root["time"][:]
 
+        # Cache of dataset indices known to contain NaN samples
+        self._nan_indices: set = set()
+
     def __len__(self):
         return self.idx.shape[0]
 
@@ -136,15 +139,31 @@ class HRRRSurfaceDataset(Dataset):
         for i, var in enumerate(self.VARIABLES):
             arr = root[var][time_idx, :, :]
             if var in self.LOG_VARIABLES:
-                # Replace NaN with 0 before log transform — missing
-                # precipitation/aerosol is treated as zero.
-                arr = np.where(np.isnan(arr), 0.0, arr)
-                data_arrays[i] = np.log(arr + self.EPSILON)
+                data_arrays[i] = np.log(np.clip(arr, a_min=0, a_max=1e8) + self.EPSILON)
             else:
                 data_arrays[i] = arr
         return data_arrays
 
+    MAX_SKIP_RETRIES = 10
+
     def __getitem__(self, idx):
+        for attempt in range(self.MAX_SKIP_RETRIES):
+            if attempt == 0 and idx not in self._nan_indices:
+                current_idx = idx
+            else:
+                current_idx = np.random.randint(0, len(self))
+                while current_idx in self._nan_indices:
+                    current_idx = np.random.randint(0, len(self))
+            target, condition_spatial, condition_time = self._load_sample(current_idx)
+            if not torch.isnan(target).any():
+                return target, condition_spatial, condition_time
+            self._nan_indices.add(current_idx)
+        raise RuntimeError(
+            f"Could not find a valid sample after {self.MAX_SKIP_RETRIES} attempts "
+            f"starting from idx={idx}"
+        )
+
+    def _load_sample(self, idx):
         time_idx = self.idx[idx]
         time_stamp = self.time_array[time_idx]
         data_arrays = self._get_array(idx)

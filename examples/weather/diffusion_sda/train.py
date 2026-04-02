@@ -55,6 +55,9 @@ def parse_args():
     p = argparse.ArgumentParser(description="HRRR surface diffusion SDA training")
     p.add_argument("--load-checkpoint", action="store_true", default=False)
     p.add_argument("--checkpoint-dir", type=str, default="./checkpoints")
+    p.add_argument("--batch-size-per-gpu", type=int, default=2)
+    p.add_argument("--P-mean", type=float, default=-0.8)
+    p.add_argument("--P-std", type=float, default=1.6)
     return p.parse_args()
 
 
@@ -65,13 +68,13 @@ def main():
     img_resolution = [1059, 1799]
     img_channels = 16
     num_condition_channels = 3
-    batch_size_per_gpu = 1
+    batch_size_per_gpu = args.batch_size_per_gpu
     num_patches_per_sample = 4
     patch_shape = (448, 448)
     load_checkpoint_from_file = args.load_checkpoint
     checkpoint_dir = args.checkpoint_dir
     max_training_samples = 10000000
-    checkpoint_frequency = 1000
+    checkpoint_frequency = 100000
     validation_frequency = 1000
     num_validation_samples = 100
     logging_frequency = 1000
@@ -222,7 +225,7 @@ def main():
     )
 
     # Create loss function with multi-diffusion support
-    noise_scheduler = EDMNoiseScheduler(P_mean=-0.8, P_std=1.6, sigma_data=1.0)
+    noise_scheduler = EDMNoiseScheduler(P_mean=args.P_mean, P_std=args.P_std, sigma_data=1.0)
     loss_fn = MultiDiffusionMSEDSMLoss(
         model=model,
         noise_scheduler=noise_scheduler,
@@ -277,8 +280,8 @@ def main():
     samples_since_validation = 0
     samples_since_checkpoint = 0
 
+    tick_start_time = time.time()
     while current_samples_trained < max_training_samples:
-        tick_start_time = time.time()
 
         model.train()
 
@@ -325,11 +328,13 @@ def main():
         samples_since_logging += total_batch_size
         if samples_since_logging >= logging_frequency:
             elapsed = time.time() - tick_start_time
+            steps = samples_since_logging / total_batch_size
             rank_zero_logger.info(
                 f"Samples trained: {current_samples_trained}, "
                 f"loss: {loss_running_mean:.3e}, "
                 f"learning rate: {optimizer.param_groups[0]['lr']:.2e}, "
-                f"time per 1k samples: {(elapsed / (samples_since_logging)) * 1000:.1f}s"
+                f"throughput: {samples_since_logging / elapsed / 1000:.4f} ksamples/s, "
+                f"time/step: {elapsed / steps:.3f}s"
             )
             # Reset running mean after logging
             loss_running_mean = 0.0

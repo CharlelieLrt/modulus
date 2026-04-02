@@ -60,7 +60,10 @@ def main() -> None:
     root = zarr.open_group(
         store="s3://hrrr-surface-sda/zarr-v1",
         mode="r",
-        storage_options={"endpoint_url": "https://pdx.s8k.io"},
+        storage_options={
+            "endpoint_url": "https://pdx.s8k.io",
+            "profile": "physicsnemo"
+        },
     )
     n_grid = root["lat"].shape[0] * root["lat"].shape[1]
     grouped = read_daily_stats("daily_random_moments.csv")

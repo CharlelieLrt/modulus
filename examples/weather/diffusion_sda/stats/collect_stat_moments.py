@@ -40,7 +40,7 @@ def compute_stats_for_index(
     print(f"Fetching times for index {idx}")
     for var in variables:
         if var == "tp" or var == "aerot":
-            data = np.log(root[var][idx, :, :] + 1e-8)
+            data = np.log(np.clip(root[var][idx, :, :], a_min=0, a_max=1e8) + 1e-8)
         else:
             data = root[var][idx, :, :]
         x_val = float(np.nansum(data))
@@ -53,7 +53,10 @@ def main() -> None:
     root = zarr.open_group(
         store="s3://hrrr-surface-sda/zarr-v1",
         mode="r",
-        storage_options={"endpoint_url": "https://pdx.s8k.io"},
+        storage_options={
+            "endpoint_url": "https://pdx.s8k.io",
+            "profile": "physicsnemo"
+        },
     )
     variables = [
         "u10m",
