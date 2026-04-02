@@ -43,6 +43,22 @@ from physicsnemo.utils.logging import PythonLogger, RankZeroLoggingWrapper
 from physicsnemo.utils.logging.wandb import initialize_wandb
 
 
+class ClippedGuidance:
+    """Thin wrapper that clips DPS guidance output to a given range."""
+
+    def __init__(self, inner, clip_min, clip_max):
+        self.inner = inner
+        self.clip_min = clip_min
+        self.clip_max = clip_max
+
+    def __call__(self, x, t, x_0):
+        return torch.clamp(
+            self.inner(x, t, x_0),
+            min=self.clip_min,
+            max=self.clip_max,
+        )
+
+
 def RMSE(pred: torch.Tensor, target: torch.Tensor) -> float:
     """Calculate Root Mean Square Error."""
     return torch.sqrt(torch.mean((pred - target) ** 2)).item()
@@ -343,24 +359,7 @@ def main(cfg: DictConfig) -> None:
             if clip_range is not None:
                 clip_range = list(clip_range)
                 rank_zero_logger.info(f"Using score clipping with range {clip_range}")
-                raw_guidance = guidance
-
-                class ClippedGuidance:
-                    """Thin wrapper that clips guidance output."""
-
-                    def __init__(self, inner, clip_min, clip_max):
-                        self.inner = inner
-                        self.clip_min = clip_min
-                        self.clip_max = clip_max
-
-                    def __call__(self, x, t, x_0):
-                        return torch.clamp(
-                            self.inner(x, t, x_0),
-                            min=self.clip_min,
-                            max=self.clip_max,
-                        )
-
-                guidance = ClippedGuidance(raw_guidance, clip_range[0], clip_range[1])
+                guidance = ClippedGuidance(guidance, clip_range[0], clip_range[1])
 
             dps_score_predictor = DPSScorePredictor(
                 x0_predictor=x0_predictor,
@@ -411,6 +410,8 @@ def main(cfg: DictConfig) -> None:
                     time_steps=t_steps,
                 )
                 x_generated.append(x_0)
+            if not x_generated:
+                continue
             x_pred_rank = torch.cat(x_generated)
 
         # Gather predictions to rank 0
