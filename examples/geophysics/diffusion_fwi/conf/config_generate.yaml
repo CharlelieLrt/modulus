@@ -90,6 +90,13 @@ generation:
       vp_range: null  # P-wave velocity range (m/s), e.g., [1500, 6000]
       vs_range: null  # S-wave velocity range (m/s), e.g., [800, 3500]
       rho_range: null  # Density range (kg/m³), e.g., [1000, 3000]
+      # Resolution [depth, width] of the original PDE grid that was used to
+      # generate the training data. The wave operator interpolates the velocity
+      # model to this resolution before running the wave equation, so that the
+      # observation operator is consistent with the training data pipeline.
+      pde_resolution: [70, 70]
+      # Grid spacing (in meters) on the original PDE grid.
+      pde_dx: 5.0
       # Clip guidance output to given range. By default, the guidance is not
       # clipped. Clipping may improve stability of the sampling procedure.
       score_clip_range: null  # e.g., [-1, 1]

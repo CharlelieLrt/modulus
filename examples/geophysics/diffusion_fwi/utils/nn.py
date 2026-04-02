@@ -434,6 +434,7 @@ class DiffusionFWINet(Module):
             augment_dim=0,
             model_channels=model_channels,
             channel_mult=channel_mult,
+            num_blocks=num_blocks,
             attn_resolutions=attn_resolutions,
             N_grid_channels=N_grid_channels,
             gridtype="learnable",

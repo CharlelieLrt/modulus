@@ -21,6 +21,7 @@ import deepwave
 import hydra
 import numpy as np
 import torch
+import torch.nn.functional as F
 import wandb
 from datasets.dataset import EFWIDatapipe
 from datasets.transforms import Interpolate, ZscoreNormalize
@@ -155,15 +156,21 @@ def main(cfg: DictConfig) -> None:
     )
 
     # Wave operator for diffusion posterior sampling (DPS) based on PDE
-    # constraint
+    # constraint.  The wave equation is solved on the original PDE grid
+    # (``pde_resolution``) rather than on the model grid so that the
+    # observation operator is consistent with the training data pipeline:
+    #   training:  vel_orig -> PDE(vel_orig) -> seismic_orig -> norm -> interp
+    #   guidance:  vel_model -> interp_to_orig -> PDE -> seismic_orig -> norm -> interp
     def wave_operator(x: torch.Tensor) -> torch.Tensor:
         def smooth_clamp(
             x: torch.Tensor,
             min_val: float,
             max_val: float,
         ) -> torch.Tensor:
-            x_scaled = torch.sigmoid(x)
-            return min_val + (max_val - min_val) * x_scaled
+            center = 0.5 * (min_val + max_val)
+            half_width = 0.5 * (max_val - min_val)
+            x_normalized = 5.0 * (x - center) / half_width
+            return min_val + (max_val - min_val) * torch.sigmoid(x_normalized)
 
         # Unpack velocity model from latent state x
         B = x.shape[0]
@@ -195,26 +202,40 @@ def main(cfg: DictConfig) -> None:
             rho_min, rho_max = list(rho_range)
             rho = smooth_clamp(rho, rho_min, rho_max)
 
-        # Define geometry, sources and receivers
-        # NOTE: hard-coded resolution change from 70 to 80.
-        dx = 5.0 * 7 / 8
+        # Interpolate velocity model from model resolution to original PDE
+        # resolution so that the wave equation is solved on the same grid
+        # that was used to generate the training data.
+        pde_H, pde_W = list(guidance_cfg.pde_resolution)
+        pde_dx = guidance_cfg.pde_dx
+        vp = F.interpolate(
+            vp.unsqueeze(1), size=(pde_H, pde_W), mode="bilinear"
+        ).squeeze(1)
+        vs = F.interpolate(
+            vs.unsqueeze(1), size=(pde_H, pde_W), mode="bilinear"
+        ).squeeze(1)
+        rho = F.interpolate(
+            rho.unsqueeze(1), size=(pde_H, pde_W), mode="bilinear"
+        ).squeeze(1)
+
+        # Define geometry, sources and receivers on the original PDE grid
         nt = cfg.dataset.y_resolution[0]
         dt = 0.001
-        freq = cfg.generation.sampler.physics_informed_guidance.source_frequency
+        freq = guidance_cfg.source_frequency
         peak_time = 1.5 / freq
         n_shots = cfg.dataset.nb_shots
         source_depth = 1
         receiver_depth = 1
-        n_receivers_per_shot = cfg.dataset.y_resolution[1] - 1
+        n_receivers_per_shot = pde_W - 1
 
-        # Set sources and receivers
+        # Set sources evenly spaced on the original grid
         source_locations = torch.zeros(
             n_shots, 1, 2, dtype=torch.long, device=x.device
         )  # (Ns, 1, 2)
         source_locations[..., 0] = source_depth
-        # NOTE: hard-coded to go from 5 sources at 0, 17, 34, 51, 68 on a mesh
-        # of width 70, to 5 sources on a mesh of width 80.
-        source_locations[:, 0, 1] = torch.arange(n_shots) * 17 * 8 // 7
+        source_spacing = (pde_W - 2) // (n_shots - 1)
+        source_locations[:, 0, 1] = torch.arange(n_shots) * source_spacing
+
+        # Set receivers on the original grid
         receiver_locations = torch.zeros(
             n_shots, n_receivers_per_shot, 2, dtype=torch.long, device=x.device
         )  # (Ns, Nr, 2)
@@ -237,11 +258,11 @@ def main(cfg: DictConfig) -> None:
         vs = repeat(vs, "B H W -> (B Ns) H W", Ns=n_shots)
         rho = repeat(rho, "B H W -> (B Ns) H W", Ns=n_shots)
 
-        # Run the forward wave PDE
+        # Run the forward wave PDE at original resolution
         out = {}
         out["vz"], out["vx"] = deepwave.elastic(
             *deepwave.common.vpvsrho_to_lambmubuoyancy(vp, vs, rho),
-            grid_spacing=dx,
+            grid_spacing=pde_dx,
             dt=dt,
             source_amplitudes_y=source_amplitudes,
             source_amplitudes_x=source_amplitudes,
@@ -251,7 +272,7 @@ def main(cfg: DictConfig) -> None:
             receiver_locations_x=receiver_locations,
             pml_freq=freq,
             pml_width=[20, 20, 20, 20],
-        )[-2:]  # (B * Ns, Nr, Nt)
+        )[-2:]  # (B * Ns, Nr_orig, Nt)
 
         y: torch.Tensor = torch.cat(
             [
@@ -259,12 +280,24 @@ def main(cfg: DictConfig) -> None:
                 for var in list(cfg.dataset.y_vars)
             ],
             dim=1,
-        ).transpose(3, 2)  # (B, 2 * Ns, Nt, Nr)
+        ).transpose(3, 2)  # (B, C, Nt, Nr_orig)
 
-        # Pad to match target resolution
-        if y.shape[-1] != cfg.dataset.y_resolution[1]:
-            pad_r = cfg.dataset.y_resolution[1] - y.shape[-1]
-            y = torch.nn.functional.pad(y, pad=(0, pad_r))
+        # Z-score normalize to match the normalized conditioning data
+        y_vars = list(cfg.dataset.y_vars)
+        for idx, var in enumerate(y_vars):
+            ch_start = idx * n_shots
+            ch_end = (idx + 1) * n_shots
+            y[:, ch_start:ch_end] = (
+                y[:, ch_start:ch_end] - stats_mean[var]
+            ) / stats_std[var]
+
+        # Interpolate receiver dimension to model resolution, matching the
+        # bilinear interpolation applied to the training data
+        y = F.interpolate(
+            y,
+            size=(y.shape[2], cfg.dataset.y_resolution[1]),
+            mode="bilinear",
+        )
 
         return y
 
@@ -364,9 +397,10 @@ def main(cfg: DictConfig) -> None:
                     else list(batch_seeds)
                 )
                 rnd = StackedRandomGenerator(device, seeds_list)
-                x_T = rnd.randn((B,) + spatial_shape, device=device).to(
-                    memory_format=torch.channels_last
-                )
+                x_T = (
+                    noise_scheduler.sigma(t_steps[0])
+                    * rnd.randn((B,) + spatial_shape, device=device)
+                ).to(memory_format=torch.channels_last)
 
                 x_0 = sample(
                     denoiser=denoiser,
