@@ -58,7 +58,7 @@ class Conv2dX0Predictor(Module):
 
     def __init__(self, channels: int = 3):
         super().__init__()
-        self.net = torch.nn.Conv2d(channels, channels, kernel_size=1)
+        self.net = torch.nn.Conv2d(channels, channels, kernel_size=3, padding=1)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor, **kwargs: Any) -> torch.Tensor:
         t_bc = t.view(-1, 1, 1, 1)
@@ -70,7 +70,7 @@ class Conv3dX0Predictor(Module):
 
     def __init__(self, channels: int = 2):
         super().__init__()
-        self.net = torch.nn.Conv3d(channels, channels, kernel_size=1)
+        self.net = torch.nn.Conv3d(channels, channels, kernel_size=3, padding=1)
 
     def forward(self, x: torch.Tensor, t: torch.Tensor, **kwargs: Any) -> torch.Tensor:
         t_bc = t.view(-1, 1, 1, 1, 1)

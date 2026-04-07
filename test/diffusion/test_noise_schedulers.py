@@ -676,3 +676,74 @@ class TestSpatialMethodNonRegression:
         x0 = s.score_to_x0(score, x_t, t)
         score_recovered = s.x0_to_score(x0, x_t, t)
         compare_outputs(score_recovered, score, atol=1e-3, rtol=1e-3)
+
+
+# =============================================================================
+# Compile Tests — Denoiser Closures
+# =============================================================================
+
+# Subset of schedulers for compile tests (avoid combinatorial explosion)
+COMPILE_SCHEDULER_CONFIGS = [
+    (EDMNoiseScheduler, {}, "edm"),
+    (VPNoiseScheduler, {}, "vp"),
+    (VENoiseScheduler, {}, "ve"),
+]
+
+
+@pytest.mark.parametrize(
+    "denoising_type,predictor_kwarg",
+    [("ode", "x0_predictor"), ("ode", "score_predictor"), ("sde", "x0_predictor")],
+    ids=["ode_x0", "ode_score", "sde_x0"],
+)
+@pytest.mark.parametrize(
+    "sched_cls,sched_kwargs,sched_name",
+    COMPILE_SCHEDULER_CONFIGS,
+    ids=[c[2] for c in COMPILE_SCHEDULER_CONFIGS],
+)
+@pytest.mark.parametrize(
+    "spatial_name,shape,predictor_cls,predictor_kwargs",
+    SPATIAL_CONFIGS,
+    ids=[c[0] for c in SPATIAL_CONFIGS],
+)
+class TestDenoiserCompile:
+    """Double-call compile tests for denoiser closures from get_denoiser()."""
+
+    def test_compiled_denoiser(
+        self,
+        deterministic_settings,
+        device,
+        denoising_type,
+        predictor_kwarg,
+        sched_cls,
+        sched_kwargs,
+        sched_name,
+        spatial_name,
+        shape,
+        predictor_cls,
+        predictor_kwargs,
+    ):
+        """Compiled denoiser closure matches eager and graph is reused."""
+        torch._dynamo.config.error_on_recompile = True
+
+        s = sched_cls(**sched_kwargs)
+        model = instantiate_model_deterministic(
+            predictor_cls, seed=0, **predictor_kwargs
+        ).to(device)
+        denoiser = s.get_denoiser(
+            **{predictor_kwarg: model}, denoising_type=denoising_type
+        )
+
+        x = make_input(shape, seed=60, device=device)
+        t = make_input((shape[0],), seed=61, device=device).abs() + 0.5
+
+        compiled_denoiser = torch.compile(denoiser, fullgraph=True)
+
+        with torch.no_grad():
+            out_eager = denoiser(x, t)
+            out_compiled = compiled_denoiser(x, t)
+        torch.testing.assert_close(out_eager, out_compiled)
+
+        # Second call — must reuse the graph
+        with torch.no_grad():
+            out_compiled_2 = compiled_denoiser(x, t)
+        torch.testing.assert_close(out_compiled, out_compiled_2)

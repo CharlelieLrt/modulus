@@ -285,3 +285,64 @@ class TestStepNonRegression:
         x_stoch = stoch_solver.step(x, t_cur, t_next)
         x_det = det_solver.step(x, t_cur, t_next)
         compare_outputs(x_stoch, x_det, **tolerances)
+
+
+# =============================================================================
+# Compile Tests
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "solver_cls,solver_kwargs,solver_name,uses_rng",
+    SOLVER_CONFIGS,
+    ids=[c[2] for c in SOLVER_CONFIGS],
+)
+@pytest.mark.parametrize(
+    "spatial_name,shape,predictor_cls,predictor_kwargs",
+    SPATIAL_CONFIGS,
+    ids=[c[0] for c in SPATIAL_CONFIGS],
+)
+class TestStepCompile:
+    """Double-call compile tests for solver step()."""
+
+    def test_compiled_step(
+        self,
+        deterministic_settings,
+        device,
+        solver_cls,
+        solver_kwargs,
+        solver_name,
+        uses_rng,
+        spatial_name,
+        shape,
+        predictor_cls,
+        predictor_kwargs,
+    ):
+        """Compiled step traces without error and graph is reused on second call."""
+        torch._dynamo.config.error_on_recompile = True
+
+        denoiser, _ = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
+        solver = _make_solver(solver_cls, solver_kwargs, denoiser)
+
+        x = make_input(shape, seed=100, device=device)
+        t_cur = torch.tensor([5.0] * shape[0], device=device)
+        t_next = torch.tensor([2.5] * shape[0], device=device)
+
+        compiled_step = torch.compile(solver.step, fullgraph=True)
+
+        with torch.no_grad():
+            out_compiled = compiled_step(x, t_cur, t_next)
+        assert out_compiled.shape == shape
+        assert torch.isfinite(out_compiled).all()
+
+        # Second call — must reuse the graph
+        with torch.no_grad():
+            out_compiled_2 = compiled_step(x, t_cur, t_next)
+        assert out_compiled_2.shape == shape
+        assert torch.isfinite(out_compiled_2).all()
+
+        # For deterministic solvers, also verify eager-vs-compiled match
+        if not uses_rng:
+            with torch.no_grad():
+                out_eager = solver.step(x, t_cur, t_next)
+            torch.testing.assert_close(out_eager, out_compiled)
