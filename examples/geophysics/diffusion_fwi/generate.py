@@ -178,16 +178,6 @@ def main(cfg: DictConfig) -> None:
     #   training:  vel_orig -> PDE(vel_orig) -> seismic_orig -> norm -> interp
     #   guidance:  vel_model -> interp_to_orig -> PDE -> seismic_orig -> norm -> interp
     def wave_operator(x: torch.Tensor) -> torch.Tensor:
-        def smooth_clamp(
-            x: torch.Tensor,
-            min_val: float,
-            max_val: float,
-        ) -> torch.Tensor:
-            center = 0.5 * (min_val + max_val)
-            half_width = 0.5 * (max_val - min_val)
-            x_normalized = 5.0 * (x - center) / half_width
-            return min_val + (max_val - min_val) * torch.sigmoid(x_normalized)
-
         # Unpack velocity model from latent state x
         B = x.shape[0]
         x_vars = torch.split(x, 1, dim=1)
@@ -201,22 +191,19 @@ def main(cfg: DictConfig) -> None:
         vs = stats_mean["vs"] + stats_std["vs"] * vs  # (B, H, W)
         rho = stats_mean["rho"] + stats_std["rho"] * rho  # (B, H, W)
 
-        # Apply smooth clamping to denormalized values if ranges are specified
+        # Clamp denormalized values to physical ranges if specified
         guidance_cfg = cfg.generation.sampler.physics_informed_guidance
         vp_range = getattr(guidance_cfg, "vp_range", None)
         if vp_range is not None:
-            vp_min, vp_max = list(vp_range)
-            vp = smooth_clamp(vp, vp_min, vp_max)
+            vp = torch.clamp(vp, min=vp_range[0], max=vp_range[1])
 
         vs_range = getattr(guidance_cfg, "vs_range", None)
         if vs_range is not None:
-            vs_min, vs_max = list(vs_range)
-            vs = smooth_clamp(vs, vs_min, vs_max)
+            vs = torch.clamp(vs, min=vs_range[0], max=vs_range[1])
 
         rho_range = getattr(guidance_cfg, "rho_range", None)
         if rho_range is not None:
-            rho_min, rho_max = list(rho_range)
-            rho = smooth_clamp(rho, rho_min, rho_max)
+            rho = torch.clamp(rho, min=rho_range[0], max=rho_range[1])
 
         # Interpolate velocity model from model resolution to original PDE
         # resolution so that the wave equation is solved on the same grid
