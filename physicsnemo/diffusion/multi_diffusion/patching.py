@@ -310,7 +310,7 @@ class RandomPatching2D(BasePatching2D):
         Tensor
             Integer tensor of shape :math:`(P, 2, H_p, W_p)`.
         """
-        if self._global_index_needs_update:
+        if getattr(self, "_global_index_needs_update", True):
             new_global_index = self._compute_global_index()
             if (
                 hasattr(self, "_global_index")
