@@ -258,8 +258,12 @@ class MSEDSMLoss:
         self,
         model: DiffusionModel,
         noise_scheduler: NoiseScheduler,
-        prediction_type: Literal["x0", "score"] = "x0",
+        prediction_type: Literal["x0", "score", "epsilon"] = "x0",
         score_to_x0_fn: Callable[
+            [torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
+        ]
+        | None = None,
+        epsilon_to_x0_fn: Callable[
             [torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
         ]
         | None = None,
@@ -278,9 +282,18 @@ class MSEDSMLoss:
                 )
             self._to_x0 = score_to_x0_fn
 
+        elif prediction_type == "epsilon":
+            if epsilon_to_x0_fn is None:
+                raise ValueError(
+                    "epsilon_to_x0_fn must be provided when "
+                    "prediction_type='epsilon'."
+                )
+            self._to_x0 = epsilon_to_x0_fn
+
         else:
             raise ValueError(
-                f"prediction_type must be 'x0' or 'score', got '{prediction_type}'."
+                f"prediction_type must be 'x0', 'score', or 'epsilon', "
+                f"got '{prediction_type}'."
             )
 
         # Define the reduction callbacks
@@ -409,8 +422,12 @@ class WeightedMSEDSMLoss:
         self,
         model: DiffusionModel,
         noise_scheduler: NoiseScheduler,
-        prediction_type: Literal["x0", "score"] = "x0",
+        prediction_type: Literal["x0", "score", "epsilon"] = "x0",
         score_to_x0_fn: Callable[
+            [torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
+        ]
+        | None = None,
+        epsilon_to_x0_fn: Callable[
             [torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
         ]
         | None = None,
@@ -429,9 +446,18 @@ class WeightedMSEDSMLoss:
                 )
             self._to_x0 = score_to_x0_fn
 
+        elif prediction_type == "epsilon":
+            if epsilon_to_x0_fn is None:
+                raise ValueError(
+                    "epsilon_to_x0_fn must be provided when "
+                    "prediction_type='epsilon'."
+                )
+            self._to_x0 = epsilon_to_x0_fn
+
         else:
             raise ValueError(
-                f"prediction_type must be 'x0' or 'score', got '{prediction_type}'."
+                f"prediction_type must be 'x0', 'score', or 'epsilon', "
+                f"got '{prediction_type}'."
             )
 
         # Define the reduction callbacks
