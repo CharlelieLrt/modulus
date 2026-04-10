@@ -285,8 +285,7 @@ class MSEDSMLoss:
         elif prediction_type == "epsilon":
             if epsilon_to_x0_fn is None:
                 raise ValueError(
-                    "epsilon_to_x0_fn must be provided when "
-                    "prediction_type='epsilon'."
+                    "epsilon_to_x0_fn must be provided when prediction_type='epsilon'."
                 )
             self._to_x0 = epsilon_to_x0_fn
 
@@ -449,8 +448,7 @@ class WeightedMSEDSMLoss:
         elif prediction_type == "epsilon":
             if epsilon_to_x0_fn is None:
                 raise ValueError(
-                    "epsilon_to_x0_fn must be provided when "
-                    "prediction_type='epsilon'."
+                    "epsilon_to_x0_fn must be provided when prediction_type='epsilon'."
                 )
             self._to_x0 = epsilon_to_x0_fn
 

@@ -754,10 +754,12 @@ class TestSpatialMethodNonRegression:
         eps_pred = lambda x, t: make_input(x.shape, seed=120, device=device)  # noqa: E731
         # Build denoiser from epsilon predictor
         denoiser_eps = s.get_denoiser(epsilon_predictor=eps_pred)
+
         # Build equivalent score predictor and denoiser
         def score_pred(x, t):
             eps = eps_pred(x, t)
             return s.epsilon_to_score(eps, t)
+
         denoiser_score = s.get_denoiser(score_predictor=score_pred)
         x = make_input(shape, seed=121, device=device)
         t = make_input((shape[0],), seed=122, device=device).abs() * 0.3 + 0.2

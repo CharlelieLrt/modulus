@@ -1048,8 +1048,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         """
         # Validate: exactly one predictor must be provided
         provided = sum(
-            p is not None
-            for p in (score_predictor, x0_predictor, epsilon_predictor)
+            p is not None for p in (score_predictor, x0_predictor, epsilon_predictor)
         )
         if provided != 1:
             raise ValueError(
