@@ -336,8 +336,9 @@ class RandomPatching2D(BasePatching2D):
         P = self.patch_num
         K = Hp * Wp
 
-        py = self.patch_indices[:, 0]  # (P,)
-        px = self.patch_indices[:, 1]  # (P,)
+        patch_indices = self.patch_indices.to(input.device)
+        py = patch_indices[:, 0]  # (P,)
+        px = patch_indices[:, 1]  # (P,)
 
         dy = torch.arange(Hp, device=input.device)
         dx = torch.arange(Wp, device=input.device)
