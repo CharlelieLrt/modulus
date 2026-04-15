@@ -25,6 +25,7 @@ from physicsnemo.diffusion.noise_schedulers import (
     VENoiseScheduler,
     VPNoiseScheduler,
 )
+from physicsnemo.diffusion.preconditioners import EDMPreconditioner
 
 from .conftest import GLOBAL_SEED
 from .helpers import (
@@ -44,6 +45,10 @@ REF_PREFIX = "test_losses_"
 BATCH = 4
 LR = 1e-2
 TRAIN_STEPS = 2
+
+# sigma_data must be consistent between EDMPreconditioner and EDMNoiseScheduler
+# to mirror the realistic SDA recipe pattern.
+SIGMA_DATA = 1.0
 
 SCHEDULER_CONFIGS = [
     (EDMNoiseScheduler, {}, "edm"),
@@ -468,3 +473,149 @@ class TestWeightedMSEDSMLossCompile:
         # Second call — must reuse the graph
         loss_2 = compiled_loss_fn(x0, weight=weight)
         assert loss_2.ndim == 0 and torch.isfinite(loss_2)
+
+
+# =============================================================================
+# Combined Workflow Tests — EDMPreconditioner + EDMNoiseScheduler + Loss
+# =============================================================================
+
+
+def _make_preconditioned_model(predictor_cls, predictor_kwargs, seed=0):
+    """Wrap predictor_cls in EDMPreconditioner with sigma_data=SIGMA_DATA.
+
+    sigma_data must be consistent with the EDMNoiseScheduler used in the loss
+    to mirror the realistic SDA recipe pattern.
+    """
+    inner = instantiate_model_deterministic(
+        predictor_cls, seed=seed, **predictor_kwargs
+    )
+    return EDMPreconditioner(inner, sigma_data=SIGMA_DATA)
+
+
+@pytest.mark.parametrize("prediction_type", PREDICTION_TYPES, ids=PREDICTION_TYPES)
+@pytest.mark.parametrize(
+    "spatial_name,shape,predictor_cls,predictor_kwargs",
+    SPATIAL_CONFIGS,
+    ids=[c[0] for c in SPATIAL_CONFIGS],
+)
+class TestMSEDSMLossWithPreconditioner:
+    """Non-regression tests for MSEDSMLoss with EDMPreconditioner as the model.
+
+    Tests the full pipeline: EDMPreconditioner(backbone) + EDMNoiseScheduler
+    (with consistent sigma_data) + MSEDSMLoss. This verifies that the wrapping
+    order and parameter alignment produce a stable training signal.
+    """
+
+    def test_non_regression(
+        self,
+        deterministic_settings,
+        device,
+        tolerances,
+        prediction_type,
+        spatial_name,
+        shape,
+        predictor_cls,
+        predictor_kwargs,
+    ):
+        model = _make_preconditioned_model(predictor_cls, predictor_kwargs).to(device)
+        # sigma_data must match the preconditioner to ensure consistent noise scaling.
+        scheduler = EDMNoiseScheduler(sigma_data=SIGMA_DATA)
+        loss_fn = _make_loss(model, scheduler, prediction_type)
+
+        x0 = make_input(shape, seed=GLOBAL_SEED, device=device)
+        param_before = _first_param(model).cpu()
+
+        losses, params = _run_training_loop(loss_fn, model, x0)
+
+        for loss_val in losses:
+            assert loss_val.ndim == 0 and torch.isfinite(loss_val)
+        assert not torch.equal(param_before, params[0])
+        assert not torch.equal(params[0], params[1])
+
+        if "cuda" in str(device):
+            ref_file = f"{REF_PREFIX}precond_edm_{spatial_name}_{prediction_type}.pth"
+            ref = load_or_create_reference(ref_file, None)
+            assert losses[0].shape == ref["loss_0"].shape
+            assert params[0].shape == ref["param_0"].shape
+        else:
+            ref_file = f"{REF_PREFIX}precond_edm_{spatial_name}_{prediction_type}.pth"
+            ref = load_or_create_reference(
+                ref_file,
+                lambda: {
+                    "loss_0": losses[0],
+                    "loss_1": losses[1],
+                    "param_0": params[0],
+                    "param_1": params[1],
+                },
+            )
+            compare_outputs(losses[0], ref["loss_0"], **tolerances)
+            compare_outputs(losses[1], ref["loss_1"], **tolerances)
+            compare_outputs(params[0], ref["param_0"], **tolerances)
+            compare_outputs(params[1], ref["param_1"], **tolerances)
+
+
+@pytest.mark.parametrize("prediction_type", PREDICTION_TYPES, ids=PREDICTION_TYPES)
+@pytest.mark.parametrize(
+    "spatial_name,shape,predictor_cls,predictor_kwargs",
+    SPATIAL_CONFIGS,
+    ids=[c[0] for c in SPATIAL_CONFIGS],
+)
+class TestWeightedMSEDSMLossWithPreconditioner:
+    """Non-regression tests for WeightedMSEDSMLoss with EDMPreconditioner as the model.
+
+    Same intent as TestMSEDSMLossWithPreconditioner but exercises the weighted
+    variant with a partial spatial mask.
+    """
+
+    def test_non_regression(
+        self,
+        deterministic_settings,
+        device,
+        tolerances,
+        prediction_type,
+        spatial_name,
+        shape,
+        predictor_cls,
+        predictor_kwargs,
+    ):
+        model = _make_preconditioned_model(predictor_cls, predictor_kwargs).to(device)
+        scheduler = EDMNoiseScheduler(sigma_data=SIGMA_DATA)
+        loss_fn = _make_weighted_loss(model, scheduler, prediction_type)
+
+        x0 = make_input(shape, seed=GLOBAL_SEED, device=device)
+        weight = torch.ones_like(x0)
+        # Zero out half the last spatial dimension
+        weight.narrow(-1, 0, shape[-1] // 2).zero_()
+        param_before = _first_param(model).cpu()
+
+        losses, params = _run_weighted_training_loop(loss_fn, model, x0, weight)
+
+        for loss_val in losses:
+            assert loss_val.ndim == 0 and torch.isfinite(loss_val)
+        assert not torch.equal(param_before, params[0])
+        assert not torch.equal(params[0], params[1])
+
+        if "cuda" in str(device):
+            ref_file = (
+                f"{REF_PREFIX}weighted_precond_edm_{spatial_name}_{prediction_type}.pth"
+            )
+            ref = load_or_create_reference(ref_file, None)
+            assert losses[0].shape == ref["loss_0"].shape
+            assert params[0].shape == ref["param_0"].shape
+        else:
+            ref_file = (
+                f"{REF_PREFIX}weighted_precond_edm_{spatial_name}_{prediction_type}.pth"
+            )
+            ref = load_or_create_reference(
+                ref_file,
+                lambda: {
+                    "loss_0": losses[0],
+                    "loss_1": losses[1],
+                    "param_0": params[0],
+                    "param_1": params[1],
+                },
+            )
+            compare_outputs(losses[0], ref["loss_0"], **tolerances)
+            compare_outputs(losses[1], ref["loss_1"], **tolerances)
+            compare_outputs(params[0], ref["param_0"], **tolerances)
+            compare_outputs(params[1], ref["param_1"], **tolerances)
