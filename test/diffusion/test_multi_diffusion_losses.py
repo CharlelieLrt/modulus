@@ -19,45 +19,29 @@
 import pytest
 import torch
 
+from physicsnemo.diffusion.multi_diffusion import (
+    MultiDiffusionModel2D,
+    MultiDiffusionMSEDSMLoss,
+    MultiDiffusionWeightedMSEDSMLoss,
+)
+from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+
 from .conftest import GLOBAL_SEED
 from .helpers import compare_outputs, load_or_create_reference, make_input
-
-# ``physicsnemo.diffusion.multi_diffusion`` and ``physicsnemo.diffusion.noise_schedulers``
-# transitively import ``physicsnemo.domain_parallel``, which in turn imports
-# optional torch.distributed internals that are not available on every
-# supported torch version (e.g., torch 2.11 removed
-# ``torch.distributed.tensor._ops.registration``). When the optional
-# dependency fails to import we skip the whole module with a clear reason
-# so that the rest of the test suite is unaffected. ``test_multi_diffusion_models``
-# is imported here as well because it transitively pulls in the same optional
-# stack and we reuse its helpers/constants.
-try:
-    from physicsnemo.diffusion.multi_diffusion import (
-        MultiDiffusionModel2D,
-        MultiDiffusionMSEDSMLoss,
-        MultiDiffusionWeightedMSEDSMLoss,
-    )
-    from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
-
-    from .test_multi_diffusion_models import (
-        BATCH,
-        CHANNELS,
-        IMG_H,
-        IMG_H_NS,
-        IMG_W,
-        IMG_W_NS,
-        INPUT_SHAPE,
-        PATCH_NUM,
-        PATCH_SHAPE,
-        PATCH_SHAPE_NS,
-        _create_md_model,
-        _make_condition,
-    )
-except ImportError as e:
-    pytest.skip(
-        f"multi-diffusion optional dependency unavailable: {e}",
-        allow_module_level=True,
-    )
+from .test_multi_diffusion_models import (
+    BATCH,
+    CHANNELS,
+    IMG_H,
+    IMG_H_NS,
+    IMG_W,
+    IMG_W_NS,
+    INPUT_SHAPE,
+    PATCH_NUM,
+    PATCH_SHAPE,
+    PATCH_SHAPE_NS,
+    _create_md_model,
+    _make_condition,
+)
 
 REF_PREFIX = "test_multi_diffusion_losses_"
 LR = 1e-2
