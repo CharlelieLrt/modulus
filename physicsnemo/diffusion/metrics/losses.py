@@ -26,10 +26,7 @@ from tensordict import TensorDict
 from torch import Tensor
 
 from physicsnemo.diffusion.base import DiffusionModel, PredictorType
-from physicsnemo.diffusion.noise_schedulers import (
-    DomainParallelNoiseScheduler,
-    NoiseScheduler,
-)
+from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
 from physicsnemo.diffusion.utils.utils import apply_loss_weight
 
 
@@ -38,7 +35,13 @@ def _check_domain_parallel_scheduler(
 ) -> None:
     """Raise if *x0* is domain-sharded but *scheduler* is not domain-parallel."""
     mesh = getattr(x0, "device_mesh", None)
-    if mesh is not None and not isinstance(scheduler, DomainParallelNoiseScheduler):
+    if mesh is None:
+        return
+    from physicsnemo.diffusion.noise_schedulers.domain_parallel import (
+        DomainParallelNoiseScheduler,
+    )
+
+    if not isinstance(scheduler, DomainParallelNoiseScheduler):
         raise ValueError(
             "x0 is a ShardTensor (domain-parallel) but the noise scheduler "
             "is not a DomainParallelNoiseScheduler. Wrap your scheduler with "
