@@ -532,13 +532,12 @@ class TestMSEDSMLossWithPreconditioner:
         assert not torch.equal(param_before, params[0])
         assert not torch.equal(params[0], params[1])
 
+        ref_file = f"{REF_PREFIX}precond_edm_{spatial_name}_{prediction_type}.pth"
         if "cuda" in str(device):
-            ref_file = f"{REF_PREFIX}precond_edm_{spatial_name}_{prediction_type}.pth"
             ref = load_or_create_reference(ref_file, None)
             assert losses[0].shape == ref["loss_0"].shape
             assert params[0].shape == ref["param_0"].shape
         else:
-            ref_file = f"{REF_PREFIX}precond_edm_{spatial_name}_{prediction_type}.pth"
             ref = load_or_create_reference(
                 ref_file,
                 lambda: {
@@ -595,17 +594,14 @@ class TestWeightedMSEDSMLossWithPreconditioner:
         assert not torch.equal(param_before, params[0])
         assert not torch.equal(params[0], params[1])
 
+        ref_file = (
+            f"{REF_PREFIX}weighted_precond_edm_{spatial_name}_{prediction_type}.pth"
+        )
         if "cuda" in str(device):
-            ref_file = (
-                f"{REF_PREFIX}weighted_precond_edm_{spatial_name}_{prediction_type}.pth"
-            )
             ref = load_or_create_reference(ref_file, None)
             assert losses[0].shape == ref["loss_0"].shape
             assert params[0].shape == ref["param_0"].shape
         else:
-            ref_file = (
-                f"{REF_PREFIX}weighted_precond_edm_{spatial_name}_{prediction_type}.pth"
-            )
             ref = load_or_create_reference(
                 ref_file,
                 lambda: {
