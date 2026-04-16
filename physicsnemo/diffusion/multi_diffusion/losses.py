@@ -260,20 +260,19 @@ class MultiDiffusionMSEDSMLoss:
         self.noise_scheduler = noise_scheduler
         self._compiled_patch_x = _CompiledPatchX(self._md_model)
 
-        if prediction_type == "x0":
-            self._to_x0 = lambda prediction, x_t, t: prediction
-
-        elif prediction_type == "score":
-            if score_to_x0_fn is None:
+        match prediction_type:
+            case "x0":
+                self._to_x0 = lambda prediction, x_t, t: prediction
+            case "score":
+                if score_to_x0_fn is None:
+                    raise ValueError(
+                        "score_to_x0_fn must be provided when prediction_type='score'."
+                    )
+                self._to_x0 = score_to_x0_fn
+            case _:
                 raise ValueError(
-                    "score_to_x0_fn must be provided when prediction_type='score'."
+                    f"prediction_type must be 'x0' or 'score', got '{prediction_type}'."
                 )
-            self._to_x0 = score_to_x0_fn
-
-        else:
-            raise ValueError(
-                f"prediction_type must be 'x0' or 'score', got '{prediction_type}'."
-            )
 
         _reductions = {
             "none": lambda x: x,
@@ -508,20 +507,19 @@ class MultiDiffusionWeightedMSEDSMLoss:
         self.noise_scheduler = noise_scheduler
         self._compiled_patch_x = _CompiledPatchX(self._md_model)
 
-        if prediction_type == "x0":
-            self._to_x0 = lambda prediction, x_t, t: prediction
-
-        elif prediction_type == "score":
-            if score_to_x0_fn is None:
+        match prediction_type:
+            case "x0":
+                self._to_x0 = lambda prediction, x_t, t: prediction
+            case "score":
+                if score_to_x0_fn is None:
+                    raise ValueError(
+                        "score_to_x0_fn must be provided when prediction_type='score'."
+                    )
+                self._to_x0 = score_to_x0_fn
+            case _:
                 raise ValueError(
-                    "score_to_x0_fn must be provided when prediction_type='score'."
+                    f"prediction_type must be 'x0' or 'score', got '{prediction_type}'."
                 )
-            self._to_x0 = score_to_x0_fn
-
-        else:
-            raise ValueError(
-                f"prediction_type must be 'x0' or 'score', got '{prediction_type}'."
-            )
 
         _reductions = {
             "none": lambda x: x,

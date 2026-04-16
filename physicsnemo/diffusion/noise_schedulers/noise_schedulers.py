@@ -615,7 +615,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         Tensor
             Drift term with same shape as ``x``.
         """
-        t_bc = t.reshape(-1, *([1] * (x.ndim - 1)))
+        expected_shape = (-1,) + (1,) * (x.ndim - 1)
+        t_bc = t.reshape(expected_shape)
         alpha_t_bc = self.alpha(t_bc)
         alpha_dot_t_bc = self.alpha_dot(t_bc)
         return (alpha_dot_t_bc / alpha_t_bc) * x
@@ -646,7 +647,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         Tensor
             Squared diffusion term, broadcastable to shape of ``x``.
         """
-        t_bc = t.reshape(-1, *([1] * (x.ndim - 1)))
+        expected_shape = (-1,) + (1,) * (x.ndim - 1)
+        t_bc = t.reshape(expected_shape)
         sigma_t_bc = self.sigma(t_bc)
         sigma_dot_t_bc = self.sigma_dot(t_bc)
         alpha_t_bc = self.alpha(t_bc)
@@ -703,7 +705,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         ...     return scheduler.x0_to_score(x0_pred, x, t)
         >>> # Or simply: scheduler.get_denoiser(x0_predictor=x0_predictor)
         """
-        t_bc = t.reshape(-1, *([1] * (x0.ndim - 1)))
+        expected_shape = (-1,) + (1,) * (x0.ndim - 1)
+        t_bc = t.reshape(expected_shape)
         alpha_t_bc = self.alpha(t_bc)
         sigma_t_bc = self.sigma(t_bc)
         return (alpha_t_bc * x0 - x_t) / (sigma_t_bc**2)
@@ -764,7 +767,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         >>> x0_est.shape
         torch.Size([2, 4])
         """
-        t_bc = t.reshape(-1, *([1] * (score.ndim - 1)))
+        expected_shape = (-1,) + (1,) * (score.ndim - 1)
+        t_bc = t.reshape(expected_shape)
         alpha_t_bc = self.alpha(t_bc)
         sigma_t_bc = self.sigma(t_bc)
         return (x_t + sigma_t_bc**2 * score) / alpha_t_bc
@@ -807,7 +811,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         >>> score.shape
         torch.Size([2, 4])
         """
-        t_bc = t.reshape(-1, *([1] * (epsilon.ndim - 1)))
+        expected_shape = (-1,) + (1,) * (epsilon.ndim - 1)
+        t_bc = t.reshape(expected_shape)
         sigma_t_bc = self.sigma(t_bc)
         return -epsilon / sigma_t_bc
 
@@ -847,7 +852,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         >>> eps.shape
         torch.Size([2, 4])
         """
-        t_bc = t.reshape(-1, *([1] * (score.ndim - 1)))
+        expected_shape = (-1,) + (1,) * (score.ndim - 1)
+        t_bc = t.reshape(expected_shape)
         sigma_t_bc = self.sigma(t_bc)
         return -sigma_t_bc * score
 
@@ -894,7 +900,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         >>> x0_est.shape
         torch.Size([2, 4])
         """
-        t_bc = t.reshape(-1, *([1] * (epsilon.ndim - 1)))
+        expected_shape = (-1,) + (1,) * (epsilon.ndim - 1)
+        t_bc = t.reshape(expected_shape)
         alpha_t_bc = self.alpha(t_bc)
         sigma_t_bc = self.sigma(t_bc)
         return (x_t - sigma_t_bc * epsilon) / alpha_t_bc
@@ -940,7 +947,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         >>> eps.shape
         torch.Size([2, 4])
         """
-        t_bc = t.reshape(-1, *([1] * (x0.ndim - 1)))
+        expected_shape = (-1,) + (1,) * (x0.ndim - 1)
+        t_bc = t.reshape(expected_shape)
         alpha_t_bc = self.alpha(t_bc)
         sigma_t_bc = self.sigma(t_bc)
         return (x_t - alpha_t_bc * x0) / sigma_t_bc
@@ -1155,7 +1163,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         Tensor
             Noisy latent state of shape :math:`(B, *)`.
         """
-        t_bc = time.reshape(-1, *([1] * (x0.ndim - 1)))
+        expected_shape = (-1,) + (1,) * (x0.ndim - 1)
+        t_bc = time.reshape(expected_shape)
         alpha_t_bc = self.alpha(t_bc)
         sigma_t_bc = self.sigma(t_bc)
         noise = torch.randn_like(x0)
@@ -1197,7 +1206,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         """
         B = tN.shape[0]
         noise = torch.randn(B, *spatial_shape, device=device, dtype=dtype)
-        tN_bc = tN.reshape(-1, *([1] * len(spatial_shape)))
+        expected_shape = (-1,) + (1,) * len(spatial_shape)
+        tN_bc = tN.reshape(expected_shape)
         sigma_tN_bc = self.sigma(tN_bc)
         return sigma_tN_bc * noise
 
@@ -2497,7 +2507,8 @@ class StudentTEDMNoiseScheduler(LinearGaussianNoiseScheduler):
         Tensor
             Noisy latent state of shape :math:`(B, *)`.
         """
-        t_bc = time.reshape(-1, *([1] * (x0.ndim - 1)))
+        expected_shape = (-1,) + (1,) * (x0.ndim - 1)
+        t_bc = time.reshape(expected_shape)
         sigma_t_bc = self.sigma(t_bc)
         noise = self._sample_student_t(*x0.shape, device=x0.device, dtype=x0.dtype)
         return x0 + sigma_t_bc * noise
@@ -2538,6 +2549,7 @@ class StudentTEDMNoiseScheduler(LinearGaussianNoiseScheduler):
         """
         B = tN.shape[0]
         noise = self._sample_student_t(B, *spatial_shape, device=device, dtype=dtype)
-        tN_bc = tN.reshape(-1, *([1] * len(spatial_shape)))
+        expected_shape = (-1,) + (1,) * len(spatial_shape)
+        tN_bc = tN.reshape(expected_shape)
         sigma_tN_bc = self.sigma(tN_bc)
         return sigma_tN_bc * noise
