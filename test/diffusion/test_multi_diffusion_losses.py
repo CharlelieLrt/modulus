@@ -19,29 +19,45 @@
 import pytest
 import torch
 
-from physicsnemo.diffusion.multi_diffusion import (
-    MultiDiffusionModel2D,
-    MultiDiffusionMSEDSMLoss,
-    MultiDiffusionWeightedMSEDSMLoss,
-)
-from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
-
 from .conftest import GLOBAL_SEED
 from .helpers import compare_outputs, load_or_create_reference, make_input
-from .test_multi_diffusion_models import (
-    BATCH,
-    CHANNELS,
-    IMG_H,
-    IMG_H_NS,
-    IMG_W,
-    IMG_W_NS,
-    INPUT_SHAPE,
-    PATCH_NUM,
-    PATCH_SHAPE,
-    PATCH_SHAPE_NS,
-    _create_md_model,
-    _make_condition,
-)
+
+# ``physicsnemo.diffusion.multi_diffusion`` and ``physicsnemo.diffusion.noise_schedulers``
+# transitively import ``physicsnemo.domain_parallel``, which in turn imports
+# optional torch.distributed internals that are not available on every
+# supported torch version (e.g., torch 2.11 removed
+# ``torch.distributed.tensor._ops.registration``). When the optional
+# dependency fails to import we skip the whole module with a clear reason
+# so that the rest of the test suite is unaffected. ``test_multi_diffusion_models``
+# is imported here as well because it transitively pulls in the same optional
+# stack and we reuse its helpers/constants.
+try:
+    from physicsnemo.diffusion.multi_diffusion import (
+        MultiDiffusionModel2D,
+        MultiDiffusionMSEDSMLoss,
+        MultiDiffusionWeightedMSEDSMLoss,
+    )
+    from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+
+    from .test_multi_diffusion_models import (
+        BATCH,
+        CHANNELS,
+        IMG_H,
+        IMG_H_NS,
+        IMG_W,
+        IMG_W_NS,
+        INPUT_SHAPE,
+        PATCH_NUM,
+        PATCH_SHAPE,
+        PATCH_SHAPE_NS,
+        _create_md_model,
+        _make_condition,
+    )
+except ImportError as e:
+    pytest.skip(
+        f"multi-diffusion optional dependency unavailable: {e}",
+        allow_module_level=True,
+    )
 
 REF_PREFIX = "test_multi_diffusion_losses_"
 LR = 1e-2
@@ -55,6 +71,8 @@ LOSS_CONFIGS = [
     ("posembd_learn", "x0", (IMG_H, IMG_W), PATCH_SHAPE, "posembd_x0_sq"),
     ("uncond", "score", (IMG_H, IMG_W), PATCH_SHAPE, "uncond_score_sq"),
     ("cond_patch", "score", (IMG_H, IMG_W), PATCH_SHAPE, "cond_patch_score_sq"),
+    ("uncond", "epsilon", (IMG_H, IMG_W), PATCH_SHAPE, "uncond_eps_sq"),
+    ("cond_patch", "epsilon", (IMG_H, IMG_W), PATCH_SHAPE, "cond_patch_eps_sq"),
     ("uncond", "x0", (IMG_H_NS, IMG_W_NS), PATCH_SHAPE_NS, "uncond_x0_ns"),
     ("cond_patch", "x0", (IMG_H_NS, IMG_W_NS), PATCH_SHAPE_NS, "cond_patch_x0_ns"),
 ]
@@ -75,6 +93,8 @@ def _make_loss(md, scheduler, prediction_type):
     kwargs = {}
     if prediction_type == "score":
         kwargs["score_to_x0_fn"] = scheduler.score_to_x0
+    elif prediction_type == "epsilon":
+        kwargs["epsilon_to_x0_fn"] = scheduler.epsilon_to_x0
     return MultiDiffusionMSEDSMLoss(
         md, scheduler, prediction_type=prediction_type, **kwargs
     )
@@ -85,6 +105,8 @@ def _make_weighted_loss(md, scheduler, prediction_type):
     kwargs = {}
     if prediction_type == "score":
         kwargs["score_to_x0_fn"] = scheduler.score_to_x0
+    elif prediction_type == "epsilon":
+        kwargs["epsilon_to_x0_fn"] = scheduler.epsilon_to_x0
     return MultiDiffusionWeightedMSEDSMLoss(
         md, scheduler, prediction_type=prediction_type, **kwargs
     )
@@ -161,6 +183,24 @@ class TestConstructor:
         md.set_random_patching(patch_shape=PATCH_SHAPE, patch_num=PATCH_NUM)
         with pytest.raises(ValueError, match="score_to_x0_fn"):
             MultiDiffusionMSEDSMLoss(md, EDMNoiseScheduler(), prediction_type="score")
+
+    def test_epsilon_requires_fn(self):
+        md = _create_md_model("uncond")
+        md.set_random_patching(patch_shape=PATCH_SHAPE, patch_num=PATCH_NUM)
+        with pytest.raises(ValueError, match="epsilon_to_x0_fn"):
+            MultiDiffusionMSEDSMLoss(md, EDMNoiseScheduler(), prediction_type="epsilon")
+
+    def test_epsilon_constructor(self):
+        md = _create_md_model("uncond")
+        md.set_random_patching(patch_shape=PATCH_SHAPE, patch_num=PATCH_NUM)
+        scheduler = EDMNoiseScheduler()
+        loss_fn = MultiDiffusionMSEDSMLoss(
+            md,
+            scheduler,
+            prediction_type="epsilon",
+            epsilon_to_x0_fn=scheduler.epsilon_to_x0,
+        )
+        assert loss_fn.model is md
 
     def test_invalid_reduction(self):
         md = _create_md_model("uncond")
@@ -336,6 +376,7 @@ COMPILE_LOSS_CONFIGS = [
     ("uncond", "x0", (IMG_H, IMG_W), PATCH_SHAPE, "uncond_x0_sq"),
     ("cond_patch", "x0", (IMG_H, IMG_W), PATCH_SHAPE, "cond_patch_x0_sq"),
     ("uncond", "score", (IMG_H, IMG_W), PATCH_SHAPE, "uncond_score_sq"),
+    ("uncond", "epsilon", (IMG_H, IMG_W), PATCH_SHAPE, "uncond_eps_sq"),
 ]
 
 
