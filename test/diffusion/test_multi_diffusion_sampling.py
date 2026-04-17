@@ -260,9 +260,10 @@ class TestMultiDiffusionSampleCompile:
             num_steps=NUM_STEPS_SHORT,
         )
 
-        # Compiled path: compile the predictor, build a new denoiser around it
-        compiled_predictor = torch.compile(predictor, fullgraph=True)
-        denoiser_compiled = scheduler.get_denoiser(x0_predictor=compiled_predictor)
+        # Compiled path: compile the denoiser (same pattern as test_samplers.py
+        # TestSampleCompile). Compiling the denoiser-closure traces through the
+        # predictor and is more robust than compiling the predictor instance directly.
+        denoiser_compiled = torch.compile(denoiser_eager, fullgraph=True)
 
         with torch.no_grad():
             torch.manual_seed(GLOBAL_SEED)
