@@ -289,14 +289,7 @@ class TestMultiDiffusionSampleCompile:
                 solver_options=solver_options,
             )
 
-        # Under torch>=2.10 the euler path diverges numerically from eager (heun
-        # is fine, predictor compiles cleanly in isolation — likely an upstream
-        # Dynamo bug). For euler we only check shape + isfinite until resolved.
-        if solver_name == "euler":
-            assert x0_compiled.shape == x0_eager.shape
-            assert torch.isfinite(x0_compiled).all()
-        else:
-            torch.testing.assert_close(x0_eager, x0_compiled, atol=0.5, rtol=0.3)
+        torch.testing.assert_close(x0_eager, x0_compiled, atol=0.5, rtol=0.3)
 
         # Second compiled call — must reuse the graph (error_on_recompile guards this)
         with torch.no_grad():
