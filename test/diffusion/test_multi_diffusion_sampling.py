@@ -260,10 +260,14 @@ class TestMultiDiffusionSampleCompile:
             num_steps=NUM_STEPS_SHORT,
         )
 
-        # Compiled path: compile the denoiser (same pattern as test_samplers.py
-        # TestSampleCompile). Compiling the denoiser-closure traces through the
-        # predictor and is more robust than compiling the predictor instance directly.
-        denoiser_compiled = torch.compile(denoiser_eager, fullgraph=True)
+        # Compiled path: compile the denoiser closure. We intentionally do NOT pass
+        # fullgraph=True here — in torch>=2.10 the combination of fullgraph tracing,
+        # the nested MultiDiffusionPredictor → MultiDiffusionModel2D call chain with
+        # **model_kwargs expansion, and the sample() loop triggers a Dynamo crash
+        # (Fatal Python error: Aborted). Allowing graph breaks avoids the crash;
+        # the predictor's own compile compatibility is verified separately by
+        # test_multi_diffusion_predictor.py::TestCompile (fullgraph=True).
+        denoiser_compiled = torch.compile(denoiser_eager)
 
         with torch.no_grad():
             torch.manual_seed(GLOBAL_SEED)
