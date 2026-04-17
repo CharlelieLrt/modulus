@@ -327,8 +327,10 @@ class DDPMSolver:
         mu = _bc(1.0 / alpha_ind.sqrt()) * (x - _bc(beta / sigma_t) * eps)
 
         # Posterior noise (skip at t=0)
-        if self.stochastic and t_next.sum() > 0:
-            mu = mu + _bc(beta.sqrt()) * torch.randn_like(x)
+        if self.stochastic:
+            noise_mask = (t_next > 0).float()
+            if noise_mask.any():
+                mu = mu + _bc(noise_mask) * _bc(beta.sqrt()) * torch.randn_like(x)
 
         return mu
 
