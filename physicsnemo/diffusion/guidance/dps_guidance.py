@@ -159,7 +159,7 @@ class DPSGuidance(Protocol):
         ...
 
 
-class DPSScorePredictor:
+class DPSScorePredictor(Predictor):
     r"""
     Score predictor that combines an x0-predictor with DPS-style guidance.
 

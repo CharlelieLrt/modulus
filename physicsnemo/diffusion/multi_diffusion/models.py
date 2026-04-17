@@ -401,6 +401,7 @@ class MultiDiffusionModel2D(Module):
         self._patching: RandomPatching2D | GridPatching2D | None = None
         self._patching_type: Literal["random", "grid"] | None = None
         self._fuse: bool = False
+        self._skip_positional_embedding_injection: bool = False
         # Normalise condition flags to defaultdict for uniform access
         if not isinstance(condition_patch, (bool, dict)):
             raise TypeError(
@@ -890,26 +891,13 @@ class MultiDiffusionModel2D(Module):
                     "The model will run without patching.",
                     stacklevel=2,
                 )
-            if self.pos_embd is not None:
+            if (
+                self.pos_embd is not None
+                and not self._skip_positional_embedding_injection
+            ):
                 B = x.shape[0]
                 pos_embd = self.pos_embd.unsqueeze(0).expand(B, -1, -1, -1)
-                if condition is None:
-                    condition = TensorDict(
-                        {"positional_embedding": pos_embd}, batch_size=[B]
-                    )
-                elif isinstance(condition, TensorDict):
-                    condition["positional_embedding"] = pos_embd
-                elif isinstance(condition, Tensor):
-                    condition = TensorDict(
-                        {"condition": condition, "positional_embedding": pos_embd},
-                        batch_size=[B],
-                    )
-                else:
-                    raise ValueError(
-                        "When positional embeddings are configured, condition "
-                        "must be a Tensor, TensorDict, or None, got "
-                        f"{type(condition).__name__}."
-                    )
+                condition = self._inject_patched_pos_embd(condition, pos_embd, B)
             return self.model(x, t, condition=condition, **model_kwargs)
 
         P = self._patching.patch_num
@@ -935,30 +923,15 @@ class MultiDiffusionModel2D(Module):
         if not condition_is_patched:
             condition = self.patch_condition(condition)
 
-        # Positional embeddings are always injected (internal to the wrapper)
-        if self.pos_embd is not None:
+        # Positional embeddings injected here unless _skip_positional_embedding_injection
+        # is set (e.g. by MultiDiffusionPredictor which pre-patches PE at construction time)
+        if self.pos_embd is not None and not self._skip_positional_embedding_injection:
             pos_embd_patched = self._patching.apply(
                 self.pos_embd.unsqueeze(0).expand(B, -1, -1, -1)
             )  # (P*B, C_PE, Hp, Wp)
-            PB = P * B
-            if condition is None:
-                condition = TensorDict(
-                    {"positional_embedding": pos_embd_patched},
-                    batch_size=[PB],
-                )
-            elif isinstance(condition, TensorDict):
-                condition["positional_embedding"] = pos_embd_patched
-            elif isinstance(condition, Tensor):
-                condition = TensorDict(
-                    {"condition": condition, "positional_embedding": pos_embd_patched},
-                    batch_size=[PB],
-                )
-            else:
-                raise ValueError(
-                    "When positional embeddings are configured, condition "
-                    "must be a Tensor, TensorDict, or None, got "
-                    f"{type(condition).__name__}."
-                )
+            condition = self._inject_patched_pos_embd(
+                condition, pos_embd_patched, P * B
+            )
 
         output = self.model(x, t, condition=condition, **model_kwargs)
 
@@ -1006,3 +979,35 @@ class MultiDiffusionModel2D(Module):
 
         # Default: repeat along batch dimension
         return tensor.repeat(P, *([1] * (tensor.ndim - 1)))
+
+    def _inject_patched_pos_embd(
+        self,
+        condition: Tensor | TensorDict | None,
+        pos_embd_patched: Float[Tensor, "P_times_B C_PE Hp Wp"],
+        PB: int,
+    ) -> TensorDict:
+        """Inject an already-patched positional embedding into the (possibly
+        already-patched) condition under the ``"positional_embedding"`` key.
+
+        Common logic factored out of :meth:`forward` so it can be reused by
+        :class:`~physicsnemo.diffusion.multi_diffusion.MultiDiffusionPredictor`.
+        When ``condition`` is a ``TensorDict`` it is mutated in place for
+        efficiency; otherwise a new ``TensorDict`` is built.
+        """
+        if condition is None:
+            return TensorDict(
+                {"positional_embedding": pos_embd_patched},
+                batch_size=[PB],
+            )
+        if isinstance(condition, TensorDict):
+            condition["positional_embedding"] = pos_embd_patched
+            return condition
+        if isinstance(condition, Tensor):
+            return TensorDict(
+                {"condition": condition, "positional_embedding": pos_embd_patched},
+                batch_size=[PB],
+            )
+        raise ValueError(
+            "When positional embeddings are configured, condition must be a "
+            f"Tensor, TensorDict, or None, got {type(condition).__name__}."
+        )
