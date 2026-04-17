@@ -16,7 +16,7 @@
 
 """Multi-diffusion predictor wrapper for patch-based diffusion sampling."""
 
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 import torch
 from jaxtyping import Float
@@ -55,8 +55,7 @@ class MultiDiffusionPredictor:
         diffusion step. Pass ``None`` for unconditional models.
     fuse : bool, default=True
         Whether to fuse per-patch outputs back to the global resolution
-        before returning. The default ``True`` is what every sampling
-        utility expects.
+        before returning.
     **model_kwargs : Any
         Additional keyword arguments bound once at construction and
         forwarded to the wrapped model at every call.
@@ -209,6 +208,90 @@ class MultiDiffusionPredictor:
         # Set fuse via the property so it also updates _md_model._fuse
         self.fuse = fuse
 
+        # Build the hot-path call function at init — zero branches, no **kwargs
+        # expansion in __call__. Keeping the hot path flat helps torch.compile
+        # (especially with fullgraph=True) trace cleanly.
+        self._call_fn = self._build_call_fn(model_kwargs)
+
+    def _build_call_fn(
+        self,
+        model_kwargs: dict[str, Any],
+    ) -> Callable[[Tensor, Tensor], Tensor]:
+        """Return a specialized ``(x, t) -> prediction`` closure.
+
+        Dispatch on ``pos_embd`` presence and ``model_kwargs`` is resolved
+        once here, so the returned closure has no branches and does not
+        ``**``-expand any dict.
+        """
+        md = self._md_model
+        cond = self._cond_patched
+        pos = self._pos_embd_patched
+        P = self._P
+
+        if pos is None and not model_kwargs:
+
+            def _run(x: Tensor, t: Tensor) -> Tensor:
+                return md(
+                    md.patch_x(x),
+                    md.patch_t(t),
+                    condition=cond,
+                    x_is_patched=True,
+                    t_is_patched=True,
+                    condition_is_patched=True,
+                )
+
+            return _run
+
+        if pos is None:
+
+            def _run(x: Tensor, t: Tensor) -> Tensor:
+                return md(
+                    md.patch_x(x),
+                    md.patch_t(t),
+                    condition=cond,
+                    x_is_patched=True,
+                    t_is_patched=True,
+                    condition_is_patched=True,
+                    **model_kwargs,
+                )
+
+            return _run
+
+        inject = md._inject_patched_pos_embd
+
+        if not model_kwargs:
+
+            def _run(x: Tensor, t: Tensor) -> Tensor:
+                B = x.shape[0]
+                pe = pos.repeat_interleave(B, dim=0)  # (P*B, C_PE, Hp, Wp)
+                c = inject(cond, pe, P * B)
+                return md(
+                    md.patch_x(x),
+                    md.patch_t(t),
+                    condition=c,
+                    x_is_patched=True,
+                    t_is_patched=True,
+                    condition_is_patched=True,
+                )
+
+            return _run
+
+        def _run(x: Tensor, t: Tensor) -> Tensor:
+            B = x.shape[0]
+            pe = pos.repeat_interleave(B, dim=0)  # (P*B, C_PE, Hp, Wp)
+            c = inject(cond, pe, P * B)
+            return md(
+                md.patch_x(x),
+                md.patch_t(t),
+                condition=c,
+                x_is_patched=True,
+                t_is_patched=True,
+                condition_is_patched=True,
+                **model_kwargs,
+            )
+
+        return _run
+
     # fuse property: bound to the underlying model's fuse flag
     @property
     def fuse(self) -> bool:
@@ -244,20 +327,4 @@ class MultiDiffusionPredictor:
             Otherwise: per-patch predictions, shape
             :math:`(P \times B, C, H_p, W_p)`.
         """
-        B = x.shape[0]
-        x_patched = self._md_model.patch_x(x)  # (P*B, C, Hp, Wp)
-        t_patched = self._md_model.patch_t(t)  # (P*B,)
-        cond = self._cond_patched
-        if self._pos_embd_patched is not None:
-            # Expand cached PE from (P, ...) to (P*B, ...) and inject
-            pe = self._pos_embd_patched.repeat_interleave(B, dim=0)
-            cond = self._md_model._inject_patched_pos_embd(cond, pe, self._P * B)
-        return self._md_model(
-            x_patched,
-            t_patched,
-            condition=cond,
-            x_is_patched=True,
-            t_is_patched=True,
-            condition_is_patched=True,
-            **self._model_kwargs,
-        )
+        return self._call_fn(x, t)
