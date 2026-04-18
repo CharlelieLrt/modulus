@@ -18,17 +18,17 @@
 
 from typing import Any, cast
 
-import torch
 from jaxtyping import Float
 from tensordict import TensorDict
 from torch import Tensor
 
+from physicsnemo.diffusion.base import Predictor
 from physicsnemo.diffusion.multi_diffusion.models import MultiDiffusionModel2D
 from physicsnemo.diffusion.multi_diffusion.patching import GridPatching2D
 from physicsnemo.diffusion.utils.utils import _unwrap_module
 
 
-class MultiDiffusionPredictor:
+class MultiDiffusionPredictor(Predictor):
     r"""Predictor for sampling from a trained
     :class:`~physicsnemo.diffusion.multi_diffusion.MultiDiffusionModel2D`.
 
@@ -175,12 +175,11 @@ class MultiDiffusionPredictor:
             model, MultiDiffusionModel2D
         )
 
-        if not torch.compiler.is_compiling():
-            if self._md_model._patching_type != "grid":
-                raise RuntimeError(
-                    "MultiDiffusionPredictor requires grid patching to be configured. "
-                    "Call model.set_grid_patching() before creating the predictor."
-                )
+        if self._md_model._patching_type != "grid":
+            raise RuntimeError(
+                "MultiDiffusionPredictor requires grid patching to be configured. "
+                "Call model.set_grid_patching() before creating the predictor."
+            )
 
         # Grid patching is now guaranteed — narrow the type for downstream access
         self._patching: GridPatching2D = cast(GridPatching2D, self._md_model._patching)
