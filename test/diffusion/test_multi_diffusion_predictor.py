@@ -20,6 +20,7 @@ import pytest
 import torch
 from tensordict import TensorDict
 
+from physicsnemo.diffusion.multi_diffusion import MultiDiffusionModel2D
 from physicsnemo.diffusion.multi_diffusion.predictor import MultiDiffusionPredictor
 
 from .conftest import GLOBAL_SEED
@@ -80,100 +81,43 @@ def _create_predictor(
 
 
 class TestConstructor:
-    """Tests for MultiDiffusionPredictor constructor and public attributes."""
+    """Constructor tests covering the predictor's public contract.
 
-    def test_requires_grid_patching_raises(self):
+    These tests deliberately avoid asserting on private attributes such as
+    the pre-patched caches; the correctness of those caches is exercised end
+    to end by the non-regression tests.
+    """
+
+    @pytest.mark.parametrize(
+        "setup",
+        ["none", "random"],
+        ids=["no_patching", "random_patching"],
+    )
+    def test_requires_grid_patching(self, setup):
+        """Predictor construction raises when grid patching is not active."""
         md = _create_md_model("uncond")
+        if setup == "random":
+            md.set_random_patching(patch_shape=PATCH_SHAPE, patch_num=PATCH_NUM)
         with pytest.raises(RuntimeError, match="grid patching"):
             MultiDiffusionPredictor(md)
 
-    def test_requires_random_patching_raises(self):
-        md = _create_md_model("uncond")
-        md.set_random_patching(patch_shape=PATCH_SHAPE, patch_num=PATCH_NUM)
-        with pytest.raises(RuntimeError, match="grid patching"):
-            MultiDiffusionPredictor(md)
-
+    @pytest.mark.parametrize("fuse", [True, False], ids=["fuse_true", "fuse_false"])
     @pytest.mark.parametrize(
         "config_name",
         [c[0] for c in MD_CONFIGS],
         ids=[c[0] for c in MD_CONFIGS],
     )
-    def test_attributes(self, config_name):
-        md = _create_md_model(config_name)
-        md.set_grid_patching(patch_shape=PATCH_SHAPE, fuse=True)
-        condition = _make_condition(config_name)
-        pred = MultiDiffusionPredictor(md, condition=condition, fuse=True)
-        assert pred.fuse is True
-        assert pred._P == md._patching.patch_num
-        assert pred.model is md
-
-    def test_cond_patched_none_when_uncond(self):
-        md = _create_md_model("uncond")
-        md.set_grid_patching(patch_shape=PATCH_SHAPE)
-        pred = MultiDiffusionPredictor(md)
-        assert pred._cond_patched is None
-
-    @pytest.mark.parametrize(
-        "config_name",
-        ["cond_patch", "cond_interp", "cond_vec_img"],
-        ids=["cond_patch", "cond_interp", "cond_vec_img"],
-    )
-    def test_cond_patched_shape_when_conditional(self, config_name):
-        md = _create_md_model(config_name)
-        md.set_grid_patching(patch_shape=PATCH_SHAPE)
-        condition = _make_condition(config_name)
-        pred = MultiDiffusionPredictor(md, condition=condition)
-        assert pred._cond_patched is not None
-        assert pred._cond_patched["image"].shape[0] == BATCH * md._patching.patch_num
-
-    @pytest.mark.parametrize(
-        "config_name,channels_pe",
-        [("posembd_sin", 4), ("posembd_learn", 4)],
-        ids=["posembd_sin", "posembd_learn"],
-    )
-    def test_pos_embd_patched_when_configured(self, config_name, channels_pe):
-        md = _create_md_model(config_name)
-        md.set_grid_patching(patch_shape=PATCH_SHAPE)
-        condition = _make_condition(config_name)
-        pred = MultiDiffusionPredictor(md, condition=condition)
-        assert pred._pos_embd_patched is not None
-        P = md._patching.patch_num
-        Hp, Wp = PATCH_SHAPE
-        assert pred._pos_embd_patched.shape == (P, channels_pe, Hp, Wp)
-
-    @pytest.mark.parametrize(
-        "config_name",
-        ["uncond", "cond_patch", "cond_vec_img"],
-        ids=["uncond", "cond_patch", "cond_vec_img"],
-    )
-    def test_pos_embd_patched_none_when_not_configured(self, config_name):
-        md = _create_md_model(config_name)
-        md.set_grid_patching(patch_shape=PATCH_SHAPE)
-        condition = _make_condition(config_name)
-        pred = MultiDiffusionPredictor(md, condition=condition)
-        assert pred._pos_embd_patched is None
-
-    def test_pe_injection_disabled_on_model(self):
-        md = _create_md_model("posembd_sin")
-        md.set_grid_patching(patch_shape=PATCH_SHAPE)
-        condition = _make_condition("posembd_sin")
-        MultiDiffusionPredictor(md, condition=condition)
-        assert md._skip_positional_embedding_injection is True
-
-    def test_fuse_property_setter(self):
-        md = _create_md_model("uncond")
-        md.set_grid_patching(patch_shape=PATCH_SHAPE, fuse=True)
-        pred = MultiDiffusionPredictor(md, fuse=True)
-        assert pred.fuse is True
-        pred.fuse = False
-        assert pred.fuse is False
-        assert md._fuse is False
-
-    def test_fuse_default_true(self):
-        md = _create_md_model("uncond")
-        md.set_grid_patching(patch_shape=PATCH_SHAPE)
-        pred = MultiDiffusionPredictor(md)
-        assert pred.fuse is True
+    def test_public_api(self, config_name, fuse):
+        """Every MD_CONFIG constructs cleanly and exposes the documented API."""
+        pred = _create_predictor(config_name, fuse=fuse)
+        # .fuse property reports the value passed to the constructor
+        assert pred.fuse is fuse
+        # .model is the MultiDiffusionModel2D the predictor wraps
+        assert isinstance(pred.model, MultiDiffusionModel2D)
+        # .fuse setter round-trips and is reflected on the wrapped model
+        pred.fuse = not fuse
+        assert pred.fuse is (not fuse)
+        assert pred.model._fuse is (not fuse)
 
 
 # =============================================================================

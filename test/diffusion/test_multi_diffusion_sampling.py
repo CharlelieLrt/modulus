@@ -226,7 +226,13 @@ COMPILE_SOLVER_CONFIGS = [
     ids=[c[5] for c in COMPILE_SAMPLE_CONFIGS],
 )
 class TestMultiDiffusionSampleCompile:
-    """torch.compile tests: compiled predictor in sample() loop."""
+    """torch.compile tests: compiled denoiser in sample() loop.
+
+    Mirrors ``test_samplers.py::TestSampleCompile`` but with
+    ``MultiDiffusionPredictor`` supplying the x0 predictor inside the
+    denoiser. Compiling the denoiser closure (not the predictor instance) is
+    the same pattern used across the rest of the diffusion test suite.
+    """
 
     def test_compiled_denoiser_in_sample(
         self,
@@ -245,7 +251,7 @@ class TestMultiDiffusionSampleCompile:
         solver_options,
         solver_name,
     ):
-        """Compiled predictor produces same output as eager; graph reused on second call."""
+        """Compiled denoiser produces same output as eager; graph reused on second call."""
         torch._dynamo.config.error_on_recompile = True
 
         scheduler, md, predictor, denoiser_eager, xN = _make_sampling_components(
@@ -260,9 +266,7 @@ class TestMultiDiffusionSampleCompile:
             num_steps=NUM_STEPS_SHORT,
         )
 
-        # Compiled path: compile the predictor, build a new denoiser around it
-        compiled_predictor = torch.compile(predictor, fullgraph=True)
-        denoiser_compiled = scheduler.get_denoiser(x0_predictor=compiled_predictor)
+        denoiser_compiled = torch.compile(denoiser_eager, fullgraph=True)
 
         with torch.no_grad():
             torch.manual_seed(GLOBAL_SEED)
@@ -291,7 +295,7 @@ class TestMultiDiffusionSampleCompile:
 
         torch.testing.assert_close(x0_eager, x0_compiled, atol=0.5, rtol=0.3)
 
-        # Second compiled call — must reuse the graph (error_on_recompile guards this)
+        # Second compiled call, must reuse the graph (error_on_recompile guards this)
         with torch.no_grad():
             torch.manual_seed(GLOBAL_SEED)
             if "cuda" in str(device):
@@ -306,6 +310,95 @@ class TestMultiDiffusionSampleCompile:
             )
 
         torch.testing.assert_close(x0_compiled, x0_compiled_2, atol=0.5, rtol=0.3)
+
+
+# =============================================================================
+# Full Sampler Compile Tests
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "solver_key,solver_options,solver_name",
+    COMPILE_SOLVER_CONFIGS,
+    ids=[c[2] for c in COMPILE_SOLVER_CONFIGS],
+)
+@pytest.mark.parametrize(
+    "sched_cls,sched_kwargs,sched_name",
+    COMPILE_SCHEDULER_CONFIGS,
+    ids=[c[2] for c in COMPILE_SCHEDULER_CONFIGS],
+)
+@pytest.mark.parametrize(
+    "md_config,img_shape,patch_shape,overlap_pix,boundary_pix,config_tag",
+    COMPILE_SAMPLE_CONFIGS,
+    ids=[c[5] for c in COMPILE_SAMPLE_CONFIGS],
+)
+class TestMultiDiffusionFullSamplerCompile:
+    """Compile the entire ``sample()`` call (not just the denoiser).
+
+    Mirrors ``test_samplers.py::TestFullSamplerCompile``: wraps the
+    ``sample(denoiser, xN, scheduler, ..., solver=...)`` invocation in a
+    closure and compiles the whole thing with ``fullgraph=True``. Verifies
+    the graph is reused on a second call, and that the compiled output
+    matches eager within a loose tolerance.
+    """
+
+    def test_compiled_sample(
+        self,
+        deterministic_settings,
+        device,
+        md_config,
+        img_shape,
+        patch_shape,
+        overlap_pix,
+        boundary_pix,
+        config_tag,
+        sched_cls,
+        sched_kwargs,
+        sched_name,
+        solver_key,
+        solver_options,
+        solver_name,
+    ):
+        torch._dynamo.config.error_on_recompile = True
+
+        scheduler, md, predictor, denoiser, xN = _make_sampling_components(
+            md_config,
+            img_shape,
+            patch_shape,
+            overlap_pix,
+            boundary_pix,
+            sched_cls,
+            sched_kwargs,
+            device,
+            num_steps=NUM_STEPS_SHORT,
+        )
+
+        def do_sample(x):
+            return sample(
+                denoiser,
+                x,
+                scheduler,
+                NUM_STEPS_SHORT,
+                solver=solver_key,
+                solver_options=solver_options,
+            )
+
+        compiled_sample = torch.compile(do_sample, fullgraph=True)
+
+        with torch.no_grad():
+            x0_compiled = compiled_sample(xN)
+        assert x0_compiled.shape == xN.shape
+        assert torch.isfinite(x0_compiled).all()
+
+        # Second call must reuse the graph (error_on_recompile guards this)
+        with torch.no_grad():
+            x0_compiled_2 = compiled_sample(xN)
+        torch.testing.assert_close(x0_compiled, x0_compiled_2, atol=0.5, rtol=0.3)
+
+        # Eager vs compiled match, with a loose tolerance
+        with torch.no_grad():
+            x0_eager = do_sample(xN)
+        torch.testing.assert_close(x0_eager, x0_compiled, atol=2.0, rtol=2.0)
 
 
 # =============================================================================
