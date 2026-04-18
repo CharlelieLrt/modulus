@@ -898,7 +898,10 @@ class MultiDiffusionModel2D(Module):
                 and not self._skip_positional_embedding_injection
             ):
                 B = x.shape[0]
-                pos_embd = self.pos_embd.unsqueeze(0).expand(B, -1, -1, -1)
+                # .expand creates a stride-0 view that can trip up downstream
+                # torch ops (e.g. nn.ReflectionPad2d / F.unfold on torch 2.10).
+                # Materialise a contiguous copy before handing it off.
+                pos_embd = self.pos_embd.unsqueeze(0).expand(B, -1, -1, -1).contiguous()
                 condition = self._inject_patched_pos_embd(condition, pos_embd, B)
             return self.model(x, t, condition=condition, **model_kwargs)
 
@@ -928,8 +931,11 @@ class MultiDiffusionModel2D(Module):
         # Positional embeddings injected here unless _skip_positional_embedding_injection
         # is set (e.g. by MultiDiffusionPredictor which pre-patches PE at construction time)
         if self.pos_embd is not None and not self._skip_positional_embedding_injection:
+            # .expand creates a stride-0 view that can trip up downstream
+            # torch ops (e.g. nn.ReflectionPad2d / F.unfold on torch 2.10).
+            # Materialise a contiguous copy before passing to patching.
             pos_embd_patched = patching.apply(
-                self.pos_embd.unsqueeze(0).expand(B, -1, -1, -1)
+                self.pos_embd.unsqueeze(0).expand(B, -1, -1, -1).contiguous()
             )  # (P*B, C_PE, Hp, Wp)
             condition = self._inject_patched_pos_embd(
                 condition, pos_embd_patched, P * B
