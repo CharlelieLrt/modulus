@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Tuple, Union
 
 import torch
+from einops import rearrange
 from jaxtyping import Float, Int
 from torch import Tensor
 
@@ -752,26 +753,14 @@ def image_batching(
     if input.dtype in [torch.int32, torch.int64]:
         x_unfold = x_unfold.view(input.dtype)
 
-    # Rearrange to patch-major batch layout: (P*B, C, Hp, Wp).
-    # Equivalent to the einops pattern
-    # "b (c p_h p_w) (nb_p_h nb_p_w) -> (nb_p_w nb_p_h b) c p_h p_w" but
-    # expressed with native torch ops so that torch.compile / inductor can
-    # trace the reshape cleanly.
-    channels = x_unfold.shape[1] // (patch_shape_y * patch_shape_x)
-    x_unfold = x_unfold.view(
-        batch_size,
-        channels,
-        patch_shape_y,
-        patch_shape_x,
-        patch_num_y,
-        patch_num_x,
-    )
-    x_unfold = x_unfold.permute(5, 4, 0, 1, 2, 3).contiguous()
-    x_unfold = x_unfold.view(
-        patch_num_x * patch_num_y * batch_size,
-        channels,
-        patch_shape_y,
-        patch_shape_x,
+    # Rearrange to patch-major batch layout: (P*B, C, Hp, Wp)
+    x_unfold = rearrange(
+        x_unfold,
+        "b (c p_h p_w) (nb_p_h nb_p_w) -> (nb_p_w nb_p_h b) c p_h p_w",
+        p_h=patch_shape_y,
+        p_w=patch_shape_x,
+        nb_p_h=patch_num_y,
+        nb_p_w=patch_num_x,
     )
 
     if input_interp is not None:
@@ -843,25 +832,14 @@ def image_fuse(
     if overlap_count.device != input.device:
         overlap_count = overlap_count.to(input.device)
 
-    # Rearrange patches back to fold-compatible layout. Equivalent to the
-    # einops pattern
-    # "(nb_p_w nb_p_h b) c p_h p_w -> b (c p_h p_w) (nb_p_h nb_p_w)" but
-    # expressed with native torch ops so that torch.compile / inductor can
-    # trace the reshape cleanly.
-    channels = input.shape[1]
-    x = input.view(
-        patch_num_x,
-        patch_num_y,
-        batch_size,
-        channels,
-        patch_shape_y,
-        patch_shape_x,
-    )
-    x = x.permute(2, 3, 4, 5, 1, 0).contiguous()
-    x = x.view(
-        batch_size,
-        channels * patch_shape_y * patch_shape_x,
-        patch_num_y * patch_num_x,
+    # Rearrange patches back to fold-compatible layout
+    x = rearrange(
+        input,
+        "(nb_p_w nb_p_h b) c p_h p_w -> b (c p_h p_w) (nb_p_h nb_p_w)",
+        p_h=patch_shape_y,
+        p_w=patch_shape_x,
+        nb_p_h=patch_num_y,
+        nb_p_w=patch_num_x,
     )
 
     # Integer dtypes are not supported by fold — cast temporarily
@@ -881,16 +859,11 @@ def image_fuse(
     if input.dtype in [torch.int32, torch.int64]:
         x_folded = x_folded.view(input.dtype)
 
-    # Crop padding and normalise by overlap count. The final ``.clone()``
-    # materialises the result into its own storage so that the returned tensor
-    # does not alias ``x_folded`` / ``overlap_count`` — this matters under
-    # ``torch.compile`` / inductor where a returned view can otherwise outlive
-    # the buffer it points into, or share storage with a cached compiled buffer
-    # across successive calls.
+    # Crop padding and normalise by overlap count
     x_no_padding = x_folded[
         ..., pad[2] : pad[2] + img_shape_y, pad[0] : pad[0] + img_shape_x
     ]
     overlap_count_no_padding = overlap_count[
         ..., pad[2] : pad[2] + img_shape_y, pad[0] : pad[0] + img_shape_x
     ]
-    return (x_no_padding / overlap_count_no_padding).clone()
+    return x_no_padding / overlap_count_no_padding

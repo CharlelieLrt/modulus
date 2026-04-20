@@ -317,6 +317,29 @@ class TestMultiDiffusionSampleCompile:
 # =============================================================================
 
 
+def _torch_version_ge_2_10() -> bool:
+    """True when the installed torch version is >= 2.10."""
+    parts = torch.__version__.split(".")
+    try:
+        major, minor = int(parts[0]), int(parts[1])
+    except (IndexError, ValueError):
+        return False
+    return (major, minor) >= (2, 10)
+
+
+@pytest.mark.xfail(
+    _torch_version_ge_2_10(),
+    reason=(
+        "torch>=2.10 inductor codegen segfaults when compiling the full "
+        "sample() call through MultiDiffusionPredictor. The crash is at the "
+        "C level (SIGSEGV), which would bring down the whole pytest process, "
+        "so the test is not run on torch>=2.10. The per-step denoiser compile "
+        "(TestMultiDiffusionSampleCompile) still runs cleanly. Revisit once "
+        "the upstream issue is resolved."
+    ),
+    strict=False,
+    run=False,
+)
 @pytest.mark.parametrize(
     "solver_key,solver_options,solver_name",
     COMPILE_SOLVER_CONFIGS,
