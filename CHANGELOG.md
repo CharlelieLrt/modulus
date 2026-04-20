@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `uniform_grid_gradient`, `rectilinear_grid_gradient`,
   `spectral_grid_gradient`, `meshless_fd_derivatives`, `mesh_lsq_gradient`,
   and `mesh_green_gauss_gradient`.
+- Added geometry functionals in `physicsnemo.nn.functional` for
+  `mesh_poisson_disk_sample`, `mesh_to_voxel_fraction`, and
+  `signed_distance_field`.
 
 ### Changed
 

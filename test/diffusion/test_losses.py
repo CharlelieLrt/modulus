@@ -61,7 +61,7 @@ SPATIAL_CONFIGS = [
     ("2d", (BATCH, 3, 8, 6), Conv2dX0Predictor, {"channels": 3}),
 ]
 
-PREDICTION_TYPES = ["x0", "score"]
+PREDICTION_TYPES = ["x0", "score", "epsilon"]
 
 
 # =============================================================================
@@ -79,6 +79,8 @@ def _make_loss(model, scheduler, prediction_type):
     kwargs = {}
     if prediction_type == "score":
         kwargs["score_to_x0_fn"] = scheduler.score_to_x0
+    elif prediction_type == "epsilon":
+        kwargs["epsilon_to_x0_fn"] = scheduler.epsilon_to_x0
     return MSEDSMLoss(model, scheduler, prediction_type=prediction_type, **kwargs)
 
 
@@ -87,6 +89,8 @@ def _make_weighted_loss(model, scheduler, prediction_type):
     kwargs = {}
     if prediction_type == "score":
         kwargs["score_to_x0_fn"] = scheduler.score_to_x0
+    elif prediction_type == "epsilon":
+        kwargs["epsilon_to_x0_fn"] = scheduler.epsilon_to_x0
     return WeightedMSEDSMLoss(
         model, scheduler, prediction_type=prediction_type, **kwargs
     )
@@ -159,6 +163,22 @@ class TestConstructor:
         model = instantiate_model_deterministic(FlatLinearX0Predictor, features=48)
         with pytest.raises(ValueError, match="score_to_x0_fn"):
             MSEDSMLoss(model, EDMNoiseScheduler(), prediction_type="score")
+
+    def test_epsilon_requires_fn(self):
+        model = instantiate_model_deterministic(FlatLinearX0Predictor, features=48)
+        with pytest.raises(ValueError, match="epsilon_to_x0_fn"):
+            MSEDSMLoss(model, EDMNoiseScheduler(), prediction_type="epsilon")
+
+    def test_epsilon_constructor(self):
+        model = instantiate_model_deterministic(FlatLinearX0Predictor, features=48)
+        scheduler = EDMNoiseScheduler()
+        loss_fn = MSEDSMLoss(
+            model,
+            scheduler,
+            prediction_type="epsilon",
+            epsilon_to_x0_fn=scheduler.epsilon_to_x0,
+        )
+        assert loss_fn.model is model
 
     def test_invalid_reduction(self):
         model = instantiate_model_deterministic(FlatLinearX0Predictor, features=48)

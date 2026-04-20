@@ -66,6 +66,8 @@ LOSS_CONFIGS = [
     ("posembd_learn", "x0", (IMG_H, IMG_W), PATCH_SHAPE, "posembd_x0_sq"),
     ("uncond", "score", (IMG_H, IMG_W), PATCH_SHAPE, "uncond_score_sq"),
     ("cond_patch", "score", (IMG_H, IMG_W), PATCH_SHAPE, "cond_patch_score_sq"),
+    ("uncond", "epsilon", (IMG_H, IMG_W), PATCH_SHAPE, "uncond_eps_sq"),
+    ("cond_patch", "epsilon", (IMG_H, IMG_W), PATCH_SHAPE, "cond_patch_eps_sq"),
     ("uncond", "x0", (IMG_H_NS, IMG_W_NS), PATCH_SHAPE_NS, "uncond_x0_ns"),
     ("cond_patch", "x0", (IMG_H_NS, IMG_W_NS), PATCH_SHAPE_NS, "cond_patch_x0_ns"),
 ]
@@ -86,6 +88,8 @@ def _make_loss(md, scheduler, prediction_type):
     kwargs = {}
     if prediction_type == "score":
         kwargs["score_to_x0_fn"] = scheduler.score_to_x0
+    elif prediction_type == "epsilon":
+        kwargs["epsilon_to_x0_fn"] = scheduler.epsilon_to_x0
     return MultiDiffusionMSEDSMLoss(
         md, scheduler, prediction_type=prediction_type, **kwargs
     )
@@ -96,6 +100,8 @@ def _make_weighted_loss(md, scheduler, prediction_type):
     kwargs = {}
     if prediction_type == "score":
         kwargs["score_to_x0_fn"] = scheduler.score_to_x0
+    elif prediction_type == "epsilon":
+        kwargs["epsilon_to_x0_fn"] = scheduler.epsilon_to_x0
     return MultiDiffusionWeightedMSEDSMLoss(
         md, scheduler, prediction_type=prediction_type, **kwargs
     )
@@ -172,6 +178,24 @@ class TestConstructor:
         md.set_random_patching(patch_shape=PATCH_SHAPE, patch_num=PATCH_NUM)
         with pytest.raises(ValueError, match="score_to_x0_fn"):
             MultiDiffusionMSEDSMLoss(md, EDMNoiseScheduler(), prediction_type="score")
+
+    def test_epsilon_requires_fn(self):
+        md = _create_md_model("uncond")
+        md.set_random_patching(patch_shape=PATCH_SHAPE, patch_num=PATCH_NUM)
+        with pytest.raises(ValueError, match="epsilon_to_x0_fn"):
+            MultiDiffusionMSEDSMLoss(md, EDMNoiseScheduler(), prediction_type="epsilon")
+
+    def test_epsilon_constructor(self):
+        md = _create_md_model("uncond")
+        md.set_random_patching(patch_shape=PATCH_SHAPE, patch_num=PATCH_NUM)
+        scheduler = EDMNoiseScheduler()
+        loss_fn = MultiDiffusionMSEDSMLoss(
+            md,
+            scheduler,
+            prediction_type="epsilon",
+            epsilon_to_x0_fn=scheduler.epsilon_to_x0,
+        )
+        assert loss_fn.model is md
 
     def test_invalid_reduction(self):
         md = _create_md_model("uncond")
@@ -347,6 +371,7 @@ COMPILE_LOSS_CONFIGS = [
     ("uncond", "x0", (IMG_H, IMG_W), PATCH_SHAPE, "uncond_x0_sq"),
     ("cond_patch", "x0", (IMG_H, IMG_W), PATCH_SHAPE, "cond_patch_x0_sq"),
     ("uncond", "score", (IMG_H, IMG_W), PATCH_SHAPE, "uncond_score_sq"),
+    ("uncond", "epsilon", (IMG_H, IMG_W), PATCH_SHAPE, "uncond_eps_sq"),
 ]
 
 
