@@ -946,7 +946,10 @@ class MultiDiffusionModel2D(Module):
         if self._fuse:
             output = patching.fuse(output, batch_size=B)
 
-        return output
+        # .contiguous() on the way out so that a compiled caller (torch.compile)
+        # never receives a tensor that aliases an internal buffer whose lifetime
+        # ends with this frame.
+        return output.contiguous()
 
     # ------------------------------------------------------------------
     # Private helpers
