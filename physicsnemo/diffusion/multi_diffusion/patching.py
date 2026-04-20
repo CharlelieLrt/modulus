@@ -881,15 +881,16 @@ def image_fuse(
     if input.dtype in [torch.int32, torch.int64]:
         x_folded = x_folded.view(input.dtype)
 
-    # Crop padding and normalise by overlap count. The final ``.contiguous()``
+    # Crop padding and normalise by overlap count. The final ``.clone()``
     # materialises the result into its own storage so that the returned tensor
     # does not alias ``x_folded`` / ``overlap_count`` — this matters under
     # ``torch.compile`` / inductor where a returned view can otherwise outlive
-    # the buffer it points into.
+    # the buffer it points into, or share storage with a cached compiled buffer
+    # across successive calls.
     x_no_padding = x_folded[
         ..., pad[2] : pad[2] + img_shape_y, pad[0] : pad[0] + img_shape_x
     ]
     overlap_count_no_padding = overlap_count[
         ..., pad[2] : pad[2] + img_shape_y, pad[0] : pad[0] + img_shape_x
     ]
-    return (x_no_padding / overlap_count_no_padding).contiguous()
+    return (x_no_padding / overlap_count_no_padding).clone()
