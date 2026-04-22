@@ -42,21 +42,22 @@ class MultiDiffusionPredictor(Predictor):
 
     The wrapped model must have grid patching configured via
     :meth:`~MultiDiffusionModel2D.set_grid_patching` before constructing the
-    predictor.  The predictor is intended for **test-time sampling**: the
-    wrapped multi-diffusion model should already be trained.
+    predictor.  The predictor is intended for **test-time sampling**: it is not
+    suitable for training, and the wrapped multi-diffusion model should already
+    be trained.
 
     Parameters
     ----------
     model : MultiDiffusionModel2D
         A trained multi-diffusion model with grid patching already configured.
     condition : torch.Tensor, TensorDict, or None, optional, default=None
-        Shape :math:`(B, *cond_dims)`. Conditioning information at the
-        global resolution, bound once at construction and reused at every
-        diffusion step. Pass ``None`` for unconditional models.
+        When provided, the shape should be :math:`(B, *cond_dims)`.
+        Conditioning information at the global resolution, bound once at
+        construction and reused at every diffusion step. Pass ``None`` for
+        unconditional models.
     fuse : bool, default=True
         Whether to fuse per-patch outputs back to the global resolution
-        before returning. The default ``True`` is what every sampling
-        utility expects.
+        before returning.
     **model_kwargs : Any
         Additional keyword arguments bound once at construction and
         forwarded to the wrapped model at every call.
@@ -181,7 +182,6 @@ class MultiDiffusionPredictor(Predictor):
                 "Call model.set_grid_patching() before creating the predictor."
             )
 
-        # Grid patching is now guaranteed — narrow the type for downstream access
         self._patching: GridPatching2D = cast(GridPatching2D, self._md_model._patching)
 
         self.model = model
@@ -193,7 +193,7 @@ class MultiDiffusionPredictor(Predictor):
             condition
         )
 
-        # Pre-patch PE for B=1, expanded to (P*B) at call time via repeat_interleave
+        # Pre-patch PE for B=1, expanded to (P*B) at call time
         if self._md_model.pos_embd is not None:
             self._pos_embd_patched: Tensor | None = self._md_model.patch_x(
                 self._md_model.pos_embd.unsqueeze(0)
@@ -205,10 +205,8 @@ class MultiDiffusionPredictor(Predictor):
         # suppress the wrapper's own per-step PE injection to avoid redundant work
         self._md_model._skip_positional_embedding_injection = True
 
-        # Set fuse via the property so it also updates _md_model._fuse
         self.fuse = fuse
 
-    # fuse property: bound to the underlying model's fuse flag
     @property
     def fuse(self) -> bool:
         """Whether the predictor fuses per-patch outputs back to the global
