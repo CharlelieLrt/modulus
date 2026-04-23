@@ -14,3 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from .dataset import TCADMapsDataPipe, TCADMapsDataset
+
+__all__ = ["TCADMapsDataset", "TCADMapsDataPipe"]

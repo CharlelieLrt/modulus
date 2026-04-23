@@ -169,6 +169,8 @@ mlflow.db
 checkpoints/
 cache/
 output/
+examples/tcad/**/*.npz
+examples/tcad/**/*.png
 
 # Hydra
 outputs/

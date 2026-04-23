@@ -14,3 +14,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Path to the .mdlus checkpoint file produced by save_checkpoint during training.
+checkpoint: ???
+
+# Data
+dataset:
+  # Path to the maps_only/data/ directory.
+  data_dir: ???
+  # stats.json produced by compute_stats.py — required for normalization.
+  stats_file: ???
+
+# What to roll out. Each entry is a (thickness, sim_id) pair.
+rollout:
+  simulations:
+    - thickness: "2nm"
+      sim_id: 0
+    - thickness: "3nm"
+      sim_id: 0
+    - thickness: "4nm"
+      sim_id: 0
+
+# Output
+io:
+  # Directory for per-simulation .pth files.
+  output_dir: "./rollouts/"
+  # Log progress every N timesteps within a simulation.
+  logging_frequency: 20
+
+seed: 1234
