@@ -1,0 +1,310 @@
+# SPDX-FileCopyrightText: Copyright (c) 2023 - 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from __future__ import annotations
+
+import logging
+import random
+import time
+
+import hydra
+import numpy as np
+import torch
+from hydra.utils import to_absolute_path
+from omegaconf import DictConfig
+from torch.nn.parallel import DistributedDataParallel
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
+from physicsnemo.distributed import DistributedManager
+from physicsnemo.distributed.utils import reduce_loss
+from physicsnemo.utils import (
+    get_checkpoint_dir,
+    load_checkpoint,
+    save_checkpoint,
+)
+from physicsnemo.utils.logging import PythonLogger, RankZeroLoggingWrapper
+
+from dataset import TCADMapsDataPipe
+from utils.nn import TimeConditionedGeoTransolver
+
+
+def _build_scheduler(
+    optimizer: torch.optim.Optimizer,
+    cfg_scheduler: DictConfig,
+    num_training_samples: int,
+    max_training_samples: int,
+):
+    """Return an LR scheduler according to cfg, or ``None`` for constant lr.
+
+    Keeps the scheduler choice as an opt-in config block so recipes can run
+    with or without annealing. ``cfg_scheduler`` is expected to have a
+    ``name`` field; anything else depends on the scheduler kind.
+
+    Parameters
+    ----------
+    optimizer : torch.optim.Optimizer
+        Optimizer to wrap.
+    cfg_scheduler : DictConfig or None
+        Scheduler config block. ``None`` or ``name=null`` disables scheduling.
+        Currently supported names: ``"cosine_annealing"`` with ``eta_min``.
+    num_training_samples : int
+        Size of the training dataset (one ``scheduler.step()`` per that many
+        samples seen).
+    max_training_samples : int
+        Total number of samples the training loop will see before stopping;
+        used to compute ``T_max`` of the cosine schedule.
+    """
+    if cfg_scheduler is None:
+        return None
+    name = cfg_scheduler.name
+    if name is None:
+        return None
+    if name == "cosine_annealing":
+        return CosineAnnealingLR(
+            optimizer,
+            T_max=max(1, max_training_samples // num_training_samples),
+            eta_min=float(cfg_scheduler.eta_min),
+        )
+    raise ValueError(
+        f"Unknown scheduler name {name!r}; expected null or 'cosine_annealing'."
+    )
+
+
+@hydra.main(version_base="1.3", config_path="conf", config_name="config_train_no_PF")
+def main(cfg: DictConfig) -> None:
+    """Train a :class:`TimeConditionedGeoTransolver` with pure teacher forcing.
+
+    Sample-based loop driven by ``InfiniteSampler``. Each iteration feeds the
+    ground-truth state at step ``n`` to the model and regresses against the
+    ground-truth state at step ``n+1``. No push-forward, no schedule — the
+    dataset returns windows of 2 consecutive timesteps.
+    """
+    # Distributed init
+    DistributedManager.initialize()
+    dist = DistributedManager()
+
+    random.seed(cfg.seed)
+    np.random.seed(cfg.seed)
+    torch.manual_seed(cfg.seed)
+
+    logger = PythonLogger("main")
+    logger.logger.setLevel(logging.INFO)
+    rank_zero = RankZeroLoggingWrapper(logger, dist)
+    rank_zero.info(f"Rank {dist.rank}/{dist.world_size} | device {dist.device}")
+
+    checkpoint_dir = get_checkpoint_dir(str(cfg.io.checkpoint_dir), "tcad_maps_only")
+
+    # Model instantiation
+    model = TimeConditionedGeoTransolver(
+        functional_dim=2,
+        out_dim=2,
+        global_dim=2,
+        n_layers=cfg.model.n_layers,
+        n_hidden=cfg.model.n_hidden,
+        n_head=cfg.model.n_head,
+        slice_num=cfg.model.slice_num,
+        mlp_ratio=cfg.model.mlp_ratio,
+        plus=cfg.model.plus,
+        time_embed_channels=cfg.model.time_embed_channels,
+    ).to(dist.device)
+    rank_zero.info(f"Model parameters: {model.num_parameters():,}")
+
+    if cfg.io.load_checkpoint:
+        load_checkpoint(checkpoint_dir, models=model)
+
+    # Compile before DDP wrap (per PyTorch recommendation)
+    if cfg.model.compile:
+        rank_zero.info("Compiling model with torch.compile ...")
+        model = torch.compile(model)
+
+    if dist.world_size > 1:
+        model = DistributedDataParallel(
+            model,
+            device_ids=[dist.local_rank],
+            output_device=dist.device,
+            broadcast_buffers=True,
+            find_unused_parameters=False,
+        )
+
+    # Resume metadata (for InfiniteSampler start_idx)
+    current_samples_trained = 0
+    if cfg.io.load_checkpoint:
+        metadata = {"current_samples_trained": 0}
+        load_checkpoint(checkpoint_dir, metadata_dict=metadata)
+        current_samples_trained = int(metadata["current_samples_trained"])
+        rank_zero.info(f"Resuming at samples trained: {current_samples_trained}")
+    total_batch_size = cfg.training.batch_size_per_gpu * dist.world_size
+    sampler_start_idx = current_samples_trained
+
+    # DataLoader
+    train_loader = TCADMapsDataPipe(
+        data_dir=to_absolute_path(cfg.dataset.data_dir),
+        batch_size_per_device=cfg.training.batch_size_per_gpu,
+        n_steps=cfg.dataset.n_steps,
+        stats_file=to_absolute_path(cfg.dataset.stats_file),
+        shuffle=True,
+        num_workers=cfg.training.num_workers,
+        process_rank=dist.rank,
+        world_size=dist.world_size,
+        start_idx=sampler_start_idx,
+        seed=cfg.seed,
+    )
+    num_training_samples = len(train_loader.dataset)
+    rank_zero.info(f"Training dataset: {num_training_samples} samples")
+    train_iter = iter(train_loader)
+
+    # Pre-fetch stats for normalization
+    coord_mean, coord_std = train_loader.get_stats("coords")
+    T_mean, T_std = train_loader.get_stats("temperature")
+    V_mean, V_std = train_loader.get_stats("potential")
+    _, t_scale = train_loader.get_stats("t")
+    # (1, 1, 2, 1) for broadcasting over (B, S, V, N)
+    var_mean = torch.tensor([T_mean, V_mean], device=dist.device).view(1, 1, 2, 1)
+    var_std = torch.tensor([T_std, V_std], device=dist.device).view(1, 1, 2, 1)
+    rank_zero.info(
+        f"Stats loaded | coord: ({coord_mean:.3e}, {coord_std:.3e}) | "
+        f"T: ({T_mean:.3f}, {T_std:.3f}) | V: ({V_mean:.3f}, {V_std:.3f}) | "
+        f"t_scale: {t_scale:.3e}"
+    )
+
+    # Optimizer + scheduler
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=cfg.training.lr,
+        betas=(0.9, 0.999),
+        weight_decay=cfg.training.weight_decay,
+    )
+    scheduler = _build_scheduler(
+        optimizer,
+        cfg_scheduler=cfg.training.scheduler,
+        num_training_samples=num_training_samples,
+        max_training_samples=cfg.training.max_training_samples,
+    )
+    rank_zero.info(
+        f"Scheduler: {scheduler.__class__.__name__ if scheduler is not None else 'None (constant lr)'}"
+    )
+
+    if dist.world_size > 1:
+        torch.distributed.barrier()
+    if cfg.io.load_checkpoint:
+        load_checkpoint(
+            checkpoint_dir,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            device=dist.device,
+        )
+
+    # Training loop
+    rank_zero.info("Training started...")
+    loss_running_mean = 0.0
+    n_loss_running_mean = 1
+    samples_since_logging = 0
+    samples_since_checkpoint = 0
+    samples_since_scheduler_update = 0
+    tick_start = time.time()
+
+    while current_samples_trained < cfg.training.max_training_samples:
+        model.train()
+        sample, _meta = next(train_iter)
+        sample = sample.to(dist.device, non_blocking=True)
+
+        # Normalization
+        positions = (sample["positions"] - coord_mean) / coord_std  # (B, N, 3)
+        variables = (sample["variables"] - var_mean) / var_std  # (B, 2, 2, N)
+        t_norm = sample["time"] / t_scale  # (B, 2), t=0 preserved
+
+        # Unpack the 2 consecutive timesteps: n → n+1
+        x_n = variables[:, 0].transpose(-1, -2).contiguous()  # (B, N, 2)
+        x_n1 = variables[:, 1].transpose(-1, -2).contiguous()  # (B, N, 2)
+
+        t_n_ = t_norm[:, 0]  # (B,)
+        dt_1 = t_norm[:, 1] - t_norm[:, 0]  # (B,)
+
+        # Single teacher-forcing pass: predict x_{n+1} from the ground-truth x_n
+        optimizer.zero_grad(set_to_none=True)
+        global_emb = torch.stack([t_n_, dt_1], dim=-1).unsqueeze(1)  # (B, 1, 2)
+        x_pred = model(
+            local_embedding=x_n,
+            local_positions=positions,
+            global_embedding=global_emb,
+            t=t_n_,
+            dt=dt_1,
+        )
+        loss = ((x_pred - x_n1) ** 2).mean()
+
+        loss.backward()
+        optimizer.step()
+
+        batch_size = x_n.shape[0]
+        mean_total_loss = reduce_loss(loss.item() * batch_size, dst_rank=0)
+
+        if dist.rank == 0:
+            loss_running_mean += (
+                mean_total_loss / total_batch_size - loss_running_mean
+            ) / n_loss_running_mean
+            n_loss_running_mean += 1
+
+        current_samples_trained += total_batch_size
+        samples_since_scheduler_update += total_batch_size
+        samples_since_logging += total_batch_size
+        samples_since_checkpoint += total_batch_size
+
+        # Scheduler step once per dataset-equivalent number of samples
+        if (
+            scheduler is not None
+            and samples_since_scheduler_update >= num_training_samples
+        ):
+            scheduler.step()
+            samples_since_scheduler_update = 0
+
+        # Periodic logging
+        if samples_since_logging >= cfg.io.logging_frequency:
+            elapsed = time.time() - tick_start
+            steps = samples_since_logging / total_batch_size
+            rank_zero.info(
+                f"samples: {current_samples_trained:>10d} | "
+                f"loss: {loss_running_mean:.3e} | "
+                f"lr: {optimizer.param_groups[0]['lr']:.2e} | "
+                f"throughput: {samples_since_logging / elapsed / 1000:.3f} ksamp/s | "
+                f"step: {elapsed / steps:.3f}s"
+            )
+            loss_running_mean = 0.0
+            n_loss_running_mean = 1
+            tick_start = time.time()
+            samples_since_logging = 0
+
+        # Periodic checkpoint
+        if samples_since_checkpoint >= cfg.io.checkpoint_frequency:
+            if dist.world_size > 1:
+                torch.distributed.barrier()
+            if dist.rank == 0:
+                save_checkpoint(
+                    checkpoint_dir,
+                    models=model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    metadata={"current_samples_trained": current_samples_trained},
+                )
+                rank_zero.info(
+                    f"Saved checkpoint at samples: {current_samples_trained}"
+                )
+            samples_since_checkpoint = 0
+
+    rank_zero.info("Training completed.")
+
+
+if __name__ == "__main__":
+    main()
