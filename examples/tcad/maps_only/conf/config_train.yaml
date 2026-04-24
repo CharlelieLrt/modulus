@@ -28,13 +28,6 @@ model:
   mlp_ratio: 4
   # Transolver++ features (Gumbel-softmax slicing, per-point temperature)
   plus: false
-  # Multi-scale local features via ball queries (needs geometry; currently off)
-  include_local_features: true
-  # Ball-query radii (normalized coords, std=1) when include_local_features=true.
-  # Ball queries pad missing neighbors with zeros — too-small radii degrade
-  # silently, so these are worth tuning explicitly. Lengths must match.
-  radii: [0.05, 0.25]
-  neighbors_in_radius: [8, 32]
   # Output dim of each SinusoidalTimestepEmbedding (one for t, one for dt);
   # the per-block AdaLN MLP consumes 2*time_embed_channels after concat.
   time_embed_channels: 64

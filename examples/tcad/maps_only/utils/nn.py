@@ -250,16 +250,6 @@ class TimeConditionedGeoTransolver(GeoTransolver):
         Activation function name. Default ``"gelu"``.
     plus : bool, optional
         Enable Transolver++ slicing. Default ``False``.
-    include_local_features : bool, optional
-        Concatenate multi-scale local (ball-query) features into the initial
-        token embedding. Requires ``local_positions`` at forward time.
-        Default ``False``.
-    radii : list of float or None, optional
-        Ball-query radii when ``include_local_features=True``.
-    neighbors_in_radius : list of int or None, optional
-        Per-radius neighbor budget when ``include_local_features=True``.
-    n_hidden_local : int, optional
-        Channels of each per-scale local feature. Default ``32``.
     attention_type : str, optional
         ``"GALE"`` or ``"GALE_FA"``. Default ``"GALE"``.
     concrete_dropout : bool, optional
@@ -281,10 +271,6 @@ class TimeConditionedGeoTransolver(GeoTransolver):
         dropout: float = 0.0,
         act: str = "gelu",
         plus: bool = False,
-        include_local_features: bool = False,
-        radii: list[float] | None = None,
-        neighbors_in_radius: list[int] | None = None,
-        n_hidden_local: int = 32,
         attention_type: str = "GALE",
         concrete_dropout: bool = False,
     ) -> None:
@@ -307,18 +293,12 @@ class TimeConditionedGeoTransolver(GeoTransolver):
             slice_num=slice_num,
             use_te=False,  # required by TimeCondGALEBlock (AdaLN vs fused LN+MLP)
             plus=plus,
-            include_local_features=include_local_features,
-            radii=radii,
-            neighbors_in_radius=neighbors_in_radius,
-            n_hidden_local=n_hidden_local,
             attention_type=attention_type,
             concrete_dropout=concrete_dropout,
         )
         self.__name__ = "TimeConditionedGeoTransolver"
 
-        effective_hidden = self.n_hidden + (
-            n_hidden_local * len(self.radii) if include_local_features else 0
-        )
+        effective_hidden = self.n_hidden
         context_dim = self.context_builder.get_context_dim()
         time_emb_dim = 2 * time_embed_channels
 
@@ -366,8 +346,7 @@ class TimeConditionedGeoTransolver(GeoTransolver):
         local_embedding : Tensor of shape ``(B, N, C)`` or tuple of such
             Per-point input features (single-stream or multi-stream).
         local_positions : Tensor of shape ``(B, N, 3)`` or tuple or None, optional
-            Per-point spatial coordinates; required when
-            ``include_local_features=True``.
+            Per-point spatial coordinates.
         global_embedding : Tensor of shape ``(B, G, Cg)`` or None, optional
             Per-sample global features. The training loop passes
             ``[t_norm, dt_norm]`` here so the shared context also carries the
@@ -394,15 +373,11 @@ class TimeConditionedGeoTransolver(GeoTransolver):
         time_emb = torch.cat([self.t_embed(t), self.dt_embed(dt)], dim=-1)
         # (B, 2 * time_embed_channels)
 
-        embedding_states, local_embedding_bq = self.context_builder.build_context(
+        embedding_states, _ = self.context_builder.build_context(
             local_embedding, local_positions, geometry, global_embedding
         )
 
         x = [self.preprocess[i](le) for i, le in enumerate(local_embedding)]
-        if self.include_local_features and local_embedding_bq is not None:
-            x = [
-                torch.cat([x[i], local_embedding_bq[i]], dim=-1) for i in range(len(x))
-            ]
 
         for block in self.blocks:
             x = block(tuple(x), time_emb, embedding_states)
