@@ -153,7 +153,6 @@ def main(cfg: DictConfig) -> None:
         slice_num=cfg.model.slice_num,
         mlp_ratio=cfg.model.mlp_ratio,
         plus=cfg.model.plus,
-        include_local_features=cfg.model.include_local_features,
         time_embed_channels=cfg.model.time_embed_channels,
     ).to(dist.device)
     rank_zero.info(f"Model parameters: {model.num_parameters():,}")

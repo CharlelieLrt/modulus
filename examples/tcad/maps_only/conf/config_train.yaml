@@ -28,8 +28,6 @@ model:
   mlp_ratio: 4
   # Transolver++ features (Gumbel-softmax slicing, per-point temperature)
   plus: false
-  # Multi-scale local features via ball queries (needs geometry; currently off)
-  include_local_features: false
   # Output dim of each SinusoidalTimestepEmbedding (one for t, one for dt);
   # the per-block AdaLN MLP consumes 2*time_embed_channels after concat.
   time_embed_channels: 64
@@ -66,7 +64,7 @@ training:
   push_forward:
     initial_fraction: 1.0
     final_fraction: 0.05
-    annealing_samples: 500000
+    annealing_samples: 250000
 
 # I/O and logging (PythonLogger only)
 io:
