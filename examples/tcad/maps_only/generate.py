@@ -24,13 +24,12 @@ from pathlib import Path
 import hydra
 import numpy as np
 import torch
+from dataset import TCADMapsDataset
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
+from utils.nn import TimeConditionedGeoTransolver
 
 from physicsnemo.utils.logging import PythonLogger
-
-from dataset import TCADMapsDataset
-from utils.nn import TimeConditionedGeoTransolver
 
 
 @hydra.main(version_base="1.3", config_path="conf", config_name="config_generate")
@@ -139,13 +138,17 @@ def main(cfg: DictConfig) -> None:
         start = time.time()
         with torch.no_grad():
             for i in range(T_len - 1):
-                x_curr = pred_vars_norm[i].transpose(0, 1).unsqueeze(0).contiguous()
+                x_curr_vals = (
+                    pred_vars_norm[i].transpose(0, 1).unsqueeze(0)
+                )  # (1, N, 2)
+                # Match training-time input layout: concat positions → (1, N, 5)
+                x_curr = torch.cat([x_curr_vals, positions_norm], dim=-1).contiguous()
                 t_n = t_norm[i : i + 1]
                 dt_n = t_norm[i + 1 : i + 2] - t_n
                 global_emb = torch.stack([t_n, dt_n], dim=-1).unsqueeze(1)
                 x_pred = model(
                     local_embedding=x_curr,
-                    local_positions=positions_norm,
+                    geometry=positions_norm,
                     global_embedding=global_emb,
                     t=t_n,
                     dt=dt_n,

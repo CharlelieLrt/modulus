@@ -23,10 +23,12 @@ import time
 import hydra
 import numpy as np
 import torch
+from dataset import TCADMapsDataPipe
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from utils.nn import TimeConditionedGeoTransolver
 
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.distributed.utils import reduce_loss
@@ -36,9 +38,6 @@ from physicsnemo.utils import (
     save_checkpoint,
 )
 from physicsnemo.utils.logging import PythonLogger, RankZeroLoggingWrapper
-
-from dataset import TCADMapsDataPipe
-from utils.nn import TimeConditionedGeoTransolver
 
 
 def _build_scheduler(
@@ -109,9 +108,10 @@ def main(cfg: DictConfig) -> None:
 
     # Model instantiation
     model = TimeConditionedGeoTransolver(
-        functional_dim=2,
+        functional_dim=5,  # temperature + potential + XYZ concatenated
         out_dim=2,
         global_dim=2,
+        geometry_dim=3,  # XYZ positions also fed through the geometry projector
         n_layers=cfg.model.n_layers,
         n_hidden=cfg.model.n_hidden,
         n_head=cfg.model.n_head,
@@ -209,12 +209,19 @@ def main(cfg: DictConfig) -> None:
 
     # Training loop
     rank_zero.info("Training started...")
-    loss_running_mean = 0.0
-    n_loss_running_mean = 1
     samples_since_logging = 0
     samples_since_checkpoint = 0
     samples_since_scheduler_update = 0
     tick_start = time.time()
+
+    # Loss EMA for logging. Time constant = half a dataset traversal in
+    # optimizer steps, so alpha = 2 * total_batch_size / num_training_samples.
+    ema_alpha = 2.0 * total_batch_size / max(1, num_training_samples)
+    loss_ema: float | None = None
+    rank_zero.info(
+        f"Loss EMA: alpha={ema_alpha:.3e} "
+        f"(tau ≈ {1.0 / ema_alpha:.0f} optimizer steps ≈ 0.5 epoch)"
+    )
 
     while current_samples_trained < cfg.training.max_training_samples:
         model.train()
@@ -227,8 +234,11 @@ def main(cfg: DictConfig) -> None:
         t_norm = sample["time"] / t_scale  # (B, 2), t=0 preserved
 
         # Unpack the 2 consecutive timesteps: n → n+1
-        x_n = variables[:, 0].transpose(-1, -2).contiguous()  # (B, N, 2)
+        x_n_vals = variables[:, 0].transpose(-1, -2).contiguous()  # (B, N, 2)
         x_n1 = variables[:, 1].transpose(-1, -2).contiguous()  # (B, N, 2)
+        # Concat normalized positions onto the input token stream → (B, N, 5).
+        # Targets stay at 2 channels (we only predict temperature + potential).
+        x_n = torch.cat([x_n_vals, positions], dim=-1).contiguous()
 
         t_n_ = t_norm[:, 0]  # (B,)
         dt_1 = t_norm[:, 1] - t_norm[:, 0]  # (B,)
@@ -238,7 +248,7 @@ def main(cfg: DictConfig) -> None:
         global_emb = torch.stack([t_n_, dt_1], dim=-1).unsqueeze(1)  # (B, 1, 2)
         x_pred = model(
             local_embedding=x_n,
-            local_positions=positions,
+            geometry=positions,
             global_embedding=global_emb,
             t=t_n_,
             dt=dt_1,
@@ -248,14 +258,13 @@ def main(cfg: DictConfig) -> None:
         loss.backward()
         optimizer.step()
 
-        batch_size = x_n.shape[0]
-        mean_total_loss = reduce_loss(loss.item() * batch_size, dst_rank=0)
-
-        if dist.rank == 0:
-            loss_running_mean += (
-                mean_total_loss / total_batch_size - loss_running_mean
-            ) / n_loss_running_mean
-            n_loss_running_mean += 1
+        # Update local EMA of the loss (one update per optimizer step).
+        loss_val = loss.item()
+        loss_ema = (
+            loss_val
+            if loss_ema is None
+            else ema_alpha * loss_val + (1.0 - ema_alpha) * loss_ema
+        )
 
         current_samples_trained += total_batch_size
         samples_since_scheduler_update += total_batch_size
@@ -270,19 +279,20 @@ def main(cfg: DictConfig) -> None:
             scheduler.step()
             samples_since_scheduler_update = 0
 
-        # Periodic logging
+        # Periodic logging — only reduce across ranks at log tick. The EMA is
+        # rank-local; mean of rank-local EMAs equals EMA of cross-rank-mean
+        # loss by linearity.
         if samples_since_logging >= cfg.io.logging_frequency:
+            reduced_loss = reduce_loss(loss_ema, dst_rank=0) / dist.world_size
             elapsed = time.time() - tick_start
             steps = samples_since_logging / total_batch_size
             rank_zero.info(
                 f"samples: {current_samples_trained:>10d} | "
-                f"loss: {loss_running_mean:.3e} | "
+                f"loss: {reduced_loss:.3e} | "
                 f"lr: {optimizer.param_groups[0]['lr']:.2e} | "
                 f"throughput: {samples_since_logging / elapsed / 1000:.3f} ksamp/s | "
                 f"step: {elapsed / steps:.3f}s"
             )
-            loss_running_mean = 0.0
-            n_loss_running_mean = 1
             tick_start = time.time()
             samples_since_logging = 0
 

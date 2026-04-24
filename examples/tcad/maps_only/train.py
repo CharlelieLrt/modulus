@@ -24,10 +24,12 @@ import time
 import hydra
 import numpy as np
 import torch
+from dataset import TCADMapsDataPipe
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
 from torch.nn.parallel import DistributedDataParallel
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from utils.nn import TimeConditionedGeoTransolver
 
 from physicsnemo.distributed import DistributedManager
 from physicsnemo.distributed.utils import reduce_loss
@@ -37,9 +39,6 @@ from physicsnemo.utils import (
     save_checkpoint,
 )
 from physicsnemo.utils.logging import PythonLogger, RankZeroLoggingWrapper
-
-from dataset import TCADMapsDataPipe
-from utils.nn import TimeConditionedGeoTransolver
 
 
 def _teacher_forcing_schedule(
@@ -144,9 +143,10 @@ def main(cfg: DictConfig) -> None:
 
     # Model instantiation
     model = TimeConditionedGeoTransolver(
-        functional_dim=2,
+        functional_dim=5,  # temperature + potential + XYZ concatenated
         out_dim=2,
         global_dim=2,
+        geometry_dim=3,  # XYZ positions also fed through the geometry projector
         n_layers=cfg.model.n_layers,
         n_hidden=cfg.model.n_hidden,
         n_head=cfg.model.n_head,
@@ -254,12 +254,19 @@ def main(cfg: DictConfig) -> None:
 
     # Training loop
     rank_zero.info("Training started...")
-    loss_running_mean = 0.0
-    n_loss_running_mean = 1
     samples_since_logging = 0
     samples_since_checkpoint = 0
     samples_since_scheduler_update = 0
     tick_start = time.time()
+
+    # Loss EMA for logging. Time constant = half a dataset traversal in
+    # optimizer steps, so alpha = 2 * total_batch_size / num_training_samples.
+    ema_alpha = 2.0 * total_batch_size / max(1, num_training_samples)
+    loss_ema: float | None = None
+    rank_zero.info(
+        f"Loss EMA: alpha={ema_alpha:.3e} "
+        f"(tau ≈ {1.0 / ema_alpha:.0f} optimizer steps ≈ 0.5 epoch)"
+    )
 
     while current_samples_trained < cfg.training.max_training_samples:
         model.train()
@@ -272,9 +279,12 @@ def main(cfg: DictConfig) -> None:
         t_norm = sample["time"] / t_scale  # (B, 3), t=0 preserved
 
         # Unpack 3 consecutive timesteps: n, n+1, n+2
-        x_n = variables[:, 0].transpose(-1, -2).contiguous()  # (B, N, 2)
+        x_n_vals = variables[:, 0].transpose(-1, -2).contiguous()  # (B, N, 2)
         x_n1 = variables[:, 1].transpose(-1, -2).contiguous()  # (B, N, 2)
         x_n2 = variables[:, 2].transpose(-1, -2).contiguous()  # (B, N, 2)
+        # Concat normalized positions onto the input token stream → (B, N, 5).
+        # Targets stay at 2 channels (we only predict temperature + potential).
+        x_n = torch.cat([x_n_vals, positions], dim=-1).contiguous()
 
         t_n_ = t_norm[:, 0]  # (B,)
         t_n1_ = t_norm[:, 1]  # (B,)
@@ -286,18 +296,21 @@ def main(cfg: DictConfig) -> None:
         global_emb_1 = torch.stack([t_n_, dt_1], dim=-1).unsqueeze(1)  # (B, 1, 2)
         x_pred_p1 = model(
             local_embedding=x_n,
-            local_positions=positions,
+            geometry=positions,
             global_embedding=global_emb_1,
             t=t_n_,
             dt=dt_1,
         )
 
         # Pass 2: push-forward input (detached pass-1 output → predicts x_{n+2})
-        x_pred_p1_det = x_pred_p1.detach().clone()
+        # x_pred_p1 has 2 channels; re-concat positions to restore functional_dim=5.
+        x_pred_p1_det = torch.cat(
+            [x_pred_p1.detach().clone(), positions], dim=-1
+        ).contiguous()
         global_emb_2 = torch.stack([t_n1_, dt_2], dim=-1).unsqueeze(1)  # (B, 1, 2)
         x_pred_p2 = model(
             local_embedding=x_pred_p1_det,
-            local_positions=positions,
+            geometry=positions,
             global_embedding=global_emb_2,
             t=t_n1_,
             dt=dt_2,
@@ -330,26 +343,13 @@ def main(cfg: DictConfig) -> None:
         loss.backward()
         optimizer.step()
 
-        # Cross-rank reductions for logging
-        mean_total_loss = reduce_loss(loss.item() * batch_size, dst_rank=0)
-        stats_local = torch.tensor(
-            [
-                loss_tf_sum.detach().item(),
-                loss_pf_sum.detach().item(),
-                float(num_tf),
-                float(batch_size - num_tf),
-            ],
-            device=dist.device,
+        # Update local EMA of the loss (one update per optimizer step).
+        loss_val = loss.item()
+        loss_ema = (
+            loss_val
+            if loss_ema is None
+            else ema_alpha * loss_val + (1.0 - ema_alpha) * loss_ema
         )
-        if dist.world_size > 1:
-            torch.distributed.all_reduce(stats_local, op=torch.distributed.ReduceOp.SUM)
-        tf_sum_all, pf_sum_all, n_tf_all, n_pf_all = stats_local.tolist()
-
-        if dist.rank == 0:
-            loss_running_mean += (
-                mean_total_loss / total_batch_size - loss_running_mean
-            ) / n_loss_running_mean
-            n_loss_running_mean += 1
 
         current_samples_trained += total_batch_size
         samples_since_scheduler_update += total_batch_size
@@ -364,25 +364,21 @@ def main(cfg: DictConfig) -> None:
             scheduler.step()
             samples_since_scheduler_update = 0
 
-        # Periodic logging
+        # Periodic logging — only reduce across ranks at log tick. The EMA is
+        # rank-local; mean of rank-local EMAs equals EMA of cross-rank-mean
+        # loss by linearity.
         if samples_since_logging >= cfg.io.logging_frequency:
+            reduced_loss = reduce_loss(loss_ema, dst_rank=0) / dist.world_size
             elapsed = time.time() - tick_start
             steps = samples_since_logging / total_batch_size
-            avg_tf_loss = tf_sum_all / max(1.0, n_tf_all)
-            avg_pf_loss = pf_sum_all / max(1.0, n_pf_all)
             rank_zero.info(
                 f"samples: {current_samples_trained:>10d} | "
                 f"tf_frac: {tf_fraction:.3f} | "
-                f"n_tf: {int(n_tf_all)} | n_pf: {int(n_pf_all)} | "
-                f"loss: {loss_running_mean:.3e} | "
-                f"loss_tf: {avg_tf_loss:.3e} | "
-                f"loss_pf: {avg_pf_loss:.3e} | "
+                f"loss: {reduced_loss:.3e} | "
                 f"lr: {optimizer.param_groups[0]['lr']:.2e} | "
                 f"throughput: {samples_since_logging / elapsed / 1000:.3f} ksamp/s | "
                 f"step: {elapsed / steps:.3f}s"
             )
-            loss_running_mean = 0.0
-            n_loss_running_mean = 1
             tick_start = time.time()
             samples_since_logging = 0
 

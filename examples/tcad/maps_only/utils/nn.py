@@ -203,7 +203,7 @@ class TimeConditionedGeoTransolver(GeoTransolver):
     Examples
     --------
     >>> model = TimeConditionedGeoTransolver(
-    ...     functional_dim=2, out_dim=2, global_dim=2,
+    ...     functional_dim=2, out_dim=2, global_dim=2, geometry_dim=3,
     ...     n_layers=4, n_hidden=128, n_head=4,
     ...     time_embed_channels=64,
     ... )
@@ -212,7 +212,7 @@ class TimeConditionedGeoTransolver(GeoTransolver):
     >>> glob = torch.randn(2, 1, 2)
     >>> t = torch.rand(2)
     >>> dt = torch.rand(2) * 0.1
-    >>> y = model(x, pos, glob, t=t, dt=dt)
+    >>> y = model(x, glob, geometry=pos, t=t, dt=dt)
     >>> y.shape
     torch.Size([2, 100, 2])
 
@@ -329,9 +329,6 @@ class TimeConditionedGeoTransolver(GeoTransolver):
     def forward(
         self,
         local_embedding: (Float[Tensor, "B N C"] | tuple[Float[Tensor, "B N C"], ...]),
-        local_positions: (
-            Float[Tensor, "B N 3"] | tuple[Float[Tensor, "B N 3"], ...] | None
-        ) = None,
         global_embedding: Float[Tensor, "B G Cg"] | None = None,
         *,
         t: Float[Tensor, " B"],
@@ -345,8 +342,6 @@ class TimeConditionedGeoTransolver(GeoTransolver):
         ----------
         local_embedding : Tensor of shape ``(B, N, C)`` or tuple of such
             Per-point input features (single-stream or multi-stream).
-        local_positions : Tensor of shape ``(B, N, 3)`` or tuple or None, optional
-            Per-point spatial coordinates.
         global_embedding : Tensor of shape ``(B, G, Cg)`` or None, optional
             Per-sample global features. The training loop passes
             ``[t_norm, dt_norm]`` here so the shared context also carries the
@@ -356,7 +351,9 @@ class TimeConditionedGeoTransolver(GeoTransolver):
         dt : Tensor of shape ``(B,)``
             Normalized step size, one scalar per sample.
         geometry : Tensor of shape ``(B, N, Cgeo)`` or None, optional
-            Per-point geometry features.
+            Per-point geometry features. With ``geometry_dim`` set in the
+            constructor this is how the model sees positions — it is tokenized
+            by the geometry projector and fed into the shared context.
         return_embedding_states : bool, optional
             If True, also return the built context for inspection.
 
@@ -367,14 +364,12 @@ class TimeConditionedGeoTransolver(GeoTransolver):
         """
         single_input = isinstance(local_embedding, torch.Tensor)
         local_embedding = _normalize_tensor(local_embedding)
-        if local_positions is not None:
-            local_positions = _normalize_tensor(local_positions)
 
         time_emb = torch.cat([self.t_embed(t), self.dt_embed(dt)], dim=-1)
         # (B, 2 * time_embed_channels)
 
         embedding_states, _ = self.context_builder.build_context(
-            local_embedding, local_positions, geometry, global_embedding
+            local_embedding, None, geometry, global_embedding
         )
 
         x = [self.preprocess[i](le) for i, le in enumerate(local_embedding)]
