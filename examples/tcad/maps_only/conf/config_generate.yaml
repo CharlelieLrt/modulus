@@ -24,11 +24,13 @@ dataset:
   # stats.json produced by compute_stats.py — required for normalization.
   stats_file: ???
 
-# What to roll out. Each entry is a (thickness, sim_id) pair.
+# What to roll out. Each entry is a (thickness, sim_id) pair. Use
+# ``sim_id: "all"`` to expand into every simulation available for that
+# thickness in the dataset.
 rollout:
   simulations:
     - thickness: "2nm"
-      sim_id: 0
+      sim_id: "all"
     - thickness: "3nm"
       sim_id: 0
     - thickness: "4nm"
@@ -36,7 +38,9 @@ rollout:
 
 # Output
 io:
-  # Directory for per-simulation .pth files.
+  # Root directory for the rollouts. One subdirectory per thickness is
+  # created underneath, and each simulation lands in
+  # ``<output_dir>/<thickness>/rollout_sim<sim_id>.pth``.
   output_dir: "./rollouts/"
   # Log progress every N timesteps within a simulation.
   logging_frequency: 20

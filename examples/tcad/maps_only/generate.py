@@ -86,16 +86,22 @@ def main(cfg: DictConfig) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     logger.info(f"Output directory: {output_dir}")
 
-    sims = list(cfg.rollout.simulations)
-    logger.info(f"Rolling out {len(sims)} simulation(s)")
+    # Expand the ``rollout.simulations`` list, resolving any ``sim_id: "all"``
+    # entry into one ``(thickness, sim_id)`` pair per available simulation.
+    pairs: list[tuple[str, int]] = []
+    for sim_cfg in cfg.rollout.simulations:
+        thickness = str(sim_cfg.thickness)
+        sim_id_raw = sim_cfg.sim_id
+        if isinstance(sim_id_raw, str) and sim_id_raw.lower() == "all":
+            pairs.extend((thickness, sid) for sid in dataset.get_sim_ids(thickness))
+        else:
+            pairs.append((thickness, int(sim_id_raw)))
+    logger.info(f"Rolling out {len(pairs)} simulation(s)")
     logging_frequency = int(cfg.io.logging_frequency)
 
     overall_start = time.time()
 
-    for sim_cfg in sims:
-        thickness = str(sim_cfg.thickness)
-        sim_id = int(sim_cfg.sim_id)
-
+    for thickness, sim_id in pairs:
         indices = dataset.get_sim_indices(thickness, sim_id)
 
         # Gather all ground-truth timesteps for this sim (raw physical units).
@@ -197,7 +203,9 @@ def main(cfg: DictConfig) -> None:
             "mse_temperature": mse_T_t.cpu(),
             "mse_potential": mse_V_t.cpu(),
         }
-        out_path = output_dir / f"rollout_{thickness}_sim{sim_id}.pth"
+        sim_dir = output_dir / thickness
+        sim_dir.mkdir(parents=True, exist_ok=True)
+        out_path = sim_dir / f"rollout_sim{sim_id}.pth"
         torch.save(out, out_path)
         logger.info(f"[{thickness}/sim{sim_id}] saved → {out_path}")
 

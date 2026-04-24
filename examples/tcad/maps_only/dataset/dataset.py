@@ -233,6 +233,20 @@ class TCADMapsDataset(Dataset):
             )
         return indices
 
+    def get_sim_ids(self, thickness_str: str) -> list[int]:
+        """Return the sorted list of ``sim_id`` values available for ``thickness_str``.
+
+        Raises ``ValueError`` if no simulation exists for that thickness.
+        """
+        sim_ids = sorted(s for t, s in self._time_arrays if t == thickness_str)
+        if not sim_ids:
+            available = sorted({t for t, _ in self._time_arrays})
+            raise ValueError(
+                f"No simulations found for thickness={thickness_str!r}. "
+                f"Available thicknesses: {available}"
+            )
+        return sim_ids
+
 
 def _collate(
     batch: list[tuple[TensorDict, dict]],
