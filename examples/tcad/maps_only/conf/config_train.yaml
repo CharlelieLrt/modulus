@@ -19,7 +19,7 @@ model:
   # Number of GALE transformer blocks
   n_layers: 4
   # Hidden dimension of the transformer blocks
-  n_hidden: 128
+  n_hidden: 160
   # Number of attention heads (must divide n_hidden evenly)
   n_head: 4
   # Number of learnable physics-slice tokens per block
@@ -47,33 +47,33 @@ dataset:
 # Training schedule (sample-based)
 training:
   batch_size_per_gpu: 8
-  lr: 1.0e-3
+  lr: 5.0e-3
   weight_decay: 1.0e-4
   # Total samples to see before stopping
-  max_training_samples: 1000000
+  max_training_samples: 5000000
   # PyTorch DataLoader workers
   num_workers: 4
   # Learning-rate scheduler. Set to null to disable (constant lr) or
   # "cosine_annealing" to use CosineAnnealingLR with the parameters below.
   scheduler:
     name: cosine_annealing
-    eta_min: 1.0e-5
+    eta_min: 5.0e-4
   # Push-forward trick. teacher_forcing_fraction follows a tanh schedule:
   # at samples_trained == annealing_samples, it has traversed 95% of the way
   # from initial_fraction to final_fraction.
   push_forward:
     initial_fraction: 1.0
     final_fraction: 0.05
-    annealing_samples: 250000
+    annealing_samples: 1250000
 
 # I/O and logging (PythonLogger only)
 io:
   checkpoint_dir: "./checkpoints/"
   load_checkpoint: false
   # Log every N samples
-  logging_frequency: 2000
+  logging_frequency: 10000
   # Save checkpoint every N samples
-  checkpoint_frequency: 50000
+  checkpoint_frequency: 200000
 
 # Reproducibility
 seed: 1234
