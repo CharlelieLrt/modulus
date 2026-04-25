@@ -147,6 +147,10 @@ def main(cfg: DictConfig) -> None:
         current_samples_trained = int(metadata["current_samples_trained"])
         rank_zero.info(f"Resuming at samples trained: {current_samples_trained}")
     total_batch_size = cfg.training.batch_size_per_gpu * dist.world_size
+    rank_zero.info(
+        f"Batch size: per-GPU={cfg.training.batch_size_per_gpu} | "
+        f"total (across {dist.world_size} ranks)={total_batch_size}"
+    )
     sampler_start_idx = current_samples_trained
 
     # DataLoader
@@ -285,16 +289,19 @@ def main(cfg: DictConfig) -> None:
         # rank-local; mean of rank-local EMAs equals EMA of cross-rank-mean
         # loss by linearity.
         if samples_since_logging >= cfg.io.logging_frequency:
-            reduced_loss = reduce_loss(loss_ema, dst_rank=0) / dist.world_size
-            elapsed = time.time() - tick_start
-            steps = samples_since_logging / total_batch_size
-            rank_zero.info(
-                f"samples: {current_samples_trained:>10d} | "
-                f"loss: {reduced_loss:.3e} | "
-                f"lr: {optimizer.param_groups[0]['lr']:.2e} | "
-                f"throughput: {samples_since_logging / elapsed / 1000:.3f} ksamp/s | "
-                f"step: {elapsed / steps:.3f}s"
-            )
+            # Collective reduction — must be called by every rank.
+            loss_sum = reduce_loss(loss_ema, dst_rank=0)
+            if dist.rank == 0:
+                reduced_loss = loss_sum / dist.world_size
+                elapsed = time.time() - tick_start
+                steps = samples_since_logging / total_batch_size
+                rank_zero.info(
+                    f"samples: {current_samples_trained:>10d} | "
+                    f"loss: {reduced_loss:.3e} | "
+                    f"lr: {optimizer.param_groups[0]['lr']:.2e} | "
+                    f"throughput: {samples_since_logging / elapsed / 1000:.3f} ksamp/s | "
+                    f"step: {elapsed / steps:.3f}s"
+                )
             tick_start = time.time()
             samples_since_logging = 0
 
