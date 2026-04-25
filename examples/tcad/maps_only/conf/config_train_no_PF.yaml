@@ -47,7 +47,7 @@ dataset:
 # Training schedule (sample-based)
 training:
   batch_size_per_gpu: 8
-  lr: 5.0e-3
+  lr: 4.0e-3
   weight_decay: 1.0e-4
   # Total samples to see before stopping
   max_training_samples: 5000000

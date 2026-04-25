@@ -147,6 +147,10 @@ def main(cfg: DictConfig) -> None:
         current_samples_trained = int(metadata["current_samples_trained"])
         rank_zero.info(f"Resuming at samples trained: {current_samples_trained}")
     total_batch_size = cfg.training.batch_size_per_gpu * dist.world_size
+    rank_zero.info(
+        f"Batch size: per-GPU={cfg.training.batch_size_per_gpu} | "
+        f"total (across {dist.world_size} ranks)={total_batch_size}"
+    )
     sampler_start_idx = current_samples_trained
 
     # DataLoader
