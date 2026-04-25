@@ -126,6 +126,11 @@ def main(cfg: DictConfig) -> None:
         )
         t_norm = (times / t_scale).to(device)
         gt_vars_norm = (gt_vars.to(device) - var_mean) / var_std
+        # Dimensionless thickness as a (1, 1) tensor; model multiplies by
+        # max_positions internally.
+        thickness_t = torch.tensor(
+            [[thickness_m / coord_std]], dtype=torch.float32, device=device
+        )
 
         # Predicted states, seeded with the ground-truth initial condition.
         pred_vars_norm = torch.zeros_like(gt_vars_norm)
@@ -145,13 +150,12 @@ def main(cfg: DictConfig) -> None:
                 x_curr = torch.cat([x_curr_vals, positions_norm], dim=-1).contiguous()
                 t_n = t_norm[i : i + 1]
                 dt_n = t_norm[i + 1 : i + 2] - t_n
-                global_emb = torch.stack([t_n, dt_n], dim=-1).unsqueeze(1)
                 x_pred = model(
                     local_embedding=x_curr,
                     geometry=positions_norm,
-                    global_embedding=global_emb,
                     t=t_n,
                     dt=dt_n,
+                    thickness=thickness_t,
                 )
                 pred_vars_norm[i + 1] = x_pred.squeeze(0).transpose(0, 1).contiguous()
 

@@ -28,9 +28,14 @@ model:
   mlp_ratio: 4
   # Transolver++ features (Gumbel-softmax slicing, per-point temperature)
   plus: false
-  # Output dim of each SinusoidalTimestepEmbedding (one for t, one for dt);
-  # the per-block AdaLN MLP consumes 2*time_embed_channels after concat.
-  time_embed_channels: 64
+  # PositionalEmbedding output dim, shared by the time and thickness
+  # embeddings. Global-context input has width 2 * embed_channels (concat of
+  # the two); the per-block AdaLN MLP consumes embed_channels (time only).
+  embed_channels: 64
+  # Euler residual head: returns x_t[..., :out_dim] + dt * f(x_t, t, ...).
+  # Set False ONLY for an ablation run; with the residual head off the model
+  # returns the raw f and the loss magnitude becomes incomparable.
+  use_residual_head: true
   # torch.compile(model) before DDP wrap. Disable for debugging.
   compile: true
 

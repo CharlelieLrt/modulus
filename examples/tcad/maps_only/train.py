@@ -145,7 +145,6 @@ def main(cfg: DictConfig) -> None:
     model = TimeConditionedGeoTransolver(
         functional_dim=5,  # temperature + potential + XYZ concatenated
         out_dim=2,
-        global_dim=2,
         geometry_dim=3,  # XYZ positions also fed through the geometry projector
         n_layers=cfg.model.n_layers,
         n_hidden=cfg.model.n_hidden,
@@ -153,7 +152,8 @@ def main(cfg: DictConfig) -> None:
         slice_num=cfg.model.slice_num,
         mlp_ratio=cfg.model.mlp_ratio,
         plus=cfg.model.plus,
-        time_embed_channels=cfg.model.time_embed_channels,
+        embed_channels=cfg.model.embed_channels,
+        use_residual_head=cfg.model.use_residual_head,
     ).to(dist.device)
     rank_zero.info(f"Model parameters: {model.num_parameters():,}")
 
@@ -277,13 +277,16 @@ def main(cfg: DictConfig) -> None:
         positions = (sample["positions"] - coord_mean) / coord_std  # (B, N, 3)
         variables = (sample["variables"] - var_mean) / var_std  # (B, 3, 2, N)
         t_norm = sample["time"] / t_scale  # (B, 3), t=0 preserved
+        # (B, 1) dimensionless thickness; lands roughly in [0.5, 1.0] for our
+        # 2-4 nm range. Model multiplies by max_positions internally.
+        thickness = sample["thickness"] / coord_std
 
         # Unpack 3 consecutive timesteps: n, n+1, n+2
         x_n_vals = variables[:, 0].transpose(-1, -2).contiguous()  # (B, N, 2)
         x_n1 = variables[:, 1].transpose(-1, -2).contiguous()  # (B, N, 2)
         x_n2 = variables[:, 2].transpose(-1, -2).contiguous()  # (B, N, 2)
         # Concat normalized positions onto the input token stream → (B, N, 5).
-        # Targets stay at 2 channels (we only predict temperature + potential).
+        # The first 2 channels (T, V) are what the residual head writes onto.
         x_n = torch.cat([x_n_vals, positions], dim=-1).contiguous()
 
         t_n_ = t_norm[:, 0]  # (B,)
@@ -293,13 +296,12 @@ def main(cfg: DictConfig) -> None:
 
         # Pass 1: teacher-forcing input (ground-truth x_n → predicts x_{n+1})
         optimizer.zero_grad(set_to_none=True)
-        global_emb_1 = torch.stack([t_n_, dt_1], dim=-1).unsqueeze(1)  # (B, 1, 2)
         x_pred_p1 = model(
             local_embedding=x_n,
             geometry=positions,
-            global_embedding=global_emb_1,
             t=t_n_,
             dt=dt_1,
+            thickness=thickness,
         )
 
         # Pass 2: push-forward input (detached pass-1 output → predicts x_{n+2})
@@ -307,13 +309,12 @@ def main(cfg: DictConfig) -> None:
         x_pred_p1_det = torch.cat(
             [x_pred_p1.detach().clone(), positions], dim=-1
         ).contiguous()
-        global_emb_2 = torch.stack([t_n1_, dt_2], dim=-1).unsqueeze(1)  # (B, 1, 2)
         x_pred_p2 = model(
             local_embedding=x_pred_p1_det,
             geometry=positions,
-            global_embedding=global_emb_2,
             t=t_n1_,
             dt=dt_2,
+            thickness=thickness,
         )
 
         # Per-sample MSE for each pass, shape (B,)
