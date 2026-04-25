@@ -19,7 +19,7 @@ model:
   # Number of GALE transformer blocks
   n_layers: 4
   # Hidden dimension of the transformer blocks
-  n_hidden: 160
+  n_hidden: 128
   # Number of attention heads (must divide n_hidden evenly)
   n_head: 4
   # Number of learnable physics-slice tokens per block
