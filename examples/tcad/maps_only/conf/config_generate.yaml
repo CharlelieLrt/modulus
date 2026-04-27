@@ -23,6 +23,10 @@ dataset:
   data_dir: ???
   # stats.json produced by compute_stats.py — required for normalization.
   stats_file: ???
+  # Restrict the dataset to a single thickness ("2nm" / "3nm" / "4nm") or null
+  # for every thickness. Set this to match the model's training distribution
+  # when using a per-thickness checkpoint.
+  thickness: null
 
 # What to roll out. Each entry is a (thickness, sim_id) pair. Use
 # ``sim_id: "all"`` to expand into every simulation available for that

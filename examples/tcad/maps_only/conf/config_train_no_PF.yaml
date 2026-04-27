@@ -48,12 +48,16 @@ dataset:
   # Number of consecutive timesteps per sample: current (n) and target (n+1).
   # Pure teacher-forcing only needs 2.
   n_steps: 2
+  # Restrict training to a single thickness ("2nm" / "3nm" / "4nm"). Use null
+  # to train across every available thickness. Pair with the matching
+  # stats_*.json (e.g. stats_2nm.json) when set.
+  thickness: null
 
 # Training schedule (sample-based)
 training:
   batch_size_per_gpu: 64
   lr: 1.0e-3
-  weight_decay: 1.0e-4
+  weight_decay: 2.0e-5
   # Total samples to see before stopping
   max_training_samples: 5000000
   # PyTorch DataLoader workers

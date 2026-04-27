@@ -159,6 +159,7 @@ def main(cfg: DictConfig) -> None:
         batch_size_per_device=cfg.training.batch_size_per_gpu,
         n_steps=cfg.dataset.n_steps,
         stats_file=to_absolute_path(cfg.dataset.stats_file),
+        thickness=cfg.dataset.thickness,
         shuffle=True,
         num_workers=cfg.training.num_workers,
         process_rank=dist.rank,
@@ -167,7 +168,11 @@ def main(cfg: DictConfig) -> None:
         seed=cfg.seed,
     )
     num_training_samples = len(train_loader.dataset)
-    rank_zero.info(f"Training dataset: {num_training_samples} samples")
+    th_filter = cfg.dataset.thickness
+    rank_zero.info(
+        f"Training dataset: {num_training_samples} samples "
+        f"| thickness filter: {th_filter if th_filter is not None else '<all>'}"
+    )
     train_iter = iter(train_loader)
 
     # Pre-fetch stats for normalization

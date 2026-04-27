@@ -48,6 +48,20 @@ class TCADMapsDataset(Dataset):
     :meth:`get_stats`. For batching with DDP-aware infinite sampling, wrap with
     :class:`TCADMapsDataPipe`.
 
+    Parameters
+    ----------
+    data_dir : path
+        Path to the maps_only/data/ directory.
+    n_steps : int, optional
+        Number of consecutive timesteps per sample window. Default ``2``.
+    stats_file : path or None, optional
+        Path to a stats.json produced by ``compute_stats.py``. Default ``None``
+        (``get_stats()`` then raises).
+    thickness : str or None, optional
+        If set to one of ``"2nm"``, ``"3nm"``, ``"4nm"``, only simulations
+        under that thickness subdirectory are loaded. ``None`` (default) loads
+        every available thickness.
+
     Examples
     --------
     >>> ds = TCADMapsDataset("data/", n_steps=3, stats_file="data/stats.json")
@@ -65,9 +79,17 @@ class TCADMapsDataset(Dataset):
         data_dir: Path | str,
         n_steps: int = 2,
         stats_file: Path | str | None = None,
+        thickness: str | None = None,
     ) -> None:
         self._data_dir = Path(data_dir)
         self._n_steps = n_steps
+
+        if thickness is not None and thickness not in _THICKNESS_METERS:
+            raise ValueError(
+                f"thickness={thickness!r} is not one of "
+                f"{sorted(_THICKNESS_METERS)}; pass None to load every thickness."
+            )
+        self._thickness_filter = thickness
 
         # Load time arrays from i-vs-time/ (source of truth for sims + timestep counts)
         self._time_arrays: dict[tuple[str, int], np.ndarray] = {}
@@ -111,6 +133,11 @@ class TCADMapsDataset(Dataset):
             thickness = thickness_dir.name
             if thickness not in _THICKNESS_METERS:
                 continue
+            if (
+                self._thickness_filter is not None
+                and thickness != self._thickness_filter
+            ):
+                continue
             for time_file in sorted(thickness_dir.glob("I_time_t_*.txt")):
                 m = re.fullmatch(r"I_time_t_(\d+)\.txt", time_file.name)
                 if m is None:
@@ -121,8 +148,13 @@ class TCADMapsDataset(Dataset):
                 self._time_arrays[(thickness, sim_id)] = rows[:, 0].astype(np.float32)
 
         if not self._time_arrays:
+            extra = (
+                f" (thickness filter = {self._thickness_filter!r})"
+                if self._thickness_filter is not None
+                else ""
+            )
             raise FileNotFoundError(
-                f"No I_time_t_*.txt files found under {ivstime_root}. "
+                f"No I_time_t_*.txt files found under {ivstime_root}{extra}. "
                 "Expected subdirectories named after thicknesses (e.g. '2nm')."
             )
 
@@ -266,6 +298,38 @@ class TCADMapsDataPipe(DataLoader):
     proxies to the inner dataset so training code can fetch normalization
     statistics from the same object that produces batches.
 
+    Parameters
+    ----------
+    data_dir : path
+        Path to the maps_only/data/ directory.
+    batch_size_per_device : int
+        Per-rank batch size. The effective global batch is
+        ``batch_size_per_device * world_size``.
+    n_steps : int, optional
+        Number of consecutive timesteps per sample window. Default ``2``.
+    stats_file : path or None, optional
+        Path to a stats.json produced by ``compute_stats.py``. Default ``None``
+        (``get_stats()`` then raises).
+    thickness : str or None, optional
+        Forwarded to :class:`TCADMapsDataset`. ``"2nm"``, ``"3nm"``, ``"4nm"``,
+        or ``None`` (default) for every thickness.
+    shuffle : bool, optional
+        Whether the sampler shuffles indices. Default ``True``.
+    num_workers : int, optional
+        Number of DataLoader worker processes. Default ``4``.
+    prefetch_factor : int, optional
+        Number of samples loaded in advance per worker (only used when
+        ``num_workers > 0``). Default ``4``.
+    process_rank : int, optional
+        Rank of this process in the DDP group. Default ``0``.
+    world_size : int, optional
+        Total number of DDP ranks. Default ``1``.
+    start_idx : int, optional
+        Sample offset to resume from (used after a checkpoint reload).
+        Default ``0``.
+    seed : int, optional
+        Seed for the :class:`InfiniteSampler` shuffle. Default ``0``.
+
     Examples
     --------
     >>> loader = TCADMapsDataPipe(
@@ -287,6 +351,7 @@ class TCADMapsDataPipe(DataLoader):
         batch_size_per_device: int,
         n_steps: int = 2,
         stats_file: Path | str | None = None,
+        thickness: str | None = None,
         shuffle: bool = True,
         num_workers: int = 4,
         prefetch_factor: int = 4,
@@ -296,7 +361,10 @@ class TCADMapsDataPipe(DataLoader):
         seed: int = 0,
     ) -> None:
         dataset = TCADMapsDataset(
-            data_dir=data_dir, n_steps=n_steps, stats_file=stats_file
+            data_dir=data_dir,
+            n_steps=n_steps,
+            stats_file=stats_file,
+            thickness=thickness,
         )
         sampler = InfiniteSampler(
             dataset=dataset,

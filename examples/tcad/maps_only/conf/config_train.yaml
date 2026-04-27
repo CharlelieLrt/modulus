@@ -48,6 +48,10 @@ dataset:
   # Number of consecutive timesteps in each sample window. The push-forward
   # trick needs 3: current (n), next1 (n+1), next2 (n+2).
   n_steps: 3
+  # Restrict training to a single thickness ("2nm" / "3nm" / "4nm"). Use null
+  # to train across every available thickness. Pair with the matching
+  # stats_*.json (e.g. stats_2nm.json) when set.
+  thickness: null
 
 # Training schedule (sample-based)
 training:

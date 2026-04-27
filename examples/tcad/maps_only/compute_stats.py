@@ -127,6 +127,12 @@ def main() -> None:
     p.add_argument("--output", default="stats.json", help="Output JSON path")
     p.add_argument("--num-workers", type=int, default=4)
     p.add_argument("--batch-size", type=int, default=4)
+    p.add_argument(
+        "--thickness",
+        default=None,
+        help="Restrict stats computation to a single thickness "
+        "(e.g. '2nm'). Default: use every thickness in the dataset.",
+    )
     args = p.parse_args()
 
     DistributedManager.initialize()
@@ -136,7 +142,12 @@ def main() -> None:
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")  # silence "no stats_file" warning
-        dataset = TCADMapsDataset(args.data_dir, n_steps=1, stats_file=None)
+        dataset = TCADMapsDataset(
+            args.data_dir, n_steps=1, stats_file=None, thickness=args.thickness
+        )
+    rank_zero.info(
+        f"Thickness filter: {args.thickness if args.thickness is not None else '<all>'}"
+    )
     rank_zero.info(f"Dataset size: {len(dataset)} samples")
 
     sampler = (

@@ -28,7 +28,6 @@ import torch
 from matplotlib.animation import FuncAnimation
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
-from matplotlib.ticker import FixedFormatter, FixedLocator
 
 _VARIABLE_LABELS = {
     "temperature": ("Temperature (K)", "MSE T (K$^2$)"),
@@ -43,20 +42,32 @@ def _attach_shared_colorbar(
     colormap: str,
     label: str,
 ) -> None:
-    """One colorbar shared between the two top-row scatter axes."""
+    """One colorbar shared between the two top-row scatter axes, fully frozen.
+
+    The colorbar's data range, ticks, and tick labels are all pinned at
+    creation time and must not move during the animation.
+    """
     vmin, vmax = value_range
     sm = ScalarMappable(cmap=colormap, norm=Normalize(vmin=vmin, vmax=vmax))
-    sm.set_array([])
+    # Seed the ScalarMappable's array with [vmin, vmax] so the colorbar's
+    # internal data range is pinned to exactly these endpoints — set_array([])
+    # leaves it implicit and matplotlib can re-derive it on redraw.
+    sm.set_array(np.array([vmin, vmax], dtype=float))
+
     cbar = fig.colorbar(sm, ax=axes, shrink=0.6, pad=0.02, aspect=25)
     cbar.set_label(label, fontsize=9)
+
     span = vmax - vmin
     decimals = max(2, int(np.ceil(-np.log10(span + 1e-30))) + 1) if span > 0 else 2
     ticks = np.linspace(vmin, vmax, 6)
-    cbar.ax.yaxis.set_major_locator(FixedLocator(ticks))
-    cbar.ax.yaxis.set_major_formatter(
-        FixedFormatter([f"{v:.{decimals}f}" for v in ticks])
-    )
+    # High-level cbar API: set_ticks/set_ticklabels go through the colorbar's
+    # own machinery and survive re-layouts more reliably than poking yaxis.
+    cbar.set_ticks(ticks)
+    cbar.set_ticklabels([f"{v:.{decimals}f}" for v in ticks])
     cbar.ax.yaxis.offsetText.set_visible(False)
+    # Final clamp on the colorbar axes' visible range — defends against any
+    # autoscale that could be triggered by per-frame redraws of the scatters.
+    cbar.ax.set_ylim(vmin, vmax)
 
 
 def _configure_scatter_axes(
@@ -94,11 +105,14 @@ def animate_prediction(
     ts_start: int = 0,
     ts_end: int | None = None,
     dpi: int = 100,
-    clip: float = 2.0,
     elev: float = 30.0,
     azim: float = -60.0,
 ) -> None:
     """Animate ground-truth vs prediction for one rollout, with synchronized MSE.
+
+    The shared colorbar is pinned to the **ground-truth min/max** over the
+    selected timestep window, so the prediction's overshoots or undershoots
+    saturate against the physical reference.
 
     Parameters
     ----------
@@ -112,9 +126,6 @@ def animate_prediction(
     ts_start : first timestep to include (inclusive)
     ts_end : last timestep to include (exclusive); None = all
     dpi : figure resolution
-    clip : clip this percent from each end of the variable distribution when
-        computing the colorbar range. Higher values = more saturation. Use 0
-        for no clipping.
     elev, azim : view angles in degrees for the 3D scatter plots
     """
     if variable not in _VARIABLE_LABELS:
@@ -151,17 +162,15 @@ def animate_prediction(
     pred_sel = pred[sel]
     gt_sel = gt[sel]
 
-    # Shared color range across pred AND gt so the two panels are comparable,
-    # and frozen up-front so it never changes during the animation.
-    combined = np.concatenate([gt_sel.ravel(), pred_sel.ravel()])
-    value_range = (
-        float(np.percentile(combined, clip)),
-        float(np.percentile(combined, 100.0 - clip)),
-    )
+    # Color range = exact GT min / max over the whole rollout. Predictions may
+    # overshoot or undershoot — the shared colorbar saturates outside the GT
+    # band, which is the desired physical reference.
+    value_range = (float(gt_sel.min()), float(gt_sel.max()))
     cbar_label, _ = _VARIABLE_LABELS[variable]
     variable_title = variable.title()
     print(
-        f"{variable_title} range: [{value_range[0]:.4f}, {value_range[1]:.4f}]\n"
+        f"{variable_title} GT min/max: "
+        f"[{value_range[0]:.4f}, {value_range[1]:.4f}]\n"
         f"Thickness: {thickness_nm:.1f} nm | sim_id: {sim_id} | "
         f"frames: {times_sel.shape[0]}"
     )
@@ -312,13 +321,6 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--dpi", type=int, default=100, help="Figure DPI [default: 100]")
     p.add_argument(
-        "--clip",
-        type=float,
-        default=2.0,
-        help="Clip this percent from each end of the variable distribution "
-        "when computing the colorbar range (0 = use min/max) [default: 2.0]",
-    )
-    p.add_argument(
         "--elev",
         type=float,
         default=30.0,
@@ -345,7 +347,6 @@ if __name__ == "__main__":
         ts_start=args.ts_start,
         ts_end=args.ts_end,
         dpi=args.dpi,
-        clip=args.clip,
         elev=args.elev,
         azim=args.azim,
     )

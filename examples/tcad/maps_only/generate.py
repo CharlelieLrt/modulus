@@ -65,8 +65,13 @@ def main(cfg: DictConfig) -> None:
         data_dir=to_absolute_path(cfg.dataset.data_dir),
         n_steps=1,
         stats_file=to_absolute_path(cfg.dataset.stats_file),
+        thickness=cfg.dataset.thickness,
     )
-    logger.info(f"Dataset: {len(dataset)} samples across all sims")
+    th_filter = cfg.dataset.thickness
+    logger.info(
+        f"Dataset: {len(dataset)} samples across all sims "
+        f"| thickness filter: {th_filter if th_filter is not None else '<all>'}"
+    )
 
     # Stats for manual normalize / unnormalize.
     coord_mean, coord_std = dataset.get_stats("coords")
