@@ -19,7 +19,7 @@ model:
   # Number of GALE transformer blocks
   n_layers: 4
   # Hidden dimension of the transformer blocks
-  n_hidden: 256
+  n_hidden: 128
   # Number of attention heads (must divide n_hidden evenly)
   n_head: 4
   # Number of learnable physics-slice tokens per block
@@ -51,8 +51,8 @@ dataset:
 
 # Training schedule (sample-based)
 training:
-  batch_size_per_gpu: 8
-  lr: 4.0e-3
+  batch_size_per_gpu: 64
+  lr: 1.0e-3
   weight_decay: 1.0e-4
   # Total samples to see before stopping
   max_training_samples: 5000000
@@ -62,7 +62,7 @@ training:
   # "cosine_annealing" to use CosineAnnealingLR with the parameters below.
   scheduler:
     name: cosine_annealing
-    eta_min: 5.0e-4
+    eta_min: 1.0e-4
 
 # I/O and logging (PythonLogger only)
 io:
