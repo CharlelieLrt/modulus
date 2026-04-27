@@ -57,7 +57,7 @@ dataset:
 training:
   batch_size_per_gpu: 64
   lr: 1.0e-3
-  weight_decay: 2.0e-5
+  weight_decay: 1.0e-4
   # Total samples to see before stopping
   max_training_samples: 5000000
   # PyTorch DataLoader workers
@@ -66,7 +66,7 @@ training:
   # "cosine_annealing" to use CosineAnnealingLR with the parameters below.
   scheduler:
     name: cosine_annealing
-    eta_min: 1.0e-4
+    eta_min: 2.0e-5
 
 # I/O and logging (PythonLogger only)
 io:
