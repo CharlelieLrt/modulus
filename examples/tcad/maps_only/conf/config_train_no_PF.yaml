@@ -52,12 +52,33 @@ dataset:
   # to train across every available thickness. Pair with the matching
   # stats_*.json (e.g. stats_2nm.json) when set.
   thickness: null
+  # Importance-weighted sampling. enabled=false uses the uniform
+  # InfiniteSampler (default, unchanged behavior). enabled=true switches
+  # to a 2-tier weighted sampler driven by the standardized starting
+  # state of each sample: weight_i = max_n |T_n - T_mean|/T_std
+  #                              + max_n |V_n - V_mean|/V_std,
+  # evaluated at the sample's first timestep. Samples are then ranked by
+  # weight and split into a top tier (the top `weight_percentile` of
+  # ranks) and a bottom tier (the rest). Each tier is sampled uniformly
+  # internally; the top tier collectively integrates to
+  # `sampling_probability` of the draw mass, and the bottom tier
+  # integrates to (1 - sampling_probability).
+  #
+  # Sanity checks for the (weight_percentile, sampling_probability) pair:
+  #   sampling_probability == weight_percentile  -> uniform sampling
+  #   sampling_probability >  weight_percentile  -> top tier over-sampled
+  #   sampling_probability <  weight_percentile  -> top tier under-sampled
+  # We require sampling_probability >= weight_percentile.
+  weighted_sampling:
+    enabled: false
+    weight_percentile: 0.2
+    sampling_probability: 0.5
 
 # Training schedule (sample-based)
 training:
   batch_size_per_gpu: 64
   lr: 1.0e-3
-  weight_decay: 2.0e-5
+  weight_decay: 1.0e-4
   # Total samples to see before stopping
   max_training_samples: 5000000
   # PyTorch DataLoader workers
@@ -66,7 +87,7 @@ training:
   # "cosine_annealing" to use CosineAnnealingLR with the parameters below.
   scheduler:
     name: cosine_annealing
-    eta_min: 1.0e-4
+    eta_min: 2.0e-5
 
 # I/O and logging (PythonLogger only)
 io:
