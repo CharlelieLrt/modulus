@@ -24,7 +24,7 @@ import time
 import hydra
 import numpy as np
 import torch
-from dataset import TCADMapsDataPipe
+from dataset import TCADMapsDataPipe, TCADMapsDataset, apply_weight_schedule
 from hydra.utils import to_absolute_path
 from omegaconf import DictConfig
 from torch.nn.parallel import DistributedDataParallel
@@ -188,7 +188,28 @@ def main(cfg: DictConfig) -> None:
     )
     sampler_start_idx = current_samples_trained
 
-    # DataLoader
+    # Optional weighted sampling: weight each sample by the standardized
+    # starting state, then apply the 2-tier rank schedule. We instantiate
+    # a throwaway dataset just to compute the weight tensor -- the data
+    # pipe will build its own internally and keeps its public API
+    # unchanged.
+    ws_cfg = cfg.dataset.weighted_sampling
+    weights = None
+    if ws_cfg.enabled:
+        weights_ds = TCADMapsDataset(
+            data_dir=to_absolute_path(cfg.dataset.data_dir),
+            n_steps=cfg.dataset.n_steps,
+            stats_file=to_absolute_path(cfg.dataset.stats_file),
+            thickness=cfg.dataset.thickness,
+        )
+        raw_weights = weights_ds.compute_sample_weights()
+        weights = apply_weight_schedule(
+            raw_weights,
+            weight_percentile=float(ws_cfg.weight_percentile),
+            sampling_probability=float(ws_cfg.sampling_probability),
+        )
+        del weights_ds
+
     train_loader = TCADMapsDataPipe(
         data_dir=to_absolute_path(cfg.dataset.data_dir),
         batch_size_per_device=cfg.training.batch_size_per_gpu,
@@ -201,12 +222,21 @@ def main(cfg: DictConfig) -> None:
         world_size=dist.world_size,
         start_idx=sampler_start_idx,
         seed=cfg.seed,
+        weights=weights,
     )
     num_training_samples = len(train_loader.dataset)
     th_filter = cfg.dataset.thickness
+    if weights is not None:
+        ws_status = (
+            f"on (percentile={ws_cfg.weight_percentile}, "
+            f"prob={ws_cfg.sampling_probability})"
+        )
+    else:
+        ws_status = "off"
     rank_zero.info(
         f"Training dataset: {num_training_samples} samples "
-        f"| thickness filter: {th_filter if th_filter is not None else '<all>'}"
+        f"| thickness filter: {th_filter if th_filter is not None else '<all>'} "
+        f"| weighted sampling: {ws_status}"
     )
     train_iter = iter(train_loader)
 

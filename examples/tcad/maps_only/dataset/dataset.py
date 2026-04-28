@@ -20,6 +20,7 @@ import json
 import re
 import warnings
 from pathlib import Path
+from typing import Iterator
 
 import numpy as np
 import torch
@@ -247,6 +248,80 @@ class TCADMapsDataset(Dataset):
         entry = self._stats[var_name]
         return float(entry["mean"]), float(entry["std"])
 
+    def compute_sample_weights(self) -> Tensor:
+        """Per-sample importance weights from the standardized starting state.
+
+        For each sample ``(thickness, sim_id, ts_id)``, this loads the
+        temperature and potential fields at the *starting* timestep
+        ``ts_id``, standardizes them with the dataset stats, and combines
+        the two extremes:
+
+        .. math::
+
+            w_i = \\max_n \\left| \\frac{T_n(t_{\\rm s}) - T_\\mathrm{mean}}{T_\\mathrm{std}} \\right|
+                + \\max_n \\left| \\frac{V_n(t_{\\rm s}) - V_\\mathrm{mean}}{V_\\mathrm{std}} \\right|.
+
+        Samples whose starting state is unusual (hot spot, high field) get
+        higher weight; quiescent early states (close to dataset mean) get
+        small weight. The result is unit-free and balanced across T and V.
+
+        Use the returned tensor as input to :func:`apply_weight_schedule`,
+        then pass the schedule output to :class:`InfiniteWeightedSampler`.
+
+        Notes
+        -----
+        Reads every TSV file in the dataset once (cached per
+        ``(thickness, sim_id)``). For a few hundred sims this is on the
+        order of seconds and only happens at the start of training.
+
+        Returns
+        -------
+        Tensor
+            1D tensor of length ``len(self)`` with non-negative weights.
+        """
+        if self._stats is None:
+            raise RuntimeError(
+                "stats_file is required to compute sample weights "
+                "(used to standardize T and V before combining)."
+            )
+        T_mean, T_std = self.get_stats("temperature")
+        V_mean, V_std = self.get_stats("potential")
+
+        # Per (thickness, sim_id) -> (T_zmax_per_ts, V_zmax_per_ts), each
+        # of shape (n_ts,). Computed once per sim by loading every
+        # timestep once.
+        norms_per_sim: dict[tuple[str, int], tuple[Tensor, Tensor]] = {}
+        for (thickness, sim_id), time_arr in self._time_arrays.items():
+            n_ts = len(time_arr)
+            T_steps: list[Tensor] = []
+            V_steps: list[Tensor] = []
+            for ts_id in range(n_ts):
+                T_path = (
+                    self._data_dir
+                    / "temperature_data"
+                    / thickness
+                    / f"temperature_{sim_id}_{ts_id}.tsv"
+                )
+                V_path = (
+                    self._data_dir
+                    / "potential_data"
+                    / thickness
+                    / f"potential_{sim_id}_{ts_id}.tsv"
+                )
+                T_steps.append(self._read_field(T_path))
+                V_steps.append(self._read_field(V_path))
+            T_arr = torch.stack(T_steps, dim=0)  # (n_ts, N)
+            V_arr = torch.stack(V_steps, dim=0)  # (n_ts, N)
+            T_zmax = ((T_arr - T_mean) / T_std).abs().amax(dim=-1)  # (n_ts,)
+            V_zmax = ((V_arr - V_mean) / V_std).abs().amax(dim=-1)  # (n_ts,)
+            norms_per_sim[(thickness, sim_id)] = (T_zmax, V_zmax)
+
+        weights = torch.empty(len(self), dtype=torch.float32)
+        for i, (thickness, sim_id, ts_id) in enumerate(self._samples):
+            T_zmax, V_zmax = norms_per_sim[(thickness, sim_id)]
+            weights[i] = float(T_zmax[ts_id] + V_zmax[ts_id])
+        return weights
+
     def get_sim_indices(self, thickness_str: str, sim_id: int) -> list[int]:
         """Return ordered flat sample indices for a given (thickness, sim_id).
 
@@ -289,6 +364,212 @@ def _collate(
     return torch.stack(tds, dim=0), metas
 
 
+def apply_weight_schedule(
+    weights: Tensor,
+    weight_percentile: float,
+    sampling_probability: float,
+) -> Tensor:
+    """Two-tier discontinuous rank-based weight schedule.
+
+    Splits the samples into a *top* tier (target size ``round(X * N)``
+    where ``X = weight_percentile``) and a *bottom* tier of the rest,
+    then assigns each tier a uniform per-sample probability so that:
+
+    - top tier collectively integrates to ``Y = sampling_probability``;
+    - bottom tier collectively integrates to ``1 - Y``.
+
+    Tied input weights receive equal probability: per-position
+    probabilities are computed first from the argsort positions, and
+    then averaged within each tie group. As a consequence, when a tie
+    group straddles the percentile boundary, all of its members get the
+    same blended probability. This preserves the invariant
+    "identical weights => identical probability" without breaking the
+    ``X == Y`` -> uniform identity (which would fail if all members of
+    a large bottom-tied group were force-promoted into a single tier).
+
+    Setting ``Y == X`` produces a uniform distribution. ``Y > X``
+    over-samples the top tier; ``Y < X`` would under-sample it (we
+    require ``Y >= X``).
+
+    Parameters
+    ----------
+    weights : Tensor
+        1D non-negative tensor (e.g. from
+        :meth:`TCADMapsDataset.compute_sample_weights`). Used only for
+        ranking — magnitudes do not affect the output beyond rank order.
+    weight_percentile : float
+        Fraction of samples in the top tier, in (0, 1).
+    sampling_probability : float
+        Total probability mass assigned to the top tier, in (0, 1).
+        Must be ``>= weight_percentile``.
+
+    Returns
+    -------
+    Tensor
+        1D float tensor of length ``len(weights)`` summing to 1.
+    """
+    if weights.ndim != 1:
+        raise ValueError(f"weights must be 1D, got shape {tuple(weights.shape)}")
+    if not 0.0 < weight_percentile < 1.0:
+        raise ValueError(
+            f"weight_percentile must be in (0, 1), got {weight_percentile}"
+        )
+    if not 0.0 < sampling_probability < 1.0:
+        raise ValueError(
+            f"sampling_probability must be in (0, 1), got {sampling_probability}"
+        )
+    if sampling_probability < weight_percentile:
+        raise ValueError(
+            "sampling_probability must be >= weight_percentile so the top "
+            f"tier is at least as dense as the bottom tier; got "
+            f"sampling_probability={sampling_probability}, "
+            f"weight_percentile={weight_percentile}."
+        )
+    n = weights.numel()
+    if n < 2:
+        raise ValueError("apply_weight_schedule requires at least 2 samples.")
+
+    X = weight_percentile
+    Y = sampling_probability
+
+    # Stable ascending sort. sort_position[i] = sort rank of sample i.
+    sort_idx = torch.argsort(weights, stable=True)
+    sort_position = torch.empty(n, dtype=torch.long, device=weights.device)
+    sort_position[sort_idx] = torch.arange(n, device=weights.device)
+
+    # Target tier sizes (positions >= threshold_pos are top tier before
+    # tie-aware averaging).
+    n_top = max(1, min(int(round(X * n)), n - 1))
+    n_bot = n - n_top
+    threshold_pos = n_bot
+    p_top = Y / n_top
+    p_bot = (1.0 - Y) / n_bot
+
+    # Raw per-position probability.
+    p_raw = torch.where(
+        sort_position >= threshold_pos,
+        torch.full_like(weights, p_top, dtype=torch.float64),
+        torch.full_like(weights, p_bot, dtype=torch.float64),
+    )
+
+    # Average within each tie group so identical weights get identical
+    # probability. A tie group is a maximal run of equal weights in the
+    # sorted order; its averaged probability is the mass-weighted blend
+    # of p_top / p_bot proportional to how much of the group lies above
+    # / below the threshold position.
+    sorted_w = weights[sort_idx]
+    sorted_p = p_raw[sort_idx]
+    is_new = torch.ones(n, dtype=torch.long, device=weights.device)
+    is_new[1:] = (sorted_w[1:] != sorted_w[:-1]).long()
+    group_ids = is_new.cumsum(0) - 1
+    n_groups = int(group_ids[-1].item()) + 1
+    sums = torch.zeros(n_groups, dtype=torch.float64, device=weights.device)
+    counts = torch.zeros(n_groups, dtype=torch.float64, device=weights.device)
+    sums.scatter_add_(0, group_ids, sorted_p)
+    counts.scatter_add_(
+        0, group_ids, torch.ones(n, dtype=torch.float64, device=weights.device)
+    )
+    group_avg_p = sums / counts
+    sorted_p_avg = group_avg_p[group_ids]
+
+    p = torch.empty(n, dtype=torch.float64, device=weights.device)
+    p[sort_idx] = sorted_p_avg
+    return p.to(weights.dtype)
+
+
+class InfiniteWeightedSampler(InfiniteSampler):
+    """Like :class:`InfiniteSampler` but draws indices via per-sample weights.
+
+    Each draw is independent and made with replacement using ``weights`` as
+    relative probabilities. Weights are normalized to a probability vector
+    internally. A scalar ``weights`` value broadcasts to a uniform
+    distribution over all dataset indices, which is statistically equivalent
+    to non-weighted uniform sampling -- useful for non-regression tests of
+    training recipes that opt into the weighted code path.
+
+    Parameters
+    ----------
+    dataset : torch.utils.data.Dataset
+        Dataset to sample from.
+    weights : Tensor or np.ndarray or scalar
+        Per-sample relative weights, length ``len(dataset)``. A scalar is
+        broadcast to a uniform vector. Must be 1-D, finite, non-negative,
+        and sum to a positive value.
+    rank : int, default 0
+        Rank of the current process within ``num_replicas`` ranks.
+    num_replicas : int, default 1
+        Total number of distributed ranks.
+    shuffle : bool, default True
+        Accepted for API parity with :class:`InfiniteSampler` but ignored:
+        weighted sampling is always with replacement.
+    seed : int, default 0
+        Seed for ``np.random.RandomState``.
+    start_idx : int, default 0
+        Sample offset used to fast-forward the RNG when resuming a
+        checkpoint. The RNG is advanced by drawing (and discarding)
+        ``start_idx`` samples.
+
+    Notes
+    -----
+    The ``window_size`` argument from :class:`InfiniteSampler` is unused --
+    weighted draws are independent per index. Resume support is exact: every
+    rank advances its RNG by ``start_idx`` draws before yielding, so the
+    rank-disjoint sample sequence is identical to a fresh run.
+    """
+
+    def __init__(
+        self,
+        dataset: Dataset,
+        weights: Tensor | np.ndarray | float,
+        rank: int = 0,
+        num_replicas: int = 1,
+        shuffle: bool = True,
+        seed: int = 0,
+        start_idx: int = 0,
+    ) -> None:
+        super().__init__(
+            dataset=dataset,
+            rank=rank,
+            num_replicas=num_replicas,
+            shuffle=shuffle,
+            seed=seed,
+            start_idx=start_idx,
+        )
+        n = len(dataset)
+        if isinstance(weights, (int, float)):
+            w = np.full(n, float(weights), dtype=np.float64)
+        else:
+            if isinstance(weights, Tensor):
+                w = weights.detach().cpu().numpy().astype(np.float64)
+            else:
+                w = np.asarray(weights, dtype=np.float64)
+            if w.ndim != 1:
+                raise ValueError(f"weights must be 1D, got shape {tuple(w.shape)}")
+            if len(w) != n:
+                raise ValueError(f"weights length {len(w)} != dataset length {n}")
+        if not np.isfinite(w).all():
+            raise ValueError("weights must be finite (no NaN/Inf)")
+        if (w < 0).any():
+            raise ValueError("weights must be non-negative")
+        total = float(w.sum())
+        if total <= 0.0:
+            raise ValueError("weights must sum to a positive value")
+        self._probs: np.ndarray = w / total
+
+    def __iter__(self) -> Iterator[int]:
+        rnd = np.random.RandomState(self.seed)
+        n = len(self.dataset)
+        # Fast-forward the RNG to the correct state for resume.
+        if self.start_idx > 0:
+            _ = rnd.choice(n, size=self.start_idx, p=self._probs)
+        idx = self.start_idx
+        while True:
+            sample_idx = int(rnd.choice(n, p=self._probs))
+            if idx % self.num_replicas == self.rank:
+                yield sample_idx
+            idx += 1
+
+
 class TCADMapsDataPipe(DataLoader):
     """DDP-aware infinite DataLoader for TCAD map windows with resume support.
 
@@ -297,6 +578,15 @@ class TCADMapsDataPipe(DataLoader):
     from an arbitrary position after a checkpoint reload. ``get_stats()``
     proxies to the inner dataset so training code can fetch normalization
     statistics from the same object that produces batches.
+
+    Pass a ``weights`` tensor to switch to :class:`InfiniteWeightedSampler`
+    -- the data pipe does not interpret the values and does not rescale
+    them, it just hands them to the sampler. Build the tensor with
+    :meth:`TCADMapsDataset.compute_sample_weights` (rescales deltas by
+    per-variable std) and :func:`apply_weight_schedule` (rank-based
+    reshaping). With ``weights=None`` (default) the loader falls back to
+    the uniform :class:`InfiniteSampler`, identical to its pre-existing
+    behavior.
 
     Parameters
     ----------
@@ -329,6 +619,10 @@ class TCADMapsDataPipe(DataLoader):
         Default ``0``.
     seed : int, optional
         Seed for the :class:`InfiniteSampler` shuffle. Default ``0``.
+    weights : Tensor or None, optional
+        Per-sample weights for :class:`InfiniteWeightedSampler`. Length
+        must equal ``len(self.dataset)``. ``None`` (default) means uniform
+        :class:`InfiniteSampler`.
 
     Examples
     --------
@@ -359,6 +653,7 @@ class TCADMapsDataPipe(DataLoader):
         world_size: int = 1,
         start_idx: int = 0,
         seed: int = 0,
+        weights: Tensor | None = None,
     ) -> None:
         dataset = TCADMapsDataset(
             data_dir=data_dir,
@@ -366,14 +661,25 @@ class TCADMapsDataPipe(DataLoader):
             stats_file=stats_file,
             thickness=thickness,
         )
-        sampler = InfiniteSampler(
-            dataset=dataset,
-            rank=process_rank,
-            num_replicas=world_size,
-            shuffle=shuffle,
-            seed=seed,
-            start_idx=start_idx,
-        )
+        if weights is not None:
+            sampler: InfiniteSampler = InfiniteWeightedSampler(
+                dataset=dataset,
+                weights=weights,
+                rank=process_rank,
+                num_replicas=world_size,
+                shuffle=shuffle,
+                seed=seed,
+                start_idx=start_idx,
+            )
+        else:
+            sampler = InfiniteSampler(
+                dataset=dataset,
+                rank=process_rank,
+                num_replicas=world_size,
+                shuffle=shuffle,
+                seed=seed,
+                start_idx=start_idx,
+            )
         loader_kwargs = dict(
             dataset=dataset,
             batch_size=batch_size_per_device,

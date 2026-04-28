@@ -14,6 +14,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .dataset import TCADMapsDataPipe, TCADMapsDataset
+from .dataset import (
+    InfiniteWeightedSampler,
+    TCADMapsDataPipe,
+    TCADMapsDataset,
+    apply_weight_schedule,
+)
 
-__all__ = ["TCADMapsDataset", "TCADMapsDataPipe"]
+__all__ = [
+    "TCADMapsDataset",
+    "TCADMapsDataPipe",
+    "InfiniteWeightedSampler",
+    "apply_weight_schedule",
+]
