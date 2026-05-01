@@ -16,7 +16,7 @@
 
 """Multi-diffusion predictor wrapper for patch-based diffusion sampling."""
 
-from typing import Any, cast
+from typing import Any
 
 from jaxtyping import Float
 from tensordict import TensorDict
@@ -42,9 +42,14 @@ class MultiDiffusionPredictor(Predictor):
 
     The wrapped model must have grid patching configured via
     :meth:`~MultiDiffusionModel2D.set_grid_patching` before constructing the
-    predictor.  The predictor is intended for **test-time sampling**: it is not
-    suitable for training, and the wrapped multi-diffusion model should already
-    be trained.
+    predictor.
+
+    .. warning::
+
+        :class:`MultiDiffusionPredictor` is intended for **test-time
+        sampling**: it is not suitable for training. The wrapped
+        multi-diffusion model should already be trained before being passed
+        to the predictor.
 
     Parameters
     ----------
@@ -176,13 +181,13 @@ class MultiDiffusionPredictor(Predictor):
             model, MultiDiffusionModel2D
         )
 
-        if self._md_model._patching_type != "grid":
+        if not isinstance(self._md_model._patching, GridPatching2D):
             raise RuntimeError(
                 "MultiDiffusionPredictor requires grid patching to be configured. "
                 "Call model.set_grid_patching() before creating the predictor."
             )
 
-        self._patching: GridPatching2D = cast(GridPatching2D, self._md_model._patching)
+        self._patching: GridPatching2D = self._md_model._patching
 
         self.model = model
         self._model_kwargs = model_kwargs

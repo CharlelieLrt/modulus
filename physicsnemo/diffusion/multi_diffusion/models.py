@@ -399,7 +399,6 @@ class MultiDiffusionModel2D(Module):
         self.model = model
         self.global_spatial_shape = tuple(global_spatial_shape)
         self._patching: RandomPatching2D | GridPatching2D | None = None
-        self._patching_type: Literal["random", "grid"] | None = None
         self._fuse: bool = False
         self._skip_positional_embedding_injection: bool = False
         # Normalise condition flags to defaultdict for uniform access
@@ -534,7 +533,6 @@ class MultiDiffusionModel2D(Module):
             patch_shape=patch_shape,
             patch_num=patch_num,
         )
-        self._patching_type = "random"
         self._fuse = False
 
     def reset_patch_indices(self) -> None:
@@ -602,7 +600,6 @@ class MultiDiffusionModel2D(Module):
             overlap_pix=overlap_pix,
             boundary_pix=boundary_pix,
         )
-        self._patching_type = "grid"
         self._fuse = fuse
 
     # ------------------------------------------------------------------
