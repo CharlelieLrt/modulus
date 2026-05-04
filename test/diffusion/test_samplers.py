@@ -105,7 +105,7 @@ SAMPLER_CONFIGS = [
     ),
 ]
 
-TIME_EVAL_INDICES = [0, 1, 3]
+TIME_EVAL_INDICES = [0, 1]
 
 
 def _make_sampling_components(
