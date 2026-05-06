@@ -24,8 +24,7 @@ import torch._dynamo
 from tensordict import TensorDict
 
 from physicsnemo.experimental.models.diffusion_unets import DiffusionUNet3D
-
-from ._helpers import (
+from test.models.diffusion._helpers import (
     GLOBAL_SEED,
     compare_outputs,
     instantiate_model_deterministic,

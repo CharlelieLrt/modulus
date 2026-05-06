@@ -28,8 +28,7 @@ from physicsnemo.experimental.nn import (
     UNetAttention3D,
     UNetBlock3D,
 )
-
-from ._helpers import (
+from test.models.diffusion._helpers import (
     GLOBAL_SEED,
     compare_outputs,
     instantiate_model_deterministic,
