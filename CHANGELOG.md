@@ -118,6 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `physicsnemo.experimental.nn`.
 - Added support for Batched radius search, which enables Domino
   and GeoTransolver with local features and batch size > 1.
+- Added the underfill recipe.
 
 ### Changed
 
