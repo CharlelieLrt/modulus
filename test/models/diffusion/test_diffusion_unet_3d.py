@@ -32,6 +32,19 @@ from test.models.diffusion._helpers import (
     load_or_create_reference,
 )
 
+# Loose GPU tolerances are needed here because attention via SDPA returns
+# meaningfully different values on CPU vs GPU (and across GPU architectures),
+# and the test models are initialized with purely-random weights and inputs.
+# Scoped to this file so the looseness doesn't leak into sibling tests.
+_CPU_TOLERANCES = {"atol": 1e-3, "rtol": 1e-3}
+_GPU_TOLERANCES = {"atol": 1e-2, "rtol": 5e-2}
+
+
+@pytest.fixture
+def tolerances(device):
+    return _CPU_TOLERANCES if device == "cpu" else _GPU_TOLERANCES
+
+
 # =============================================================================
 # Architecture configurations
 # =============================================================================

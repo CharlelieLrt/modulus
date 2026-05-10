@@ -25,8 +25,6 @@ from physicsnemo.core.version_check import check_version_spec
 _APEX_AVAILABLE = check_version_spec("apex", hard_fail=False)
 
 _GLOBAL_SEED = 42
-_CPU_TOLERANCES = {"atol": 1e-3, "rtol": 1e-3}
-_GPU_TOLERANCES = {"atol": 1e-2, "rtol": 5e-2}
 
 
 def _nop_backend(gm, _inputs):
@@ -84,12 +82,6 @@ def deterministic_settings():
         torch.backends.cuda.matmul.allow_tf32 = old_matmul_tf32
         torch.backends.cudnn.allow_tf32 = old_cudnn_tf32
         random.setstate(old_random_state)
-
-
-@pytest.fixture
-def tolerances(device):
-    """Numerical comparison tolerances scaled by device."""
-    return _CPU_TOLERANCES if device == "cpu" else _GPU_TOLERANCES
 
 
 @pytest.fixture
