@@ -568,11 +568,6 @@ class MultiDiffusionModelConsistencyDPSGuidance:
             )
 
         grad_x = grads[0]
-        if grad_x is None:
-            raise RuntimeError(
-                "Gradient is None. Ensure x has requires_grad=True and that "
-                "x_0 was computed from x."
-            )
 
         expected_shape = (-1,) + (1,) * (x.ndim - 1)
         t_bc = t.reshape(expected_shape)
@@ -852,11 +847,6 @@ class MultiDiffusionDataConsistencyDPSGuidance:
             )
 
         grad_x = grads[0]
-        if grad_x is None:
-            raise RuntimeError(
-                "Gradient is None. Ensure x has requires_grad=True and that "
-                "x_0 was computed from x."
-            )
 
         expected_shape = (-1,) + (1,) * (x.ndim - 1)
         t_bc = t.reshape(expected_shape)
