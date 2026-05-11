@@ -26,59 +26,127 @@ from physicsnemo.diffusion.base import Predictor
 from physicsnemo.diffusion.multi_diffusion.predictor import MultiDiffusionPredictor
 
 
+def _lp_loss_fn(p: int) -> Callable[[Tensor, Tensor], Tensor]:
+    """Return a per-batch-element Lp loss function with exponent ``p``."""
+
+    def _loss(y_pred: Tensor, y_true: Tensor) -> Tensor:
+        residual = (y_pred - y_true).reshape(y_pred.shape[0], -1)
+        return residual.abs().pow(p).sum(dim=1)
+
+    return _loss
+
+
 @runtime_checkable
 class MultiDiffusionDPSGuidance(Protocol):
-    r"""Protocol for patch-local DPS guidance compatible with
+    r"""Protocol for **patch-local** DPS guidance compatible with
     :class:`MultiDiffusionDPSScorePredictor`.
 
-    Identical to the standard
-    :class:`~physicsnemo.diffusion.guidance.DPSGuidance` protocol, with one
-    extra optional argument ``slice_start`` that enables chunked
-    evaluation. The semantics:
+    A guidance is **patch-local** when its computation decomposes along
+    the multi-diffusion patch grid: the guidance value at each patch
+    depends only on the data of that patch. This protocol is **not
+    applicable** to globally-coupled guidances (e.g. ones that mix
+    information across patches), use
+    :class:`~physicsnemo.diffusion.guidance.DPSGuidance` for those.
 
-    - ``slice_start=None`` (default): the call processes the **whole**
-      batch of patches at once. Inputs ``x``, ``t``, ``x_0`` should match
-      the size of the pre-patched data stored on the guidance (i.e. the
-      full :math:`P \times B`). The implementation may then optionally fuse
-      the result back to the global resolution.
-    - ``slice_start=s`` (an ``int``): the call processes a **single chunk**
-      starting at row ``s`` of the pre-patched data. Inputs ``x``, ``t``,
-      ``x_0`` are chunk-sized (:math:`K \leq chunk\_size`). The
-      implementation slices its pre-patched data with ``[s : s+K]`` and
-      returns a chunk-sized guidance term (no fusing).
+    Identical to the standard
+    :class:`~physicsnemo.diffusion.guidance.DPSGuidance` protocol, plus an
+    optional ``slice_start`` argument that enables chunked evaluation:
+
+    - **Full batch mode** (``slice_start=None``, the default): the call
+      processes the full :math:`P \times B` batch of patches at once.
+      Inputs match the size of the pre-patched data stored on the
+      guidance. The implementation may optionally fuse the result back to
+      the global resolution.
+    - **Chunked batch mode** (``slice_start=s``): the call processes a
+      single chunk of :math:`K \leq \text{chunk\_size}` patches starting
+      at row ``s``. The implementation slices its pre-patched data with
+      ``[s : s + K]`` and returns a chunk-sized guidance term (no fusing).
+
+    Chunked batch mode is the key memory-efficiency knob, the per-chunk
+    activations are released between iterations, so peak GPU memory stays
+    proportional to ``chunk_size`` rather than to the full
+    :math:`P \times B`. Use it for large global domains where the
+    full-batch counterpart from :class:`~physicsnemo.diffusion.guidance.DPSGuidance`
+    would OOM.
 
     A guidance satisfying this protocol also satisfies
     :class:`~physicsnemo.diffusion.guidance.DPSGuidance` because the extra
     argument is optional.
+
+    Examples
+    --------
+    Implementing a simple patch-local guidance from scratch. The mask and
+    observations are pre-patched once at construction time and sliced per
+    chunk based on ``slice_start``:
+
+    >>> import torch
+    >>> from physicsnemo.diffusion.multi_diffusion import (
+    ...     MultiDiffusionDPSGuidance,
+    ... )
+    >>>
+    >>> class InpaintGuidance:
+    ...     def __init__(self, mask_patched, y_patched, gamma=1.0):
+    ...         self.mask = mask_patched
+    ...         self.y = y_patched
+    ...         self.gamma = gamma
+    ...
+    ...     def __call__(self, x, t, x_0, slice_start=None):
+    ...         if slice_start is None:
+    ...             mask, y = self.mask, self.y
+    ...         else:
+    ...             K = x.shape[0]
+    ...             mask = self.mask[slice_start : slice_start + K]
+    ...             y = self.y[slice_start : slice_start + K]
+    ...         return -self.gamma * mask * (x_0 - y)
+    ...
+    >>> mask = torch.ones(8, 3, 8, 8)  # (P*B, C, Hp, Wp)
+    >>> y = torch.randn(8, 3, 8, 8)
+    >>> guidance = InpaintGuidance(mask, y)
+    >>> isinstance(guidance, MultiDiffusionDPSGuidance)
+    True
+    >>>
+    >>> # Full batch mode: process all P*B = 8 patches at once
+    >>> x = torch.randn(8, 3, 8, 8)
+    >>> t = torch.full((8,), 1.0)
+    >>> x_0 = x * 0.9
+    >>> guidance(x, t, x_0).shape
+    torch.Size([8, 3, 8, 8])
+    >>>
+    >>> # Chunked batch mode: process a chunk of 2 patches starting at row 0
+    >>> guidance(x[:2], t[:2], x_0[:2], slice_start=0).shape
+    torch.Size([2, 3, 8, 8])
     """
 
     def __call__(
         self,
-        x: Float[Tensor, " *batch_dims"],
-        t: Float[Tensor, " *batch_dims"],
-        x_0: Float[Tensor, " *batch_dims"],
+        x: Float[Tensor, "K C Hp Wp"],
+        t: Float[Tensor, " K"],
+        x_0: Float[Tensor, "K C Hp Wp"],
         slice_start: int | None = None,
-    ) -> Float[Tensor, " *batch_dims"]: ...
+    ) -> Float[Tensor, "K C Hp Wp"]: ...
 
 
 class MultiDiffusionDPSScorePredictor(Predictor):
     r"""Score predictor that combines a
     :class:`~physicsnemo.diffusion.multi_diffusion.MultiDiffusionPredictor`
-    with one or more DPS guidances, specialized for **patch-local**
-    observation operators on large multi-diffusion domains.
+    with one or more patch-local DPS guidances for guided sampling on
+    large multi-diffusion domains.
 
-    A guidance is called **patch-local** when the observation
-    :math:`y` and the operator :math:`A` decompose along the multi-diffusion
-    patch grid: each patch of :math:`y` only depends on the corresponding
-    patch of :math:`x_0`. Inpainting with a spatial mask, sparse pointwise
-    observations, and any operator that runs separately on each patch fall
-    into this category. Cross-patch coupling (a global blur, a global
-    Fourier observation) does not.
+    Implements the same :class:`~physicsnemo.diffusion.Predictor`
+    interface as :class:`~physicsnemo.diffusion.guidance.DPSScorePredictor`
+    and slots into the standard sampling stack: pass it to
+    :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`
+    to obtain a :class:`~physicsnemo.diffusion.Denoiser` that can be used
+    with :func:`~physicsnemo.diffusion.samplers.sample` or any sampling
+    utility that consumes a denoiser.
 
-    When the guidance decomposes patch-locally, this predictor is more
-    memory-efficient than
-    :class:`~physicsnemo.diffusion.guidance.DPSScorePredictor` because it
-    streams the per-patch computation:
+    Use this class instead of
+    :class:`~physicsnemo.diffusion.guidance.DPSScorePredictor` when every
+    guidance is patch-local (see :class:`MultiDiffusionDPSGuidance`) and
+    the global domain is too large for the full
+    :math:`(P \times B, \dots)` activation tensor to fit in memory. The
+    predictor streams score and guidance contributions chunk by chunk in
+    patch space and fuses once at the end:
 
     .. math::
 
@@ -87,62 +155,76 @@ class MultiDiffusionDPSScorePredictor(Predictor):
         \;=\;
         \mathrm{Fuse}\!\left[\, s^k + \sum_i g_i^k\, \right]_{k=1..P}
 
-    where the superscript :math:`k` denotes the :math:`k`-th patch chunk and
-    :math:`\mathrm{Fuse}` is the multi-diffusion fusing operator. Score
-    contributions and guidance terms are summed in patch space and fused
-    once at the end, which avoids materializing the full
-    :math:`(P \times B, \dots)` activation tensor at any point.
+    where the superscript :math:`k` denotes the :math:`k`-th patch chunk
+    and :math:`\mathrm{Fuse}` is the multi-diffusion fusing operator. The
+    full :math:`(P \times B, \dots)` activation tensor is never
+    materialized.
 
     .. important::
 
         Use :class:`~physicsnemo.diffusion.guidance.DPSScorePredictor` for
-        guidances that do **not** decompose patch-locally. For those
-        operators, the gradient must be computed against the full global
-        :math:`x_0`; passing them to this class produces incorrect results.
+        guidances that do **not** decompose patch-locally. Passing a
+        globally-coupled guidance to this class produces incorrect results.
 
-    All guidances must implement the
-    :class:`MultiDiffusionDPSGuidance` protocol:
+    Each guidance must implement the :class:`MultiDiffusionDPSGuidance`
+    protocol:
 
     .. code-block:: python
 
         def guidance(
-            x: Tensor,                 # noisy patched slice, shape: (K, C, Hp, Wp)
-            t: Tensor,                 # diffusion time slice, shape: (K,)
-            x_0: Tensor,               # x0 estimate slice, shape: (K, C, Hp, Wp)
+            x: Tensor,                 # shape: (K, C, Hp, Wp)
+            t: Tensor,                 # shape: (K,)
+            x_0: Tensor,               # shape: (K, C, Hp, Wp)
             slice_start: int | None,   # row index of the chunk in (P*B);
-                                       # None means full-batch evaluation
-        ) -> Tensor: ...               # guidance term, shape: (K, C, Hp, Wp)
+                                       # None means full-batch mode
+        ) -> Tensor: ...               # shape: (K, C, Hp, Wp)
 
-    This predictor passes the chunk's ``slice_start`` from
-    :meth:`MultiDiffusionPredictor.chunks` directly to each guidance, so the
-    guidance reads the corresponding slice of its own pre-patched
+    where :math:`K` is the number of patches in the current chunk
+    (:math:`K = P \times B` in full batch mode, :math:`K \leq
+    \text{chunk\_size}` in chunked batch mode). The predictor forwards
+    each chunk's ``slice_start`` from
+    :meth:`MultiDiffusionPredictor.chunks` directly to every guidance, so
+    each guidance reads the corresponding slice of its own pre-patched
     observations without any internal state.
+
+    The ``x0_to_score_fn`` callback must be an elementwise conversion
+    with the signature:
+
+    .. code-block:: python
+
+        def x0_to_score_fn(
+            x_0: Tensor,    # shape: (K, C, Hp, Wp)
+            x_t: Tensor,    # shape: (K, C, Hp, Wp)
+            t: Tensor,      # shape: (K,)
+        ) -> Tensor: ...    # shape: (K, C, Hp, Wp)
 
     Parameters
     ----------
     x0_predictor : MultiDiffusionPredictor
-        A trained predictor with ``chunk_size`` set, returning x0 estimates.
+        A trained predictor with ``chunk_size`` set, returning x0
+        estimates.
     x0_to_score_fn : callable
-        Elementwise conversion ``(x0, x_t, t) -> score``. Typically obtained
-        from a noise scheduler, e.g.
+        Elementwise conversion ``(x_0, x_t, t) -> score`` (see the
+        signature above). Typically obtained from a noise scheduler,
+        e.g.
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.x0_to_score`.
     guidances : MultiDiffusionDPSGuidance or sequence of MultiDiffusionDPSGuidance
-        One or more patch-local guidance objects.
+        One or more patch-local guidance objects implementing the
+        :class:`MultiDiffusionDPSGuidance` protocol.
 
     See Also
     --------
-    :class:`MultiDiffusionDataConsistencyDPSGuidance` :
-        Patch-local guidance for masked observations.
-    :class:`MultiDiffusionModelConsistencyDPSGuidance` :
-        Patch-local guidance for generic patch-local observation operators.
-    :class:`~physicsnemo.diffusion.guidance.DPSScorePredictor` :
-        Use for non-patch-local guidances.
+    :class:`MultiDiffusionDPSGuidance` : Protocol that guidances must satisfy.
+    :class:`MultiDiffusionDataConsistencyDPSGuidance` : Patch-local
+        guidance for masked observations.
+    :class:`MultiDiffusionModelConsistencyDPSGuidance` : Patch-local
+        guidance for generic patch-local observation operators.
+    :class:`~physicsnemo.diffusion.guidance.DPSScorePredictor` : Use for
+        non-patch-local guidances.
 
     Examples
     --------
-    **Example 1:** Bare-bone use with a minimal inline guidance and
-    ``x0_to_score`` callback. This avoids the noise scheduler and the
-    shipped guidance classes to keep the example self-contained:
+    **Example 1:** Basic usage with a single inpainting guidance:
 
     >>> import torch
     >>> from physicsnemo.core import Module
@@ -164,15 +246,15 @@ class MultiDiffusionDPSScorePredictor(Predictor):
     >>> predictor = MultiDiffusionPredictor(md, chunk_size=2)
     >>> predictor.set_patching(overlap_pix=0, boundary_pix=0)
     >>>
-    >>> # Minimal x0_to_score (EDM convention: score = (x_0 - x) / t**2)
+    >>> # x0-to-score for EDM: score = (x_0 - x) / t^2
     >>> def x0_to_score_fn(x_0, x, t):
     ...     t_bc = t.reshape((-1,) + (1,) * (x.ndim - 1))
     ...     return (x_0 - x) / (t_bc ** 2)
     >>>
-    >>> # Minimal patch-local guidance: gradient of L2 mismatch on a mask.
-    >>> # mask and y_obs are pre-patched once and the guidance honours
-    >>> # the optional slice_start to align with the predictor's chunks.
-    >>> class MinimalInpaintGuidance:
+    >>> # Inline inpainting guidance; mask and observations are pre-patched
+    >>> # by the user via predictor.patch_fn so all patching uses the same
+    >>> # grid as the predictor.
+    >>> class InpaintGuidance:
     ...     def __init__(self, mask_patched, y_patched, gamma=0.1):
     ...         self.mask = mask_patched
     ...         self.y = y_patched
@@ -188,7 +270,7 @@ class MultiDiffusionDPSScorePredictor(Predictor):
     >>>
     >>> mask_patched = predictor.patch_fn(torch.ones(2, 3, 16, 16))
     >>> y_patched = predictor.patch_fn(torch.randn(2, 3, 16, 16))
-    >>> guidance = MinimalInpaintGuidance(mask_patched, y_patched)
+    >>> guidance = InpaintGuidance(mask_patched, y_patched)
     >>>
     >>> dps = MultiDiffusionDPSScorePredictor(
     ...     x0_predictor=predictor,
@@ -200,34 +282,42 @@ class MultiDiffusionDPSScorePredictor(Predictor):
     >>> dps(x, t).shape
     torch.Size([2, 3, 16, 16])
 
-    **Example 2:** Use the shipped patch-local guidance classes for a
-    more realistic inpainting setup:
+    **Example 2:** Multiple guidances for multi-constraint problems. The
+    predictor returned by this class is a drop-in score predictor that
+    plugs into any sampling utility (here
+    :func:`~physicsnemo.diffusion.samplers.sample`):
 
     >>> from physicsnemo.diffusion.multi_diffusion import (
     ...     MultiDiffusionDataConsistencyDPSGuidance,
+    ...     MultiDiffusionModelConsistencyDPSGuidance,
     ... )
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+    >>> from physicsnemo.diffusion.samplers import sample
     >>>
     >>> scheduler = EDMNoiseScheduler()
+    >>>
+    >>> # First guidance: masked observations (inpainting)
     >>> mask = torch.zeros(2, 3, 16, 16, dtype=torch.bool)
     >>> mask[:, :, 4:, :] = True
-    >>> y_obs = torch.randn(2, 3, 16, 16)
-    >>>
-    >>> guidance = MultiDiffusionDataConsistencyDPSGuidance(
-    ...     predictor=predictor, mask=mask, y=y_obs, std_y=0.1,
+    >>> y_obs1 = torch.randn(2, 3, 16, 16)
+    >>> g1 = MultiDiffusionDataConsistencyDPSGuidance(
+    ...     predictor=predictor, mask=mask, y=y_obs1, std_y=0.1,
+    ...     retain_graph=True,  # required: not the last autograd guidance
     ... )
+    >>>
+    >>> # Second guidance: nonlinear patch-local channel response
+    >>> A = lambda x_0: torch.sigmoid(x_0[:, :1])
+    >>> y_obs2 = torch.rand(2, 1, 16, 16)
+    >>> g2 = MultiDiffusionModelConsistencyDPSGuidance(
+    ...     predictor=predictor, observation_operator=A,
+    ...     y=y_obs2, std_y=0.1,
+    ... )
+    >>>
     >>> dps = MultiDiffusionDPSScorePredictor(
     ...     x0_predictor=predictor,
     ...     x0_to_score_fn=scheduler.x0_to_score,
-    ...     guidances=guidance,
+    ...     guidances=[g1, g2],
     ... )
-    >>> dps(x, t).shape
-    torch.Size([2, 3, 16, 16])
-
-    **Example 3:** Plug into the standard sampling stack:
-
-    >>> from physicsnemo.diffusion.samplers import sample
-    >>>
     >>> denoiser = scheduler.get_denoiser(score_predictor=dps)
     >>> xN = torch.randn(2, 3, 16, 16)
     >>> x0 = sample(denoiser, xN, scheduler, num_steps=4)
@@ -240,11 +330,11 @@ class MultiDiffusionDPSScorePredictor(Predictor):
         x0_predictor: MultiDiffusionPredictor,
         x0_to_score_fn: Callable[
             [
-                Float[Tensor, " B C H W"],
-                Float[Tensor, " B C H W"],
-                Float[Tensor, " B"],
+                Float[Tensor, "K C Hp Wp"],
+                Float[Tensor, "K C Hp Wp"],
+                Float[Tensor, " K"],
             ],
-            Float[Tensor, " B C H W"],
+            Float[Tensor, "K C Hp Wp"],
         ],
         guidances: MultiDiffusionDPSGuidance | Sequence[MultiDiffusionDPSGuidance],
     ) -> None:
@@ -267,9 +357,9 @@ class MultiDiffusionDPSScorePredictor(Predictor):
 
     def __call__(
         self,
-        x: Float[Tensor, " B C H W"],
+        x: Float[Tensor, "B C H W"],
         t: Float[Tensor, " B"],
-    ) -> Float[Tensor, " B C H W"]:
+    ) -> Float[Tensor, "B C H W"]:
         r"""Compute the guided score at the global resolution.
 
         Parameters
@@ -308,17 +398,19 @@ class MultiDiffusionDPSScorePredictor(Predictor):
 
 
 class MultiDiffusionModelConsistencyDPSGuidance:
-    r"""Patch-local DPS guidance for generic observation operators.
+    r"""Patch-local DPS guidance for generic observation operators with
+    Gaussian noise.
 
     Multi-diffusion counterpart of
     :class:`~physicsnemo.diffusion.guidance.ModelConsistencyDPSGuidance`,
-    intended for cases where the observation operator decomposes along the
-    multi-diffusion patch grid (cross-patch coupling is not supported, see
-    :class:`MultiDiffusionDPSScorePredictor` for the global-coupling case).
-    Implements the :class:`MultiDiffusionDPSGuidance` protocol.
+    intended for cases where the observation operator :math:`A`
+    decomposes along the multi-diffusion patch grid. Implements the
+    :class:`MultiDiffusionDPSGuidance` protocol, see it for the two-mode
+    (``slice_start``) semantics and the :math:`K` chunk-size convention.
 
-    Computes the likelihood score under Gaussian measurement noise. Letting
-    :math:`k` index the current patch chunk:
+    Computes the likelihood score assuming Gaussian measurement noise
+    with standard deviation :math:`\sigma_y`. Letting :math:`k` index the
+    current patch chunk:
 
     .. math::
 
@@ -327,21 +419,42 @@ class MultiDiffusionModelConsistencyDPSGuidance:
         \right)} \nabla_{\mathbf{x}^k}
         \| A(\hat{\mathbf{x}}_0^k) - \mathbf{y}^k \|^2
 
-    Observations ``y`` are pre-patched once at construction using the
-    predictor's :meth:`~MultiDiffusionPredictor.patch_fn`, so :meth:`__call__`
-    does not pay the patching cost on every diffusion step. The L2 norm
-    can be replaced by other Lp norms or a custom loss via the ``norm``
-    parameter.
+    where the scaling incorporates a Score-Based Data Assimilation (SDA)
+    correction through :math:`\Gamma`. The L2 norm can be replaced by
+    other Lp norms or a custom loss function via the ``norm`` parameter.
 
-    The :meth:`__call__` operates in two modes selected by the
-    ``slice_start`` argument:
+    Observations ``y`` are pre-patched once at construction; calling the
+    guidance many times during sampling never re-patches them.
 
-    - ``slice_start=None``: process the whole batch of patches at once
-      using the FULL pre-patched ``y``. Optionally fuse to the global
-      resolution if ``fuse=True`` was passed at construction.
-    - ``slice_start=s``: process the single chunk starting at row ``s``,
-      slicing ``y`` with ``[s : s + K]``. Returns the patched chunk
-      guidance (no fuse, regardless of ``fuse``).
+    .. important::
+
+        ``y`` must be **patcheable** in the same way as the latent state
+        :math:`\mathbf{x}`, so its spatial dimensions must equal the
+        global resolution :math:`(H, W)`. This is a stronger requirement
+        than the global counterpart
+        :class:`~physicsnemo.diffusion.guidance.ModelConsistencyDPSGuidance`,
+        which allows arbitrary observation shapes. The operator
+        :math:`A` must therefore produce observations matching the input
+        spatial resolution (e.g. channel-selection, pointwise
+        nonlinearities, local convolutions within an overlap region).
+
+    The ``observation_operator`` must be a differentiable callable with
+    the following signature:
+
+    .. code-block:: python
+
+        def observation_operator(
+            x_0: Tensor,    # shape: (K, C, Hp, Wp)
+        ) -> Tensor: ...    # shape: (K, C_obs, Hp, Wp)
+
+    When ``norm`` is a callable, it must have the signature:
+
+    .. code-block:: python
+
+        def norm(
+            y_pred: Tensor,    # shape: (K, C_obs, Hp, Wp)
+            y_true: Tensor,    # shape: (K, C_obs, Hp, Wp)
+        ) -> Tensor: ...       # shape: (K,)  scalar loss per batch element
 
     Parameters
     ----------
@@ -349,32 +462,39 @@ class MultiDiffusionModelConsistencyDPSGuidance:
         Predictor used to pre-patch ``y`` and (optionally) fuse the
         guidance. Stored on ``self.predictor`` for later access.
     observation_operator : callable
-        Patch-local observation operator ``A(x0_chunk) -> y_pred_chunk``.
-        Must be differentiable.
+        Differentiable patch-local observation operator :math:`A`. See
+        the signature above.
     y : Tensor
-        Global observations of shape :math:`(B, *obs\_dims)` matching the
-        output of ``A`` applied at the global resolution.
+        Global observations of shape :math:`(B, C_{obs}, H, W)` matching
+        the latent's global spatial shape.
     std_y : float
         Standard deviation of the measurement noise :math:`\sigma_y`.
     norm : int or callable, default=2
-        Loss to apply to the residual. An ``int`` selects the corresponding
-        Lp norm. A callable receives ``(y_pred, y_true)`` and returns a
-        scalar loss per batch element.
+        Loss applied to the residual. An ``int`` selects the
+        corresponding Lp norm; a callable replaces it with a custom loss
+        of the signature above.
     gamma : float, default=0.0
         SDA covariance scaling factor :math:`\Gamma`. Set to ``0`` for
         classical DPS without SDA scaling.
     sigma_fn : callable or None, default=None
-        :math:`t \mapsto \sigma(t)`. Required when ``gamma > 0``.
+        Function mapping diffusion time to noise level :math:`\sigma(t)`.
+        Required when ``gamma > 0``. Typically obtained from a noise
+        scheduler, e.g.
+        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.sigma`.
     alpha_fn : callable or None, default=None
-        :math:`t \mapsto \alpha(t)`. Defaults to :math:`\alpha(t) = 1`.
+        Function mapping diffusion time to signal coefficient
+        :math:`\alpha(t)`. Defaults to :math:`\alpha(t) = 1`. Typically
+        obtained from a noise scheduler, e.g.
+        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.alpha`.
     fuse : bool, default=False
         Whether :meth:`__call__` fuses the guidance term to the global
-        resolution when called without ``slice_start`` (full-batch mode).
-        Ignored in chunked mode.
+        resolution in full batch mode (``slice_start=None``). Ignored in
+        chunked batch mode.
     retain_graph : bool, default=False
-        Retain the computation graph after the gradient call. Required on
-        all but the last guidance when combining multiple autograd-based
-        guidances in a single :class:`MultiDiffusionDPSScorePredictor`.
+        Retain the computation graph after the gradient call. Required
+        on all but the last guidance when combining multiple
+        autograd-based guidances in a single
+        :class:`MultiDiffusionDPSScorePredictor`.
     create_graph : bool, default=False
         Allow higher-order derivatives.
 
@@ -389,15 +509,15 @@ class MultiDiffusionModelConsistencyDPSGuidance:
     See Also
     --------
     :class:`~physicsnemo.diffusion.guidance.ModelConsistencyDPSGuidance` :
-        Use for non-patch-local observation operators.
+        Global counterpart for non-patch-local operators.
     :class:`MultiDiffusionDPSScorePredictor` :
         Score predictor that consumes this guidance.
 
     Examples
     --------
-    **Example 1:** Patch-local channel selection. The operator selects the
-    first channel of each patch — clearly patch-local — so the multi-
-    diffusion guidance is appropriate:
+    **Example 1:** Patch-local channel selection. The operator selects
+    the first channel of each patch, clearly patch-local. Inputs are
+    chunk-sized patched tensors:
 
     >>> import torch
     >>> from physicsnemo.core import Module
@@ -431,7 +551,9 @@ class MultiDiffusionModelConsistencyDPSGuidance:
     >>> guidance(x_chunk, t_chunk, x0_chunk, slice_start=0).shape
     torch.Size([2, 3, 8, 8])
 
-    **Example 2:** Full guided sampling pipeline:
+    **Example 2:** SDA-scaled guidance with a nonlinear patch-local
+    operator (here a sigmoid response on the first channel), plugged
+    into the full sampling stack:
 
     >>> from physicsnemo.diffusion.multi_diffusion import (
     ...     MultiDiffusionDPSScorePredictor,
@@ -440,27 +562,27 @@ class MultiDiffusionModelConsistencyDPSGuidance:
     >>> from physicsnemo.diffusion.samplers import sample
     >>>
     >>> scheduler = EDMNoiseScheduler()
-    >>> md2 = MultiDiffusionModel2D(Backbone(), global_spatial_shape=(16, 16))
-    >>> md2.set_random_patching(patch_shape=(8, 8), patch_num=4)
-    >>> _ = md2.eval()
-    >>> predictor2 = MultiDiffusionPredictor(md2, chunk_size=2)
-    >>> predictor2.set_patching(overlap_pix=0, boundary_pix=0)
+    >>> A_nl = lambda x_0: torch.sigmoid(x_0[:, :1])
+    >>> y_obs_nl = torch.rand(2, 1, 16, 16)
     >>>
-    >>> A2 = lambda x: x[:, :1]
-    >>> y_obs2 = torch.randn(2, 1, 16, 16)
-    >>> guidance2 = MultiDiffusionModelConsistencyDPSGuidance(
-    ...     predictor=predictor2, observation_operator=A2,
-    ...     y=y_obs2, std_y=0.1,
+    >>> guidance_sda = MultiDiffusionModelConsistencyDPSGuidance(
+    ...     predictor=predictor,
+    ...     observation_operator=A_nl,
+    ...     y=y_obs_nl,
+    ...     std_y=0.075,
+    ...     gamma=0.05,          # enable SDA scaling
+    ...     sigma_fn=scheduler.sigma,
+    ...     alpha_fn=scheduler.alpha,
     ... )
-    >>> dps2 = MultiDiffusionDPSScorePredictor(
-    ...     x0_predictor=predictor2,
+    >>> dps = MultiDiffusionDPSScorePredictor(
+    ...     x0_predictor=predictor,
     ...     x0_to_score_fn=scheduler.x0_to_score,
-    ...     guidances=guidance2,
+    ...     guidances=guidance_sda,
     ... )
-    >>> denoiser2 = scheduler.get_denoiser(score_predictor=dps2)
-    >>> xN2 = torch.randn(2, 3, 16, 16)
-    >>> x0_2 = sample(denoiser2, xN2, scheduler, num_steps=4)
-    >>> x0_2.shape
+    >>> denoiser = scheduler.get_denoiser(score_predictor=dps)
+    >>> xN = torch.randn(2, 3, 16, 16)
+    >>> x0 = sample(denoiser, xN, scheduler, num_steps=4)
+    >>> x0.shape
     torch.Size([2, 3, 16, 16])
     """
 
@@ -468,13 +590,13 @@ class MultiDiffusionModelConsistencyDPSGuidance:
         self,
         predictor: MultiDiffusionPredictor,
         observation_operator: Callable[
-            [Float[Tensor, " K C Hp Wp"]], Float[Tensor, " K *obs_dims"]
+            [Float[Tensor, "K C Hp Wp"]], Float[Tensor, "K C_obs Hp Wp"]
         ],
-        y: Float[Tensor, " B *obs_dims"],
+        y: Float[Tensor, "B C_obs H W"],
         std_y: float,
         norm: int
         | Callable[
-            [Float[Tensor, " K *obs_dims"], Float[Tensor, " K *obs_dims"]],
+            [Float[Tensor, "K C_obs Hp Wp"], Float[Tensor, "K C_obs Hp Wp"]],
             Float[Tensor, " K"],
         ] = 2,
         gamma: float = 0.0,
@@ -493,7 +615,11 @@ class MultiDiffusionModelConsistencyDPSGuidance:
         self._y_patched: Tensor = predictor.patch_fn(y)
         self.observation_operator = observation_operator
         self.std_y = std_y
-        self.norm = norm
+        # Resolve the loss callable at construction so __call__ has no branch.
+        if isinstance(norm, int):
+            self._loss_fn: Callable[[Tensor, Tensor], Tensor] = _lp_loss_fn(norm)
+        else:
+            self._loss_fn = norm
         self.gamma = gamma
         self.sigma_fn = (
             sigma_fn if sigma_fn is not None else lambda t: torch.zeros_like(t)
@@ -507,34 +633,43 @@ class MultiDiffusionModelConsistencyDPSGuidance:
 
     def __call__(
         self,
-        x: Float[Tensor, " K C Hp Wp"],
+        x: Float[Tensor, "K C Hp Wp"],
         t: Float[Tensor, " K"],
-        x_0: Float[Tensor, " K C Hp Wp"],
+        x_0: Float[Tensor, "K C Hp Wp"],
         slice_start: int | None = None,
-    ) -> Float[Tensor, " K C Hp Wp"] | Float[Tensor, " B C H W"]:
+    ) -> Float[Tensor, "K C Hp Wp"] | Float[Tensor, "B C H W"]:
         r"""Compute the patch-local likelihood score guidance term.
+
+        See :class:`MultiDiffusionDPSGuidance` for the meaning of
+        ``slice_start`` (full vs chunked batch mode) and the :math:`K`
+        chunk-size convention.
 
         Parameters
         ----------
         x : Tensor
-            Noisy patched latent slice :math:`(K, C, H_p, W_p)` with
-            ``requires_grad=True``.
+            Noisy patched latent slice :math:`\mathbf{x}_t^k`, of shape
+            :math:`(K, C, H_p, W_p)`. Must have ``requires_grad=True``
+            and be part of a computational graph connecting to ``x_0``.
+            Its ``dtype`` and ``device`` determine those of all internal
+            computations.
         t : Tensor
-            Diffusion time slice :math:`(K,)`.
+            Patched diffusion time slice, shape :math:`(K,)`.
         x_0 : Tensor
-            Patched x0 estimate :math:`(K, C, H_p, W_p)` computed from ``x``.
+            Estimate of the patched clean state
+            :math:`\hat{\mathbf{x}}_0^k(\mathbf{x}_t^k, t)`, of shape
+            :math:`(K, C, H_p, W_p)`. Must be computed from ``x`` so
+            gradients can backpropagate.
         slice_start : int or None, default=None
-            ``None`` processes the whole pre-patched batch at once (and
-            optionally fuses if ``fuse=True``). An ``int`` ``s`` processes
-            only the chunk starting at row ``s`` of the pre-patched
-            observations, returning a patched chunk guidance with no fuse.
+            Chunk offset along the :math:`(P \times B)` dimension. See
+            class docstring.
 
         Returns
         -------
         Tensor
-            Patch-local guidance term of shape :math:`(K, C, H_p, W_p)`,
-            or fused global guidance of shape :math:`(B, C, H, W)` when
-            ``slice_start=None`` and ``fuse=True``.
+            Patch-local guidance term of shape :math:`(K, C, H_p, W_p)`.
+            Fused to the global resolution :math:`(B, C, H, W)` when
+            ``slice_start=None`` and ``fuse=True`` was passed at
+            construction.
         """
         if not torch.compiler.is_compiling() and torch.is_inference_mode_enabled():
             raise RuntimeError(
@@ -552,22 +687,13 @@ class MultiDiffusionModelConsistencyDPSGuidance:
 
         with torch.enable_grad():
             y_pred = self.observation_operator(x_0)
-
-            norm = self.norm
-            if callable(norm):
-                loss = norm(y_pred, y_chunk)
-            else:
-                residual = (y_pred - y_chunk).reshape(y_pred.shape[0], -1)
-                loss = residual.abs().pow(norm).sum(dim=1)
-
-            grads = torch.autograd.grad(
+            loss = self._loss_fn(y_pred, y_chunk)
+            grad_x = torch.autograd.grad(
                 outputs=loss.sum(),
                 inputs=x,
                 retain_graph=self.retain_graph,
                 create_graph=self.create_graph,
-            )
-
-        grad_x = grads[0]
+            )[0]
 
         expected_shape = (-1,) + (1,) * (x.ndim - 1)
         t_bc = t.reshape(expected_shape)
@@ -582,18 +708,20 @@ class MultiDiffusionModelConsistencyDPSGuidance:
 
 
 class MultiDiffusionDataConsistencyDPSGuidance:
-    r"""Patch-local DPS guidance for masked observations.
+    r"""Patch-local DPS guidance for masked observations with Gaussian
+    noise.
 
     Multi-diffusion counterpart of
     :class:`~physicsnemo.diffusion.guidance.DataConsistencyDPSGuidance`,
     intended for masked observations whose mask decomposes along the
-    multi-diffusion patch grid (each patch's mask is independent of other
-    patches). Use cases: inpainting, sparse pointwise data assimilation
-    on large domains. Implements the :class:`MultiDiffusionDPSGuidance`
-    protocol.
+    multi-diffusion patch grid. Use cases: inpainting, sparse pointwise
+    data assimilation on large domains. Implements the
+    :class:`MultiDiffusionDPSGuidance` protocol, see it for the two-mode
+    (``slice_start``) semantics and the :math:`K` chunk-size convention.
 
-    Computes the likelihood score under Gaussian measurement noise. Letting
-    :math:`k` index the current patch chunk:
+    Computes the likelihood score assuming Gaussian measurement noise
+    with standard deviation :math:`\sigma_y`. Letting :math:`k` index
+    the current patch chunk:
 
     .. math::
 
@@ -602,20 +730,32 @@ class MultiDiffusionDataConsistencyDPSGuidance:
         \right)} \nabla_{\mathbf{x}^k}
         \| \mathbf{M}^k \odot (\hat{\mathbf{x}}_0^k - \mathbf{y}^k) \|^2
 
-    Both ``mask`` and ``y`` are pre-patched once at construction via the
-    predictor's :meth:`~MultiDiffusionPredictor.patch_fn`, so subsequent
-    diffusion steps do not pay the patching cost. The L2 norm can be
-    replaced by other Lp norms or a custom loss via the ``norm`` parameter.
+    where :math:`\mathbf{M}` is a binary mask (1 = observed, 0 = missing)
+    and :math:`\odot` denotes element-wise multiplication. The scaling
+    incorporates an SDA correction through :math:`\Gamma`. The L2 norm
+    can be replaced by other Lp norms or a custom loss function via the
+    ``norm`` parameter.
 
-    The :meth:`__call__` operates in two modes selected by the
-    ``slice_start`` argument:
+    Both ``mask`` and ``y`` are pre-patched once at construction;
+    calling the guidance many times during sampling never re-patches
+    them.
 
-    - ``slice_start=None``: process the whole batch of patches at once
-      using the FULL pre-patched ``mask`` and ``y``. Optionally fuse to the
-      global resolution if ``fuse=True`` was passed at construction.
-    - ``slice_start=s``: process the single chunk starting at row ``s``,
-      slicing ``mask`` and ``y`` with ``[s : s + K]``. Returns the patched
-      chunk guidance (no fuse, regardless of ``fuse``).
+    .. important::
+
+        ``mask`` and ``y`` must be **patcheable** in the same way as the
+        latent state :math:`\mathbf{x}`, so their spatial dimensions
+        must equal the global resolution :math:`(H, W)`. The mask
+        defines per-pixel observability within the global spatial
+        domain.
+
+    When ``norm`` is a callable, it must have the signature:
+
+    .. code-block:: python
+
+        def norm(
+            y_pred: Tensor,    # shape: (K, C, Hp, Wp)
+            y_true: Tensor,    # shape: (K, C, Hp, Wp)
+        ) -> Tensor: ...       # shape: (K,)  scalar loss per batch element
 
     Parameters
     ----------
@@ -623,32 +763,39 @@ class MultiDiffusionDataConsistencyDPSGuidance:
         Predictor used to pre-patch ``mask`` and ``y`` and (optionally)
         fuse the guidance. Stored on ``self.predictor`` for later access.
     mask : Tensor
-        Boolean mask of shape :math:`(B, *)`. ``True`` marks observed
-        locations, ``False`` marks missing.
+        Boolean mask of shape :math:`(B, C, H, W)`. ``True`` marks
+        observed locations, ``False`` marks missing.
     y : Tensor
-        Observed values of shape :math:`(B, *)`. Values at unobserved
-        locations are ignored.
+        Observed values of shape :math:`(B, C, H, W)`. Values at
+        unobserved locations are ignored.
     std_y : float
         Standard deviation of the measurement noise :math:`\sigma_y`.
     norm : int or callable, default=2
-        Loss to apply to the masked residual. An ``int`` selects the
-        corresponding Lp norm. A callable receives
-        ``(mask * x0, mask * y)`` and returns a scalar loss per batch element.
+        Loss applied to the masked residual. An ``int`` selects the
+        corresponding Lp norm; a callable replaces it with a custom loss
+        of the signature above.
     gamma : float, default=0.0
         SDA covariance scaling factor :math:`\Gamma`. Set to ``0`` for
         classical DPS without SDA scaling.
     sigma_fn : callable or None, default=None
-        :math:`t \mapsto \sigma(t)`. Required when ``gamma > 0``.
+        Function mapping diffusion time to noise level :math:`\sigma(t)`.
+        Required when ``gamma > 0``. Typically obtained from a noise
+        scheduler, e.g.
+        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.sigma`.
     alpha_fn : callable or None, default=None
-        :math:`t \mapsto \alpha(t)`. Defaults to :math:`\alpha(t) = 1`.
+        Function mapping diffusion time to signal coefficient
+        :math:`\alpha(t)`. Defaults to :math:`\alpha(t) = 1`. Typically
+        obtained from a noise scheduler, e.g.
+        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.alpha`.
     fuse : bool, default=False
         Whether :meth:`__call__` fuses the guidance term to the global
-        resolution when called without ``slice_start`` (full-batch mode).
-        Ignored in chunked mode.
+        resolution in full batch mode (``slice_start=None``). Ignored in
+        chunked batch mode.
     retain_graph : bool, default=False
-        Retain the computation graph after the gradient call. Required on
-        all but the last guidance when combining multiple autograd-based
-        guidances in a single :class:`MultiDiffusionDPSScorePredictor`.
+        Retain the computation graph after the gradient call. Required
+        on all but the last guidance when combining multiple
+        autograd-based guidances in a single
+        :class:`MultiDiffusionDPSScorePredictor`.
     create_graph : bool, default=False
         Allow higher-order derivatives.
 
@@ -663,7 +810,7 @@ class MultiDiffusionDataConsistencyDPSGuidance:
     See Also
     --------
     :class:`~physicsnemo.diffusion.guidance.DataConsistencyDPSGuidance` :
-        Use for non-patch-local masks.
+        Global counterpart for non-patch-local masks.
     :class:`MultiDiffusionDPSScorePredictor` :
         Score predictor that consumes this guidance.
 
@@ -705,7 +852,8 @@ class MultiDiffusionDataConsistencyDPSGuidance:
     >>> guidance(x_chunk, t_chunk, x0_chunk, slice_start=0).shape
     torch.Size([2, 3, 8, 8])
 
-    **Example 2:** Full guided sampling pipeline:
+    **Example 2:** SDA-scaled guidance with the L1 norm for robustness,
+    plugged into the full sampling stack:
 
     >>> from physicsnemo.diffusion.multi_diffusion import (
     ...     MultiDiffusionDPSScorePredictor,
@@ -714,39 +862,43 @@ class MultiDiffusionDataConsistencyDPSGuidance:
     >>> from physicsnemo.diffusion.samplers import sample
     >>>
     >>> scheduler = EDMNoiseScheduler()
-    >>> md2 = MultiDiffusionModel2D(Backbone(), global_spatial_shape=(16, 16))
-    >>> md2.set_random_patching(patch_shape=(8, 8), patch_num=4)
-    >>> _ = md2.eval()
-    >>> predictor2 = MultiDiffusionPredictor(md2, chunk_size=2)
-    >>> predictor2.set_patching(overlap_pix=0, boundary_pix=0)
     >>>
-    >>> mask2 = torch.zeros(2, 3, 16, 16, dtype=torch.bool)
-    >>> mask2[:, :, 2, 3] = True
-    >>> y_obs2 = torch.randn(2, 3, 16, 16)
-    >>> guidance2 = MultiDiffusionDataConsistencyDPSGuidance(
-    ...     predictor=predictor2, mask=mask2, y=y_obs2, std_y=0.1,
+    >>> mask = torch.zeros(2, 3, 16, 16, dtype=torch.bool)
+    >>> mask[:, :, 2, 3] = True
+    >>> mask[:, :, 5, 6] = True
+    >>> y_obs = torch.randn(2, 3, 16, 16)
+    >>>
+    >>> guidance_sda = MultiDiffusionDataConsistencyDPSGuidance(
+    ...     predictor=predictor,
+    ...     mask=mask,
+    ...     y=y_obs,
+    ...     std_y=0.075,
+    ...     norm=1,              # L1 norm for robustness
+    ...     gamma=1.0,           # enable SDA scaling
+    ...     sigma_fn=scheduler.sigma,
+    ...     alpha_fn=scheduler.alpha,
     ... )
-    >>> dps2 = MultiDiffusionDPSScorePredictor(
-    ...     x0_predictor=predictor2,
+    >>> dps = MultiDiffusionDPSScorePredictor(
+    ...     x0_predictor=predictor,
     ...     x0_to_score_fn=scheduler.x0_to_score,
-    ...     guidances=guidance2,
+    ...     guidances=guidance_sda,
     ... )
-    >>> denoiser2 = scheduler.get_denoiser(score_predictor=dps2)
-    >>> xN2 = torch.randn(2, 3, 16, 16)
-    >>> x0_2 = sample(denoiser2, xN2, scheduler, num_steps=4)
-    >>> x0_2.shape
+    >>> denoiser = scheduler.get_denoiser(score_predictor=dps)
+    >>> xN = torch.randn(2, 3, 16, 16)
+    >>> x0 = sample(denoiser, xN, scheduler, num_steps=4)
+    >>> x0.shape
     torch.Size([2, 3, 16, 16])
     """
 
     def __init__(
         self,
         predictor: MultiDiffusionPredictor,
-        mask: Bool[Tensor, " B *dims"],
-        y: Float[Tensor, " B *dims"],
+        mask: Bool[Tensor, "B C H W"],
+        y: Float[Tensor, "B C H W"],
         std_y: float,
         norm: int
         | Callable[
-            [Float[Tensor, " K *dims"], Float[Tensor, " K *dims"]],
+            [Float[Tensor, "K C Hp Wp"], Float[Tensor, "K C Hp Wp"]],
             Float[Tensor, " K"],
         ] = 2,
         gamma: float = 0.0,
@@ -766,7 +918,11 @@ class MultiDiffusionDataConsistencyDPSGuidance:
         self._mask_patched: Tensor = patch(mask.float())
         self._y_patched: Tensor = patch(y)
         self.std_y = std_y
-        self.norm = norm
+        # Resolve the loss callable at construction so __call__ has no branch.
+        if isinstance(norm, int):
+            self._loss_fn: Callable[[Tensor, Tensor], Tensor] = _lp_loss_fn(norm)
+        else:
+            self._loss_fn = norm
         self.gamma = gamma
         self.sigma_fn = (
             sigma_fn if sigma_fn is not None else lambda t: torch.zeros_like(t)
@@ -780,35 +936,43 @@ class MultiDiffusionDataConsistencyDPSGuidance:
 
     def __call__(
         self,
-        x: Float[Tensor, " K C Hp Wp"],
+        x: Float[Tensor, "K C Hp Wp"],
         t: Float[Tensor, " K"],
-        x_0: Float[Tensor, " K C Hp Wp"],
+        x_0: Float[Tensor, "K C Hp Wp"],
         slice_start: int | None = None,
-    ) -> Float[Tensor, " K C Hp Wp"] | Float[Tensor, " B C H W"]:
+    ) -> Float[Tensor, "K C Hp Wp"] | Float[Tensor, "B C H W"]:
         r"""Compute the patch-local likelihood score guidance term.
+
+        See :class:`MultiDiffusionDPSGuidance` for the meaning of
+        ``slice_start`` (full vs chunked batch mode) and the :math:`K`
+        chunk-size convention.
 
         Parameters
         ----------
         x : Tensor
-            Noisy patched latent slice :math:`(K, C, H_p, W_p)` with
-            ``requires_grad=True``.
+            Noisy patched latent slice :math:`\mathbf{x}_t^k`, of shape
+            :math:`(K, C, H_p, W_p)`. Must have ``requires_grad=True``
+            and be part of a computational graph connecting to ``x_0``.
+            Its ``dtype`` and ``device`` determine those of all internal
+            computations.
         t : Tensor
-            Diffusion time slice :math:`(K,)`.
+            Patched diffusion time slice, shape :math:`(K,)`.
         x_0 : Tensor
-            Patched x0 estimate :math:`(K, C, H_p, W_p)` computed from ``x``.
+            Estimate of the patched clean state
+            :math:`\hat{\mathbf{x}}_0^k(\mathbf{x}_t^k, t)`, of shape
+            :math:`(K, C, H_p, W_p)`. Must be computed from ``x`` so
+            gradients can backpropagate.
         slice_start : int or None, default=None
-            ``None`` processes the whole pre-patched batch at once (and
-            optionally fuses if ``fuse=True``). An ``int`` ``s`` processes
-            only the chunk starting at row ``s`` of the pre-patched mask
-            and observations, returning a patched chunk guidance with no
-            fuse.
+            Chunk offset along the :math:`(P \times B)` dimension. See
+            class docstring.
 
         Returns
         -------
         Tensor
-            Patch-local guidance term of shape :math:`(K, C, H_p, W_p)`,
-            or fused global guidance of shape :math:`(B, C, H, W)` when
-            ``slice_start=None`` and ``fuse=True``.
+            Patch-local guidance term of shape :math:`(K, C, H_p, W_p)`.
+            Fused to the global resolution :math:`(B, C, H, W)` when
+            ``slice_start=None`` and ``fuse=True`` was passed at
+            construction.
         """
         if not torch.compiler.is_compiling() and torch.is_inference_mode_enabled():
             raise RuntimeError(
@@ -831,22 +995,13 @@ class MultiDiffusionDataConsistencyDPSGuidance:
         with torch.enable_grad():
             y_pred = mask_chunk * x_0
             y_true = mask_chunk * y_chunk
-
-            norm = self.norm
-            if callable(norm):
-                loss = norm(y_pred, y_true)
-            else:
-                residual = (y_pred - y_true).reshape(x_0.shape[0], -1)
-                loss = residual.abs().pow(norm).sum(dim=1)
-
-            grads = torch.autograd.grad(
+            loss = self._loss_fn(y_pred, y_true)
+            grad_x = torch.autograd.grad(
                 outputs=loss.sum(),
                 inputs=x,
                 retain_graph=self.retain_graph,
                 create_graph=self.create_graph,
-            )
-
-        grad_x = grads[0]
+            )[0]
 
         expected_shape = (-1,) + (1,) * (x.ndim - 1)
         t_bc = t.reshape(expected_shape)
