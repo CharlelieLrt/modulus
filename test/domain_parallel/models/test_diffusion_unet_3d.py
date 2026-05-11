@@ -53,7 +53,7 @@ def _build_model(x_channels, vol_cond_channels=0, vec_cond_dim=0, device="cpu"):
 def test_diffusion_unet_3d_distributed(distributed_mesh):
     """Unconditional forward with `x` sharded along the H axis."""
     dm = DistributedManager()
-    B, C, D, H, W = 2, 2, 8, 16, 16
+    B, C, D, H, W = 2, 2, 8, 32, 32
 
     model = _build_model(x_channels=C, device=dm.device)
     model = distribute_module(model, device_mesh=distributed_mesh)
@@ -76,7 +76,7 @@ def test_diffusion_unet_3d_distributed(distributed_mesh):
 def test_diffusion_unet_3d_conditional_distributed(distributed_mesh):
     """Forward with vector + volume conditioning, sharded along H."""
     dm = DistributedManager()
-    B, C, D, H, W = 2, 2, 8, 16, 16
+    B, C, D, H, W = 2, 2, 8, 32, 32
     C_vol, D_vec = 2, 8
 
     model = _build_model(
