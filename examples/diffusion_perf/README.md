@@ -68,15 +68,15 @@ examples/diffusion_perf/
 ```
 
 The benchmark backbone is fixed across all variants so that comparisons are
-apples-to-apples. The defaults in `bench/config.py` produce an ~100M
+apples-to-apples. The defaults in `bench/config.py` produce an ~80M
 parameter SongUNet:
 
 | key | value |
 |---|---|
 | `model_channels` | 128 |
-| `channel_mult` | `[1, 2, 2, 2, 2, 2]` (6 levels, bottleneck at H/32) |
+| `channel_mult` | `[1, 2, 2, 2, 2]` (5 levels, bottleneck at H/16) |
 | `num_blocks` | 4 |
-| `attn_resolutions` | computed per-call as the **two deepest** UNet levels (`[H/16, H/32]`) so self-attention always lands at the bottleneck and the level above it, regardless of global resolution |
+| `attn_resolutions` | computed per-call as the **two deepest** UNet levels (`[H/8, H/16]`) so self-attention always lands at the bottleneck and the level above it, regardless of global resolution |
 | `dropout` | 0.13 |
 | `embedding_type` | positional |
 
@@ -93,7 +93,7 @@ Sweep and loop defaults (all in `bench/config.py`):
 | `WARMUP_STEPS` / `MEASURE_STEPS` | 6 / 15 | training timing loop |
 | `WARMUP_STEPS_INFER` / `MEASURE_STEPS_INFER` | 3 / 5 | inference timing loop |
 | `FULL_OPTS_TRAIN`, `FULL_OPTS_INFER` | `{amp_bf16, compile, apex_gn}` | "full opts" set |
-| `PATCH_ALIGN` | 32 | every MD patch edge is a multiple of 32 (6 UNet levels => 5 downsamples) |
+| `PATCH_ALIGN` | 16 | every MD patch edge is a multiple of 16 (5 UNet levels => 4 downsamples) |
 | `OBSERVATION_FRAC`, `OBSERVATION_STD`, `OBSERVATION_CHANNEL_FRAC` | 0.005 / 0.05 / 0.5 | sparse observation mask used by the DPS benchmark |
 
 ---

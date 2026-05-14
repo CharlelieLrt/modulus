@@ -23,14 +23,14 @@ import re
 import torch
 
 # ---------------------------------------------------------------------------
-# Backbone configuration (~100M, self-attention at the 2 deepest UNet levels,
+# Backbone configuration (~80M, self-attention at the 2 deepest UNet levels,
 # computed conditionally from ``img_resolution`` since a fixed
 # ``attn_resolutions`` list is incorrect for arbitrary global resolutions).
 # ---------------------------------------------------------------------------
 
 BACKBONE_KWARGS: dict = {
     "model_channels": 128,
-    "channel_mult": [1, 2, 2, 2, 2, 2],
+    "channel_mult": [1, 2, 2, 2, 2],
     "num_blocks": 4,
     "dropout": 0.13,
     "embedding_type": "positional",
@@ -122,7 +122,7 @@ WARMUP_STEPS: int = 6
 MEASURE_STEPS: int = 15
 WARMUP_STEPS_INFER: int = 3
 MEASURE_STEPS_INFER: int = 5
-PATCH_ALIGN: int = 32  # 6 UNet levels => 5 downsamples => multiple of 2**5
+PATCH_ALIGN: int = 16  # 5 UNet levels => 4 downsamples => multiple of 2**4
 OBSERVATION_FRAC: float = 0.005
 OBSERVATION_STD: float = 0.05
 OBSERVATION_CHANNEL_FRAC: float = 0.5
@@ -167,6 +167,8 @@ _DEVICE_NAME_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 
 def detect_device(device_idx: int | None = None) -> dict:
+    """Resolve a short, stable device label + capability dict for the given
+    CUDA device index (defaults to the current device)."""
     if device_idx is None:
         device_idx = torch.cuda.current_device()
     raw_name = torch.cuda.get_device_name(device_idx)
