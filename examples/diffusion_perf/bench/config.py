@@ -168,7 +168,14 @@ _DEVICE_NAME_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 def detect_device(device_idx: int | None = None) -> dict:
     """Resolve a short, stable device label + capability dict for the given
-    CUDA device index (defaults to the current device)."""
+    CUDA device index (defaults to the current device).
+
+    ``total_memory_gb`` is read directly from PyTorch in **decimal GB**
+    (``total_memory / 1e9``) to match the convention used by
+    ``torch.cuda.max_memory_allocated() / 1e9`` for ``peak_memory_*``.
+    The vendor's marketing label (e.g. L40 "48 GB" = 48 GiB) is GiB-based,
+    so the value reported here will be larger than the marketing number
+    (e.g. ~51.54 GB decimal for an L40)."""
     if device_idx is None:
         device_idx = torch.cuda.current_device()
     raw_name = torch.cuda.get_device_name(device_idx)
@@ -181,10 +188,8 @@ def detect_device(device_idx: int | None = None) -> dict:
         "raw_name": raw_name,
         "bf16_peak_tflops": GPU_PEAK_TFLOPS_BF16.get(short),
         "fp16_peak_tflops": GPU_PEAK_TFLOPS_FP16.get(short),
-        "total_memory_gb": GPU_TOTAL_MEMORY_GB.get(
-            short,
-            torch.cuda.get_device_properties(device_idx).total_memory / 1e9,
-        ),
+        "total_memory_gb": torch.cuda.get_device_properties(device_idx).total_memory
+        / 1e9,
         "capability": list(torch.cuda.get_device_capability(device_idx)),
         "apex_gn_available": _HAS_APEX_GN,
     }
