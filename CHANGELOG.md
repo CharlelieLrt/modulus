@@ -111,7 +111,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   data assimilation, and `MultiDiffusionModelConsistencyDPSGuidance` for
   generic patch-local observation operators. Use these instead of the
   global `DPSScorePredictor` to run guided sampling on domains that
-  would otherwise OOM.
+  would otherwise OOM. A self-contained performance benchmark for the
+  framework's 2D diffusion stack lives at `examples/diffusion_perf/`:
+  training (DDP), inference (no guidance), and inference + DPS guidance
+  across pure-PyTorch baseline / PhysicsNeMo (no opts) / PhysicsNeMo +
+  full opts / PhysicsNeMo + multi-diffusion + full opts, with a
+  calibration step that picks the largest patch shape that fits a
+  configurable fraction of GPU memory, a sweep orchestrator, and a
+  plotting script that emits per-(benchmark, QoI) grouped bar plots
+  plus a user-code line-count comparison.
 - Adds `"epsilon"` as a supported prediction type throughout the diffusion
   framework, alongside the existing `"x0"` and `"score"` modes. A new
   `PredictorType = Literal["x0", "score", "epsilon"]` alias in
@@ -218,6 +226,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fixed a per-step autograd-graph leak in diffusion sampling. `sample()`
+  now detaches the latent between solver steps when the caller is under
+  `torch.no_grad()`, preventing the denoiser's output graph (notably from
+  `DPSScorePredictor` and `MultiDiffusionDPSScorePredictor`) from
+  compounding across Heun steps. Callers running under default autograd
+  context (e.g. backpropagating through `sample()` for higher-order use
+  cases) see no behavior change. `MultiDiffusionDPSScorePredictor` was
+  also patched to honor the caller's grad mode for the score-conversion
+  and chunk-add operations, mirroring the non-MD `DPSScorePredictor`
+  design. Both DPS predictor docstrings now recommend wrapping inference
+  sample loops in `torch.no_grad()` (not `torch.inference_mode()`, which
+  would break the guidance's internal `autograd.grad`).
 - Fixed functional benchmark plot fallback labeling so unlabeled ASV results use
   the same key ordering as the benchmark runner.
 - Fixed graph break caused by `FunctionSpec` dispatch (`max(key=)` is not supported by `torch.compile`)
