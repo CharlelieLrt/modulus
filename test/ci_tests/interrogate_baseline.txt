@@ -1,7 +1,8 @@
-# interrogate_baseline.txt
+
 # Known undocumented items (grandfathered). Each line: filepath:item_name
 # New code must have docstrings. Remove entries as docstrings are backfilled.
 # Regenerate: uv run python test/ci_tests/check_docstring_coverage.py --generate-baseline
+# interrogate_baseline.txt
 benchmarks/physicsnemo/nn/functional/benchmark_functionals.py:FunctionalBenchmarks.setup
 benchmarks/physicsnemo/nn/functional/benchmark_functionals.py:FunctionalBenchmarks.time_functional
 benchmarks/physicsnemo/nn/functional/plot_functional_benchmarks.py:main
@@ -217,7 +218,6 @@ examples/cfd/flow_reconstruction_diffusion/dataset/dataset_tool.py:open_image_zi
 examples/cfd/flow_reconstruction_diffusion/dataset/dataset_tool.py:open_lmdb
 examples/cfd/flow_reconstruction_diffusion/dataset/dataset_tool.py:open_mnist
 examples/cfd/flow_reconstruction_diffusion/dataset/dataset_tool.py:parse_tuple
-examples/cfd/flow_reconstruction_diffusion/dataset/dataset_tool.py:parse_tuple
 examples/cfd/flow_reconstruction_diffusion/fid.py:calculate_inception_stats
 examples/cfd/flow_reconstruction_diffusion/generate_dfsr.py:MetricLogger.get
 examples/cfd/flow_reconstruction_diffusion/generate_dfsr.py:MetricLogger.log
@@ -311,6 +311,46 @@ examples/cfd/vortex_shedding_mgn/inference.py:main
 examples/cfd/vortex_shedding_mgn/train.py:MGNTrainer
 examples/cfd/vortex_shedding_mgn/train.py:MGNTrainer.train
 examples/cfd/vortex_shedding_mgn/train.py:main
+examples/diffusion_perf/bench/config.py:detect_device
+examples/diffusion_perf/bench/memory.py:MemoryTracker.reset
+examples/diffusion_perf/bench/memory.py:MemoryTracker.snapshot
+examples/diffusion_perf/bench/memory.py:MemoryTracker.summary
+examples/diffusion_perf/bench/results.py:ResultBuilder.backbone
+examples/diffusion_perf/bench/results.py:ResultBuilder.config
+examples/diffusion_perf/bench/results.py:ResultBuilder.device
+examples/diffusion_perf/bench/results.py:ResultBuilder.loc
+examples/diffusion_perf/bench/results.py:ResultBuilder.memory
+examples/diffusion_perf/bench/results.py:ResultBuilder.mfu
+examples/diffusion_perf/bench/results.py:ResultBuilder.status
+examples/diffusion_perf/bench/results.py:ResultBuilder.timing
+examples/diffusion_perf/bench/results.py:ResultBuilder.to_dict
+examples/diffusion_perf/bench/results.py:ResultBuilder.world_size
+examples/diffusion_perf/bench/results.py:ResultBuilder.write
+examples/diffusion_perf/bench/results.py:env_summary
+examples/diffusion_perf/bench/results.py:save_yaml
+examples/diffusion_perf/bench/timing.py:StepTimer.start
+examples/diffusion_perf/bench/timing.py:StepTimer.stop
+examples/diffusion_perf/bench/timing.py:StepTimer.summary
+examples/diffusion_perf/bench/timing.py:StepTimer.total
+examples/diffusion_perf/calibrate.py:load_max_domain
+examples/diffusion_perf/calibrate.py:main
+examples/diffusion_perf/calibrate.py:save_max_domain
+examples/diffusion_perf/generate.py:generate_baseline
+examples/diffusion_perf/generate.py:generate_physicsnemo
+examples/diffusion_perf/generate.py:generate_physicsnemo_multidiffusion
+examples/diffusion_perf/generate.py:main
+examples/diffusion_perf/generate_dps_guidance.py:generate_dps_baseline
+examples/diffusion_perf/generate_dps_guidance.py:generate_dps_physicsnemo
+examples/diffusion_perf/generate_dps_guidance.py:generate_dps_physicsnemo_multidiffusion
+examples/diffusion_perf/generate_dps_guidance.py:main
+examples/diffusion_perf/plot.py:main
+examples/diffusion_perf/run_sweep.py:main
+examples/diffusion_perf/run_sweep.py:run_inference_dps_suite
+examples/diffusion_perf/run_sweep.py:run_inference_suite
+examples/diffusion_perf/train.py:main
+examples/diffusion_perf/train.py:train_baseline
+examples/diffusion_perf/train.py:train_physicsnemo
+examples/diffusion_perf/train.py:train_physicsnemo_multidiffusion
 examples/generative/topodiff/inference.py:main
 examples/generative/topodiff/train.py:main
 examples/generative/topodiff/train_classifier.py:main
@@ -322,7 +362,6 @@ examples/geophysics/diffusion_fwi/data/compute_stats.py:main
 examples/geophysics/diffusion_fwi/train.py:main
 examples/healthcare/bloodflow_1d_mgn/inference.py:MGNRollout
 examples/healthcare/bloodflow_1d_mgn/train.py:MGNTrainer
-
 examples/minimal/ShardTensorExamples/3_knn/knn_brute_force_baseline.py:knn
 examples/minimal/ShardTensorExamples/3_knn/knn_brute_force_ring_sharded.py:knn
 examples/minimal/ShardTensorExamples/3_knn/knn_brute_force_ring_sharded.py:knn_ring
@@ -582,7 +621,6 @@ physicsnemo/models/dpot/dpot3d.py:DPOT3DMeta
 physicsnemo/models/dpot/dpot3d.py:checkpoint_filter_fn
 physicsnemo/models/dpot/dpot3d.py:resize_pos_embed
 physicsnemo/models/figconvnet/components/reductions.py:row_reduction
-physicsnemo/models/figconvnet/components/reductions.py:row_reduction
 physicsnemo/models/figconvnet/point_feature_grid_ops.py:GridFeatureToPointInterp.to
 physicsnemo/models/graphcast/utils/graph_backend.py:PyGGraphBackend.add_edge_features
 physicsnemo/models/graphcast/utils/graph_backend.py:PyGGraphBackend.add_node_features
@@ -592,8 +630,6 @@ physicsnemo/models/graphcast/utils/graph_backend.py:PyGGraphBackend.khop_adj_all
 physicsnemo/models/pix2pix/pix2pixunet.py:Pix2PixUnet.load_networks
 physicsnemo/models/pix2pix/pix2pixunet.py:Pix2PixUnet.test
 physicsnemo/nn/functional/equivariant_ops.py:legendre_polynomials
-physicsnemo/nn/functional/equivariant_ops.py:legendre_polynomials
-physicsnemo/nn/functional/equivariant_ops.py:smooth_log
 physicsnemo/nn/functional/equivariant_ops.py:smooth_log
 physicsnemo/nn/functional/fourier_spectral/fft.py:IRFFT.make_inputs_backward
 physicsnemo/nn/functional/fourier_spectral/fft.py:IRFFT.make_inputs_forward
