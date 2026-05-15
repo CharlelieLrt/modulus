@@ -23,14 +23,24 @@ exact command to run.
 For each benchmark (training, inference, inference_dps), runs the same 4
 settings across ``DOMAIN_SWEEP``, with one subprocess per (setting, domain):
 
-    1. baseline           — pure-PyTorch, FP32, no framework
-    2. physicsnemo        — framework, FP32, no opts
-    3. physicsnemo + opts — framework + amp_bf16 + compile + apex_gn
-    4. MD + opts          — setting 3 with MultiDiffusionModel2D wrap,
-                            patch_shape = min(domain, MAX_DOMAIN)
+    1. baseline        — pure-PyTorch, FP32, no framework
+    2. framework       — physicsnemo, FP32, no opts
+    3. framework_opts  — physicsnemo + amp_bf16 + compile + apex_gn
+    4. md              — physicsnemo + multi-diffusion (setting 3 with
+                         MultiDiffusionModel2D wrap, patch_shape =
+                         min(domain, MAX_DOMAIN))
 
 Non-MD settings stop on first OOM. MD is expected never to OOM (the patch
 shape is bounded by what training already proved fits).
+
+CLI selectors (combinable):
+
+* ``--suite`` picks which of the 3 benchmark groups run.
+* ``--domains`` overrides the swept domain edges (default: full sweep
+  truncated by ``--max-global-domain``).
+* ``--settings`` subsets the 4 settings above (default: all 4).
+* ``--skip-existing`` skips cases whose result YAML already exists, which
+  makes a partially-completed sweep cheaply resumable.
 """
 
 from __future__ import annotations
@@ -63,6 +73,8 @@ _RESULTS_DIR = Path(__file__).resolve().parent / "results"
 _DEVICE_LABEL = "L40s"
 _TORCHRUN_PORT_BASE = 29800
 
+SETTING_NAMES = ["baseline", "framework", "framework_opts", "md"]
+
 
 def _opts_to_str(opts: frozenset[str]) -> str:
     return ",".join(sorted(opts)) if opts else "none"
@@ -87,6 +99,21 @@ def _read_status(path: Path) -> str:
         return yaml.safe_load(path.read_text())["results"]["status"]
     except Exception:
         return "missing"
+
+
+def _maybe_run(
+    *,
+    yaml_path: Path,
+    cmd: list[str],
+    multi_gpu: bool,
+    skip_existing: bool,
+    port_offset: int = 0,
+) -> None:
+    """Run ``cmd``, or skip if ``skip_existing`` and ``yaml_path`` already exists."""
+    if skip_existing and yaml_path.exists():
+        print(f"[skip] {yaml_path.name} already exists", flush=True)
+        return
+    _run_subprocess(cmd, multi_gpu=multi_gpu, port_offset=port_offset)
 
 
 def _run_subprocess(
@@ -147,19 +174,32 @@ def _train_cmd(
 
 
 def run_training_suite(
-    *, max_domain: int, warmup: int, measure: int, domains: list[int]
+    *,
+    max_domain: int,
+    warmup: int,
+    measure: int,
+    domains: list[int],
+    active_settings: set[str],
+    skip_existing: bool,
 ):
     """4 settings × ``domains`` at training B/rank DDP."""
     bs = BATCH_SIZE_TRAIN
-    print(f"[training] 4-way comparison at B={bs} DDP", flush=True)
+    print(f"[training] settings={sorted(active_settings)} at B={bs} DDP", flush=True)
     # Track OOM per setting to avoid wasting time on configs guaranteed to fail
     state = {"baseline": False, "framework": False, "framework_opts": False}
     port = 0
     for d in domains:
         # Setting 1: baseline (pure pytorch, FP32)
-        if not state["baseline"]:
-            _run_subprocess(
-                _train_cmd(
+        if "baseline" in active_settings and not state["baseline"]:
+            path = _yaml_path(
+                function="train_baseline",
+                domain=d,
+                opts=frozenset(),
+                batch_size=bs,
+            )
+            _maybe_run(
+                yaml_path=path,
+                cmd=_train_cmd(
                     function="train_baseline",
                     domain=d,
                     opts=frozenset(),
@@ -168,26 +208,24 @@ def run_training_suite(
                     batch_size=bs,
                 ),
                 multi_gpu=True,
+                skip_existing=skip_existing,
                 port_offset=port,
             )
             port += 1
-            if (
-                _read_status(
-                    _yaml_path(
-                        function="train_baseline",
-                        domain=d,
-                        opts=frozenset(),
-                        batch_size=bs,
-                    )
-                )
-                != "ok"
-            ):
+            if _read_status(path) != "ok":
                 state["baseline"] = True
                 print(f"[training] baseline OOM at d={d}", flush=True)
         # Setting 2: physicsnemo (no opts, FP32)
-        if not state["framework"]:
-            _run_subprocess(
-                _train_cmd(
+        if "framework" in active_settings and not state["framework"]:
+            path = _yaml_path(
+                function="train_physicsnemo",
+                domain=d,
+                opts=frozenset(),
+                batch_size=bs,
+            )
+            _maybe_run(
+                yaml_path=path,
+                cmd=_train_cmd(
                     function="train_physicsnemo",
                     domain=d,
                     opts=frozenset(),
@@ -196,26 +234,24 @@ def run_training_suite(
                     batch_size=bs,
                 ),
                 multi_gpu=True,
+                skip_existing=skip_existing,
                 port_offset=port,
             )
             port += 1
-            if (
-                _read_status(
-                    _yaml_path(
-                        function="train_physicsnemo",
-                        domain=d,
-                        opts=frozenset(),
-                        batch_size=bs,
-                    )
-                )
-                != "ok"
-            ):
+            if _read_status(path) != "ok":
                 state["framework"] = True
                 print(f"[training] physicsnemo OOM at d={d}", flush=True)
         # Setting 3: physicsnemo + full opts
-        if not state["framework_opts"]:
-            _run_subprocess(
-                _train_cmd(
+        if "framework_opts" in active_settings and not state["framework_opts"]:
+            path = _yaml_path(
+                function="train_physicsnemo",
+                domain=d,
+                opts=FULL_OPTS_TRAIN,
+                batch_size=bs,
+            )
+            _maybe_run(
+                yaml_path=path,
+                cmd=_train_cmd(
                     function="train_physicsnemo",
                     domain=d,
                     opts=FULL_OPTS_TRAIN,
@@ -224,27 +260,25 @@ def run_training_suite(
                     batch_size=bs,
                 ),
                 multi_gpu=True,
+                skip_existing=skip_existing,
                 port_offset=port,
             )
             port += 1
-            if (
-                _read_status(
-                    _yaml_path(
-                        function="train_physicsnemo",
-                        domain=d,
-                        opts=FULL_OPTS_TRAIN,
-                        batch_size=bs,
-                    )
-                )
-                != "ok"
-            ):
+            if _read_status(path) != "ok":
                 state["framework_opts"] = True
                 print(f"[training] physicsnemo+opts OOM at d={d}", flush=True)
         # Setting 4: MD + full opts; never OOMs (patch bounded by MAX_DOMAIN)
-        if max_domain > 0:
+        if "md" in active_settings and max_domain > 0:
             patch = patch_shape_for(d, max_domain)
-            _run_subprocess(
-                _train_cmd(
+            path = _yaml_path(
+                function="train_physicsnemo_multidiffusion",
+                domain=d,
+                opts=FULL_OPTS_TRAIN,
+                batch_size=bs,
+            )
+            _maybe_run(
+                yaml_path=path,
+                cmd=_train_cmd(
                     function="train_physicsnemo_multidiffusion",
                     domain=d,
                     opts=FULL_OPTS_TRAIN,
@@ -254,6 +288,7 @@ def run_training_suite(
                     patch_shape=patch,
                 ),
                 multi_gpu=True,
+                skip_existing=skip_existing,
                 port_offset=port,
             )
             port += 1
@@ -299,13 +334,22 @@ def _run_inference_suite(
     measure: int,
     label: str,
     domains: list[int],
+    active_settings: set[str],
+    skip_existing: bool,
 ):
-    print(f"[{label}] 4-way comparison", flush=True)
+    print(f"[{label}] settings={sorted(active_settings)}", flush=True)
     state = {"baseline": False, "framework": False, "framework_opts": False}
     for d in domains:
-        if not state["baseline"]:
-            _run_subprocess(
-                _infer_cmd(
+        if "baseline" in active_settings and not state["baseline"]:
+            path = _yaml_path(
+                function=fn_baseline,
+                domain=d,
+                opts=frozenset(),
+                batch_size=BATCH_SIZE_INFER,
+            )
+            _maybe_run(
+                yaml_path=path,
+                cmd=_infer_cmd(
                     module,
                     function=fn_baseline,
                     domain=d,
@@ -314,23 +358,21 @@ def _run_inference_suite(
                     measure=measure,
                 ),
                 multi_gpu=False,
+                skip_existing=skip_existing,
             )
-            if (
-                _read_status(
-                    _yaml_path(
-                        function=fn_baseline,
-                        domain=d,
-                        opts=frozenset(),
-                        batch_size=BATCH_SIZE_INFER,
-                    )
-                )
-                != "ok"
-            ):
+            if _read_status(path) != "ok":
                 state["baseline"] = True
                 print(f"[{label}] baseline OOM at d={d}", flush=True)
-        if not state["framework"]:
-            _run_subprocess(
-                _infer_cmd(
+        if "framework" in active_settings and not state["framework"]:
+            path = _yaml_path(
+                function=fn_physicsnemo,
+                domain=d,
+                opts=frozenset(),
+                batch_size=BATCH_SIZE_INFER,
+            )
+            _maybe_run(
+                yaml_path=path,
+                cmd=_infer_cmd(
                     module,
                     function=fn_physicsnemo,
                     domain=d,
@@ -339,23 +381,21 @@ def _run_inference_suite(
                     measure=measure,
                 ),
                 multi_gpu=False,
+                skip_existing=skip_existing,
             )
-            if (
-                _read_status(
-                    _yaml_path(
-                        function=fn_physicsnemo,
-                        domain=d,
-                        opts=frozenset(),
-                        batch_size=BATCH_SIZE_INFER,
-                    )
-                )
-                != "ok"
-            ):
+            if _read_status(path) != "ok":
                 state["framework"] = True
                 print(f"[{label}] physicsnemo OOM at d={d}", flush=True)
-        if not state["framework_opts"]:
-            _run_subprocess(
-                _infer_cmd(
+        if "framework_opts" in active_settings and not state["framework_opts"]:
+            path = _yaml_path(
+                function=fn_physicsnemo,
+                domain=d,
+                opts=FULL_OPTS_INFER,
+                batch_size=BATCH_SIZE_INFER,
+            )
+            _maybe_run(
+                yaml_path=path,
+                cmd=_infer_cmd(
                     module,
                     function=fn_physicsnemo,
                     domain=d,
@@ -364,24 +404,22 @@ def _run_inference_suite(
                     measure=measure,
                 ),
                 multi_gpu=False,
+                skip_existing=skip_existing,
             )
-            if (
-                _read_status(
-                    _yaml_path(
-                        function=fn_physicsnemo,
-                        domain=d,
-                        opts=FULL_OPTS_INFER,
-                        batch_size=BATCH_SIZE_INFER,
-                    )
-                )
-                != "ok"
-            ):
+            if _read_status(path) != "ok":
                 state["framework_opts"] = True
                 print(f"[{label}] physicsnemo+opts OOM at d={d}", flush=True)
-        if max_domain > 0:
+        if "md" in active_settings and max_domain > 0:
             patch = patch_shape_for(d, max_domain)
-            _run_subprocess(
-                _infer_cmd(
+            path = _yaml_path(
+                function=fn_md,
+                domain=d,
+                opts=FULL_OPTS_INFER,
+                batch_size=BATCH_SIZE_INFER,
+            )
+            _maybe_run(
+                yaml_path=path,
+                cmd=_infer_cmd(
                     module,
                     function=fn_md,
                     domain=d,
@@ -392,10 +430,13 @@ def _run_inference_suite(
                     chunk_size=1,
                 ),
                 multi_gpu=False,
+                skip_existing=skip_existing,
             )
 
 
-def run_inference_suite(*, max_domain, warmup, measure, domains):
+def run_inference_suite(
+    *, max_domain, warmup, measure, domains, active_settings, skip_existing
+):
     _run_inference_suite(
         module="examples.diffusion_perf.generate",
         fn_baseline="generate_baseline",
@@ -406,10 +447,14 @@ def run_inference_suite(*, max_domain, warmup, measure, domains):
         measure=measure,
         label="inference",
         domains=domains,
+        active_settings=active_settings,
+        skip_existing=skip_existing,
     )
 
 
-def run_inference_dps_suite(*, max_domain, warmup, measure, domains):
+def run_inference_dps_suite(
+    *, max_domain, warmup, measure, domains, active_settings, skip_existing
+):
     _run_inference_suite(
         module="examples.diffusion_perf.generate_dps_guidance",
         fn_baseline="generate_dps_baseline",
@@ -420,6 +465,8 @@ def run_inference_dps_suite(*, max_domain, warmup, measure, domains):
         measure=measure,
         label="inference_dps",
         domains=domains,
+        active_settings=active_settings,
+        skip_existing=skip_existing,
     )
 
 
@@ -445,17 +492,50 @@ def main():
         default=MAX_GLOBAL_DOMAIN,
         help=(
             "Largest global domain edge to sweep. Truncates "
-            "DOMAIN_SWEEP_FULL from the top. Default: %(default)s."
+            "DOMAIN_SWEEP_FULL from the top. Ignored if --domains is given. "
+            "Default: %(default)s."
+        ),
+    )
+    parser.add_argument(
+        "--domains",
+        type=int,
+        nargs="+",
+        default=None,
+        help=(
+            "Explicit list of global domain edges to sweep, e.g. "
+            "`--domains 512 1024 2048`. Overrides --max-global-domain."
+        ),
+    )
+    parser.add_argument(
+        "--settings",
+        choices=SETTING_NAMES,
+        nargs="+",
+        default=SETTING_NAMES,
+        help=("Subset of the 4 settings to run within each suite. Default: all 4."),
+    )
+    parser.add_argument(
+        "--skip-existing",
+        action="store_true",
+        help=(
+            "Skip cases whose result YAML already exists in results/, so a "
+            "partially completed sweep can be cheaply resumed."
         ),
     )
     args = parser.parse_args()
-    domains = [d for d in DOMAIN_SWEEP_FULL if d <= args.max_global_domain]
+    if args.domains is not None:
+        domains = sorted(set(args.domains))
+    else:
+        domains = [d for d in DOMAIN_SWEEP_FULL if d <= args.max_global_domain]
     if not domains:
         sys.exit(
-            f"[run_sweep] --max-global-domain={args.max_global_domain} "
-            f"excludes every entry of DOMAIN_SWEEP_FULL={DOMAIN_SWEEP_FULL}."
+            f"[run_sweep] no domains to sweep "
+            f"(--domains={args.domains}, --max-global-domain={args.max_global_domain})."
         )
-    print(f"[run_sweep] sweep domains = {domains}", flush=True)
+    active_settings = set(args.settings)
+    print(
+        f"[run_sweep] sweep domains = {domains}; settings = {sorted(active_settings)}",
+        flush=True,
+    )
 
     report = load_max_domain()
     if report is None:
@@ -478,6 +558,8 @@ def main():
             warmup=args.warmup,
             measure=args.measure,
             domains=domains,
+            active_settings=active_settings,
+            skip_existing=args.skip_existing,
         )
     if args.suite in ("inference", "all"):
         run_inference_suite(
@@ -485,6 +567,8 @@ def main():
             warmup=args.warmup_infer,
             measure=args.measure_infer,
             domains=domains,
+            active_settings=active_settings,
+            skip_existing=args.skip_existing,
         )
     if args.suite in ("inference_dps", "all"):
         run_inference_dps_suite(
@@ -492,6 +576,8 @@ def main():
             warmup=args.warmup_infer,
             measure=args.measure_infer,
             domains=domains,
+            active_settings=active_settings,
+            skip_existing=args.skip_existing,
         )
 
     summary = write_summary(_RESULTS_DIR)

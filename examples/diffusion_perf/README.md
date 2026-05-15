@@ -201,15 +201,30 @@ CLI:
 python -m examples.diffusion_perf.run_sweep \
     --suite {training,inference,inference_dps,all} \
     [--max-global-domain 8192]      # truncate the sweep from the top
-    [--warmup 6] [--measure 15]         # training timing loop
+    [--domains 512 1024 2048]       # explicit domain list (overrides --max-global-domain)
+    [--settings baseline md]        # subset of the 4 settings (default: all 4)
+    [--skip-existing]               # skip cases whose result YAML already exists
+    [--warmup 6] [--measure 15]              # training timing loop
     [--warmup-infer 3] [--measure-infer 5]   # inference timing loop
 
 ```
 
-Example: short sweep up to 2048 only:
+Setting names accepted by `--settings`: `baseline`, `framework`,
+`framework_opts`, `md` (the four rows in the table above).
+
+Examples:
 
 ```bash
+# Short sweep up to 2048 only.
 python -m examples.diffusion_perf.run_sweep --suite all --max-global-domain 2048
+
+# Re-run only the multi-diffusion column at d=4096 and d=8192 (e.g. after a
+# framework change that affects patched sampling).
+python -m examples.diffusion_perf.run_sweep \
+    --suite inference --domains 4096 8192 --settings md
+
+# Resume a partial sweep: skip every case whose result YAML already exists.
+python -m examples.diffusion_perf.run_sweep --suite all --skip-existing
 
 ```
 
