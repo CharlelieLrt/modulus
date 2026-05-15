@@ -411,6 +411,22 @@ the result YAMLs use under `device.name` (e.g. `H100-SXM-80GB`,
 
 ---
 
+## Archived results
+
+Per-device sweep outputs (per-run YAMLs, calibration record, and rendered
+plots) are checked in under `results/<device>/`. Use this directory both as
+a reference set and as the starting point for `plot.py --results-dir
+results/<device>` to regenerate the figures.
+
+| device | layout | sweep config | notes |
+|---|---|---|---|
+| `L40s` | `results/L40s/` (per-run YAMLs + `_max_domain.yaml` + `summary.yaml` + `plots/`) | `model_channels=128`, 5-level UNet, 16-channel data, `B_train=4 (DDP x 4)`, `B_infer=1`, `MAX_DOMAIN=576` (calibrated), `DOMAIN_SWEEP=(64..8192)`, full opt set `{amp_bf16, compile, apex_gn}` | MD+opt fits training all the way to d=8192 (~50 GB peak); non-MD settings OOM at d=512 (training) / d=2048 (inference) / d=1024 (inference+DPS). MD+DPS itself OOMs at d=8192 because the guidance autograd graph spans the full global image. |
+
+When adding a new device, mirror the layout (`results/<device>/`) and add a
+row to this table.
+
+---
+
 ## Porting to a different GPU
 
 The benchmark is designed to produce comparable numbers across GPU types.
