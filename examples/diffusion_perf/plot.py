@@ -160,7 +160,7 @@ QOIS = {
         short_title="peak GPU memory",
         extractor=lambda r: r["results"].get("peak_memory_allocated_gb_max_rank"),
         format=lambda v: f"{v:.1f}",
-        log_y=False,
+        log_y=True,
     ),
     "mfu": dict(
         ylabel="MFU  (% of BF16 peak)",
@@ -451,13 +451,14 @@ def _plot_qoi(
             alpha=0.85,
             zorder=1,
         )
-        # Right edge, just below the dashed line. This stays clear of the
-        # legend (top-left) and of any tall bar value annotations.
+        # Left edge, just below the dashed line: x in axes fraction (so it
+        # always sits inside the plot region) and y in data coords.
         ax.text(
-            x[-1] + 0.45,
+            0.01,
             total_mem,
             f"GPU capacity = {total_mem:.1f} GB",
-            ha="right",
+            transform=ax.get_yaxis_transform(),
+            ha="left",
             va="top",
             fontsize=11,
             color="#444444",
