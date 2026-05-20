@@ -46,7 +46,7 @@ repos:
       language: python
       additional_dependencies: ['GitPython']
       files: \.(py|yaml|ci|release)$|Dockerfile$
-      exclude: ^(physicsnemo/internal/|docs/)
+      exclude: ^(physicsnemo/internal/|docs/|examples/diffusion_perf/results/)
 
 -   repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v3.4.0
