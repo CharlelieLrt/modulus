@@ -1,0 +1,46 @@
+function: train_physicsnemo
+timestamp: 2026-05-15T03:01:34.097173+00:00Z
+device:
+  name: H100-SXM-80GB
+  raw_name: NVIDIA H100 80GB HBM3
+  bf16_peak_tflops: 989.0
+  fp16_peak_tflops: 989.0
+  total_memory_gb: 84.942979072
+  capability:
+  - 9
+  - 0
+  apex_gn_available: true
+world_size: 8
+config:
+  domain:
+  - 768
+  - 768
+  batch_size_per_rank: 4
+  channels: 16
+  optimizations:
+  - amp_bf16
+  - apex_gn
+  - compile
+  num_steps_measured: 15
+  num_steps_warmup: 6
+  solver: null
+  solver_steps: null
+  patch_shape: null
+  num_patches: null
+backbone:
+  class: SongUNet
+  params: 81330320
+  flops_per_step: null
+results:
+  status: oom
+  error: CUDA out of memory. Tried to allocate 1.12 GiB. GPU 0 has a total capacity
+    of 79.11 GiB of which 854.56 MiB is free. Including non-PyTorch memory, this process
+    has 78.26 GiB memory in use. Of the allocated memory 76.57 GiB is allocated by
+    PyTorch, and 138.96 MiB is reserved by PyTorch but unallocated. If reserved but
+    unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+loc:
+  marked_lines: 17
+git:
+  commit: 605f24fb1cde211ce3960787d415f869236c0c9e
+  branch: diffusion-performance-profile

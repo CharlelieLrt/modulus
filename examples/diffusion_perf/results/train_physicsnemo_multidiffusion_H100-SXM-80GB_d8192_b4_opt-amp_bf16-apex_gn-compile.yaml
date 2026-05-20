@@ -1,0 +1,46 @@
+function: train_physicsnemo_multidiffusion
+timestamp: 2026-05-15T12:10:20.352245+00:00Z
+device:
+  name: H100-SXM-80GB
+  raw_name: NVIDIA H100 80GB HBM3
+  bf16_peak_tflops: 989.0
+  fp16_peak_tflops: 989.0
+  total_memory_gb: 84.942979072
+  capability:
+  - 9
+  - 0
+  apex_gn_available: true
+world_size: 8
+config:
+  domain:
+  - 8192
+  - 8192
+  batch_size_per_rank: 4
+  channels: 16
+  optimizations:
+  - amp_bf16
+  - apex_gn
+  - compile
+  num_steps_measured: 15
+  num_steps_warmup: 6
+  solver: null
+  solver_steps: null
+  patch_shape:
+  - 608
+  - 608
+  num_patches: 1
+  patches_per_sample_global: 196
+  positional_embedding: sinusoidal
+  positional_embedding_channels: 4
+backbone:
+  class: SongUNet
+  params: 81334928
+  flops_per_step: null
+results:
+  status: error
+  error: 'RuntimeError(''CUDA error: CUBLAS_STATUS_ALLOC_FAILED when calling `cublasCreate(handle)`'')'
+loc:
+  marked_lines: 25
+git:
+  commit: 605f24fb1cde211ce3960787d415f869236c0c9e
+  branch: diffusion-performance-profile

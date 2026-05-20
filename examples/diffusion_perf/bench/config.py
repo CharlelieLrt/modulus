@@ -117,6 +117,10 @@ FIXED_DOMAIN: int = 256
 CHANNELS: int = 16
 BATCH_SIZE_TRAIN: int = 4
 BATCH_SIZE_INFER: int = 1
+# Number of GPUs per node used for DDP training in the orchestrators
+# (calibrate.py, run_sweep.py). One full node per training run. Inference
+# remains single-GPU regardless.
+NPROC_PER_NODE_TRAIN: int = 8
 SOLVER_STEPS: int = 18
 WARMUP_STEPS: int = 6
 MEASURE_STEPS: int = 15

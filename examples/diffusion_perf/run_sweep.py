@@ -45,10 +45,23 @@ CLI selectors (combinable):
 
 from __future__ import annotations
 
+# Allow `torchrun run_sweep.py` (file-style, no -m) by reattaching the package
+# context so relative imports resolve. See calibrate.py for rationale.
+if __name__ == "__main__" and __package__ in (None, ""):
+    import os as _os
+    import sys as _sys
+
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _modulus_root = _os.path.abspath(_os.path.join(_here, "..", ".."))
+    if _modulus_root not in _sys.path:
+        _sys.path.insert(0, _modulus_root)
+    __package__ = "examples.diffusion_perf"
+
 import argparse
 import os
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -62,16 +75,29 @@ from .bench.config import (
     MAX_GLOBAL_DOMAIN,
     MEASURE_STEPS,
     MEASURE_STEPS_INFER,
+    NPROC_PER_NODE_TRAIN,
     WARMUP_STEPS,
     WARMUP_STEPS_INFER,
+    detect_device,
 )
 from .bench.calibration import patch_shape_for
 from .bench.results import write_summary
-from .calibrate import load_max_domain
+from .calibrate import _strip_torchrun_env, load_max_domain
 
 _RESULTS_DIR = Path(__file__).resolve().parent / "results"
-_DEVICE_LABEL = "L40s"
 _TORCHRUN_PORT_BASE = 29800
+
+
+@lru_cache(maxsize=1)
+def _device_label() -> str:
+    """Short stable device label for the current CUDA device.
+
+    Lazy: not evaluated on the login node (which has no GPU). Matches the
+    label that ``bench.results.ResultBuilder.write()`` uses for its filename
+    so that probe lookups find their own outputs.
+    """
+    return detect_device()["name"]
+
 
 SETTING_NAMES = ["baseline", "framework", "framework_opts", "md"]
 
@@ -88,7 +114,7 @@ def _yaml_path(
     *, function: str, domain: int, opts: frozenset[str], batch_size: int
 ) -> Path:
     return _RESULTS_DIR / (
-        f"{function}_{_DEVICE_LABEL}_d{domain}_b{batch_size}_opt-{_opts_str(opts)}.yaml"
+        f"{function}_{_device_label()}_d{domain}_b{batch_size}_opt-{_opts_str(opts)}.yaml"
     )
 
 
@@ -119,20 +145,16 @@ def _maybe_run(
 def _run_subprocess(
     cmd: list[str], *, multi_gpu: bool = False, port_offset: int = 0
 ) -> int:
-    env = dict(os.environ)
-    env["PATH"] = (
-        "/usr/local/cuda-12.8/bin:/home/horde/miniconda3/envs/pnm-dev-py3.12/bin:"
-        + env.get("PATH", "")
-    )
-    env["LD_LIBRARY_PATH"] = (
-        "/home/horde/miniconda3/envs/pnm-dev-py3.12/lib:"
-        + env.get("LD_LIBRARY_PATH", "")
-    )
-    env["CUDA_HOME"] = "/usr/local/cuda-12.8"
+    env = _strip_torchrun_env(dict(os.environ))
     env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     if multi_gpu:
         port = _TORCHRUN_PORT_BASE + port_offset
-        full = ["torchrun", "--nproc-per-node=4", f"--master-port={port}", *cmd]
+        full = [
+            "torchrun",
+            f"--nproc-per-node={NPROC_PER_NODE_TRAIN}",
+            f"--master-port={port}",
+            *cmd,
+        ]
     else:
         env["CUDA_VISIBLE_DEVICES"] = "0"
         full = ["python", *cmd]
@@ -437,6 +459,7 @@ def _run_inference_suite(
 def run_inference_suite(
     *, max_domain, warmup, measure, domains, active_settings, skip_existing
 ):
+    """4 settings × ``domains`` for the inference-no-guidance benchmark."""
     _run_inference_suite(
         module="examples.diffusion_perf.generate",
         fn_baseline="generate_baseline",
@@ -455,6 +478,7 @@ def run_inference_suite(
 def run_inference_dps_suite(
     *, max_domain, warmup, measure, domains, active_settings, skip_existing
 ):
+    """4 settings × ``domains`` for the inference + DPS-guidance benchmark."""
     _run_inference_suite(
         module="examples.diffusion_perf.generate_dps_guidance",
         fn_baseline="generate_dps_baseline",
@@ -476,6 +500,7 @@ def run_inference_dps_suite(
 
 
 def main():
+    """CLI entry point for the sweep orchestrator."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--suite",

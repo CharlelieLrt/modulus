@@ -1,0 +1,51 @@
+function: train_physicsnemo
+timestamp: 2026-05-15T02:55:02.198488+00:00Z
+device:
+  name: H100-SXM-80GB
+  raw_name: NVIDIA H100 80GB HBM3
+  bf16_peak_tflops: 989.0
+  fp16_peak_tflops: 989.0
+  total_memory_gb: 84.942979072
+  capability:
+  - 9
+  - 0
+  apex_gn_available: true
+world_size: 8
+config:
+  domain:
+  - 256
+  - 256
+  batch_size_per_rank: 4
+  channels: 16
+  optimizations:
+  - amp_bf16
+  - apex_gn
+  - compile
+  num_steps_measured: 15
+  num_steps_warmup: 6
+  solver: null
+  solver_steps: null
+  patch_shape: null
+  num_patches: null
+backbone:
+  class: SongUNet
+  params: 81330320
+  flops_per_step: 16104228388864
+results:
+  status: ok
+  step_time_ms_median: 124.42646026611328
+  step_time_ms_p25: 124.3812484741211
+  step_time_ms_p75: 124.5324478149414
+  samples_per_sec_per_gpu_median: 32.1475029623532
+  samples_per_sec_per_gpu_p25: 32.120142743392535
+  samples_per_sec_per_gpu_p75: 32.15918837502459
+  num_measured: 15
+  peak_memory_allocated_gb_max_rank: 13.961859072
+  peak_memory_utilization: 0.16436742888621253
+  mfu: 0.13086722190025732
+  achieved_tflops_per_gpu: 129.4276824593545
+loc:
+  marked_lines: 17
+git:
+  commit: 605f24fb1cde211ce3960787d415f869236c0c9e
+  branch: diffusion-performance-profile

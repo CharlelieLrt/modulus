@@ -37,10 +37,25 @@ Bisection rules
 
 from __future__ import annotations
 
+# Allow `torchrun calibrate.py` (file-style, no -m) by reattaching the package
+# context so relative imports resolve. Required because ``submit_job`` invokes
+# scripts as ``torchrun script.py`` from inside the example directory, not as
+# ``python -m examples.diffusion_perf.calibrate`` from the repo root.
+if __name__ == "__main__" and __package__ in (None, ""):
+    import os as _os
+    import sys as _sys
+
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _modulus_root = _os.path.abspath(_os.path.join(_here, "..", ".."))
+    if _modulus_root not in _sys.path:
+        _sys.path.insert(0, _modulus_root)
+    __package__ = "examples.diffusion_perf"
+
 import argparse
 import datetime as _dt
 import os
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -49,15 +64,68 @@ from .bench.calibration import patch_shape_for, power_of_2_sweep
 from .bench.config import (
     BATCH_SIZE_TRAIN,
     FULL_OPTS_TRAIN,
+    MAX_GLOBAL_DOMAIN,
     MEASURE_STEPS,
+    NPROC_PER_NODE_TRAIN,
     PATCH_ALIGN,
     WARMUP_STEPS,
+    detect_device,
 )
+
+# Env vars set by an outer ``torchrun`` that must NOT leak into the inner
+# ``torchrun`` subprocesses calibrate.py spawns for training probes.
+_TORCHRUN_ENV_VARS = (
+    "WORLD_SIZE",
+    "RANK",
+    "LOCAL_RANK",
+    "LOCAL_WORLD_SIZE",
+    "GROUP_RANK",
+    "GROUP_WORLD_SIZE",
+    "ROLE_RANK",
+    "ROLE_WORLD_SIZE",
+    "ROLE_NAME",
+    "MASTER_ADDR",
+    "MASTER_PORT",
+    "TORCHELASTIC_RESTART_COUNT",
+    "TORCHELASTIC_MAX_RESTARTS",
+    "TORCHELASTIC_RUN_ID",
+    "TORCHELASTIC_USE_AGENT_STORE",
+    "TORCHELASTIC_ERROR_FILE",
+    "TORCH_NCCL_ASYNC_ERROR_HANDLING",
+)
+
+
+def _strip_torchrun_env(env: dict[str, str]) -> dict[str, str]:
+    """Remove outer-torchrun env vars so the inner launcher starts clean."""
+    for key in _TORCHRUN_ENV_VARS:
+        env.pop(key, None)
+    return env
+
 
 _RESULTS_DIR = Path(__file__).resolve().parent / "results"
 _MAX_DOMAIN_YAML = _RESULTS_DIR / "_max_domain.yaml"
-_DEVICE_LABEL = "L40s"
 _TORCHRUN_PORT_BASE = 29700
+
+
+@lru_cache(maxsize=1)
+def _device_label() -> str:
+    """Short stable device label for the current CUDA device.
+
+    Lazy: not evaluated on the login node (which has no GPU). Matches the
+    label that ``bench.results.ResultBuilder.write()`` uses for its filename
+    so that probe lookups find their own outputs.
+    """
+    return detect_device()["name"]
+
+
+def _calibration_dir() -> Path:
+    """Subdirectory of ``results/`` reserved for calibration probe outputs.
+
+    Each probe writes a full training-run YAML; isolating them here keeps
+    ``plot.py`` and the sweep summary from picking up off-grid domains that
+    the bisection happens to evaluate (e.g. d=576, 624, 640).
+    """
+    return _RESULTS_DIR / _device_label() / "calibration"
 
 
 def _opts_str(opts: frozenset[str]) -> str:
@@ -67,8 +135,8 @@ def _opts_str(opts: frozenset[str]) -> str:
 def _yaml_path(
     *, function: str, domain: int, opts: frozenset[str], batch_size: int
 ) -> Path:
-    return _RESULTS_DIR / (
-        f"{function}_{_DEVICE_LABEL}_d{domain}_b{batch_size}_opt-{_opts_str(opts)}.yaml"
+    return _calibration_dir() / (
+        f"{function}_{_device_label()}_d{domain}_b{batch_size}_opt-{_opts_str(opts)}.yaml"
     )
 
 
@@ -101,21 +169,12 @@ MEM_FRAC_CAP: float = 0.90
 def _run_subprocess_train(
     *, domain: int, batch_size: int, port_offset: int, warmup: int, measure: int
 ) -> None:
-    env = dict(os.environ)
-    env["PATH"] = (
-        "/usr/local/cuda-12.8/bin:/home/horde/miniconda3/envs/pnm-dev-py3.12/bin:"
-        + env.get("PATH", "")
-    )
-    env["LD_LIBRARY_PATH"] = (
-        "/home/horde/miniconda3/envs/pnm-dev-py3.12/lib:"
-        + env.get("LD_LIBRARY_PATH", "")
-    )
-    env["CUDA_HOME"] = "/usr/local/cuda-12.8"
+    env = _strip_torchrun_env(dict(os.environ))
     env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     port = _TORCHRUN_PORT_BASE + port_offset
     cmd = [
         "torchrun",
-        "--nproc-per-node=4",
+        f"--nproc-per-node={NPROC_PER_NODE_TRAIN}",
         f"--master-port={port}",
         "-m",
         "examples.diffusion_perf.train",
@@ -131,6 +190,8 @@ def _run_subprocess_train(
         str(warmup),
         "--measure",
         str(measure),
+        "--output-dir",
+        str(_calibration_dir()),
     ]
     print(f"[calibrate] {' '.join(cmd)}", flush=True)
     subprocess.run(cmd, env=env, cwd=Path(__file__).resolve().parents[2])
@@ -224,19 +285,21 @@ def find_max_domain(
         "batch_size": batch_size,
         "patch_align": PATCH_ALIGN,
         "opts": sorted(FULL_OPTS_TRAIN),
-        "device": _DEVICE_LABEL,
+        "device": _device_label(),
         "timestamp": _dt.datetime.now(_dt.UTC).isoformat() + "Z",
         "probe_log": log,
     }
 
 
 def save_max_domain(report: dict) -> Path:
+    """Persist a calibration report to ``results/_max_domain.yaml``."""
     _MAX_DOMAIN_YAML.parent.mkdir(parents=True, exist_ok=True)
     _MAX_DOMAIN_YAML.write_text(yaml.safe_dump(report, sort_keys=False))
     return _MAX_DOMAIN_YAML
 
 
 def load_max_domain() -> dict | None:
+    """Return the cached calibration report, or ``None`` if absent / unreadable."""
     if not _MAX_DOMAIN_YAML.exists():
         return None
     try:
@@ -246,6 +309,7 @@ def load_max_domain() -> dict | None:
 
 
 def main():
+    """CLI entry point for the calibration step."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--batch-size",
@@ -253,7 +317,7 @@ def main():
         default=BATCH_SIZE_TRAIN,
         help="Batch size used during calibration (default = training BS)",
     )
-    parser.add_argument("--cap", type=int, default=8192)
+    parser.add_argument("--cap", type=int, default=MAX_GLOBAL_DOMAIN)
     parser.add_argument("--warmup", type=int, default=WARMUP_STEPS)
     parser.add_argument("--measure", type=int, default=MEASURE_STEPS)
     parser.add_argument(

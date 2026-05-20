@@ -1,0 +1,53 @@
+max_domain: 608
+max_domain_util: 0.8712827113971084
+first_oom_domain: 624
+mem_frac_cap: 0.9
+batch_size: 4
+patch_align: 16
+opts:
+- amp_bf16
+- apex_gn
+- compile
+device: H100-SXM-80GB
+timestamp: 2026-05-15T03:13:25.826636+00:00Z
+probe_log:
+- domain: 64
+  phase: doubling
+  status: ok
+  util: 0.027127742883220545
+- domain: 128
+  phase: doubling
+  status: ok
+  util: 0.05441061138298947
+- domain: 256
+  phase: doubling
+  status: ok
+  util: 0.16436742888621253
+- domain: 512
+  phase: doubling
+  status: ok
+  util: 0.6161379729764136
+- domain: 1024
+  phase: doubling
+  status: oom
+  util: 0.0
+- domain: 768
+  phase: bisect
+  status: oom
+  util: 0.0
+- domain: 640
+  phase: bisect
+  status: over_cap(97%)
+  util: 0.9675063188252385
+- domain: 576
+  phase: bisect
+  status: ok
+  util: 0.7807224427081605
+- domain: 608
+  phase: bisect
+  status: ok
+  util: 0.8712827113971084
+- domain: 624
+  phase: bisect
+  status: over_cap(92%)
+  util: 0.9186791989230222

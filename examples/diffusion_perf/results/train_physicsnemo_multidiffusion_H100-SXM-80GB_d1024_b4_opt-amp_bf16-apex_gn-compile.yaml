@@ -1,0 +1,60 @@
+function: train_physicsnemo_multidiffusion
+timestamp: 2026-05-15T12:05:00.485057+00:00Z
+device:
+  name: H100-SXM-80GB
+  raw_name: NVIDIA H100 80GB HBM3
+  bf16_peak_tflops: 989.0
+  fp16_peak_tflops: 989.0
+  total_memory_gb: 84.942979072
+  capability:
+  - 9
+  - 0
+  apex_gn_available: true
+world_size: 8
+config:
+  domain:
+  - 1024
+  - 1024
+  batch_size_per_rank: 4
+  channels: 16
+  optimizations:
+  - amp_bf16
+  - apex_gn
+  - compile
+  num_steps_measured: 15
+  num_steps_warmup: 6
+  solver: null
+  solver_steps: null
+  patch_shape:
+  - 608
+  - 608
+  num_patches: 1
+  patches_per_sample_global: 4
+  positional_embedding: sinusoidal
+  positional_embedding_channels: 4
+backbone:
+  class: SongUNet
+  params: 81334928
+  flops_per_step: 92677259788288
+results:
+  status: ok
+  step_time_ms_median: 637.2567749023438
+  step_time_ms_p25: 636.4944458007812
+  step_time_ms_p75: 637.4215393066406
+  samples_per_sec_per_gpu_median: 1.5692261571534407
+  samples_per_sec_per_gpu_p25: 1.5688205345049313
+  samples_per_sec_per_gpu_p75: 1.5711056185916723
+  num_measured: 15
+  patches_per_sample_global: 4
+  samples_per_sec_per_gpu_median_per_patch: 6.276904628613763
+  samples_per_sec_per_gpu_p25_per_patch: 6.275282138019725
+  samples_per_sec_per_gpu_p75_per_patch: 6.284422474366689
+  peak_memory_allocated_gb_max_rank: 74.314208256
+  peak_memory_utilization: 0.8748716970829248
+  mfu: 0.1470491205592379
+  achieved_tflops_per_gpu: 145.4315802330863
+loc:
+  marked_lines: 25
+git:
+  commit: 605f24fb1cde211ce3960787d415f869236c0c9e
+  branch: diffusion-performance-profile

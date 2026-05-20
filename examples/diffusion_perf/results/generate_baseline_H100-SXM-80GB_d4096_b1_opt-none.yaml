@@ -1,0 +1,40 @@
+function: generate_baseline
+timestamp: 2026-05-15T12:57:48.128076+00:00Z
+device:
+  name: H100-SXM-80GB
+  raw_name: NVIDIA H100 80GB HBM3
+  bf16_peak_tflops: 989.0
+  fp16_peak_tflops: 989.0
+  total_memory_gb: 84.942979072
+  capability:
+  - 9
+  - 0
+  apex_gn_available: true
+world_size: 1
+config:
+  domain:
+  - 4096
+  - 4096
+  batch_size_per_rank: 1
+  channels: 16
+  optimizations: []
+  num_steps_measured: 5
+  num_steps_warmup: 3
+  solver: heun
+  patch_shape: null
+  num_patches: null
+  solver_steps: 18
+backbone:
+  class: SongUNet
+  params: 81330320
+  flops_per_step: null
+results:
+  status: error
+  error: RuntimeError('Expected canUse32BitIndexMath(input) && canUse32BitIndexMath(output)
+    to be true, but got false.  (Could this error message be improved?  If so, please
+    report an enhancement request to PyTorch.)')
+loc:
+  marked_lines: 37
+git:
+  commit: 605f24fb1cde211ce3960787d415f869236c0c9e
+  branch: diffusion-performance-profile

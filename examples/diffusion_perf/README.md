@@ -18,7 +18,8 @@ inference for a 2D EDM-style diffusion model under four implementations:
 
 Each implementation is exercised on three benchmarks:
 
-* **Training**, multi-GPU DDP (4 ranks by default).
+* **Training**, multi-GPU DDP (8 ranks by default; configurable via
+    `NPROC_PER_NODE_TRAIN` in `bench/config.py`).
   * **Inference, no guidance**, single GPU.
   * **Inference + DPS data-consistency guidance**, single GPU.
 
@@ -67,9 +68,22 @@ examples/diffusion_perf/
 
 ```
 
-The benchmark backbone is fixed across all variants so that comparisons are
-apples-to-apples. The defaults in `bench/config.py` produce an ~80M
-parameter SongUNet:
+---
+
+## Reference configuration & cross-GPU fair comparison
+
+All settings below are the **H100-SXM-80GB reference values**, tuned to land
+inside ~88% of GPU memory at `MAX_DOMAIN` and to give stable timing windows.
+For results to be directly comparable across GPU architectures, **every
+"frozen" setting below must stay at its H100 value on every other GPU**.
+The recipe is portable, not configurable: the calibration step adapts the
+multi-diffusion patch cap (`MAX_DOMAIN`) to whatever GPU it's running on,
+which is enough to make the sweep complete without OOM at large global
+domains. Other settings should not be re-tuned per GPU.
+
+### Backbone (frozen across GPUs)
+
+The backbone is a ~80M-parameter SongUNet:
 
 | key | value |
 |---|---|
@@ -80,21 +94,56 @@ parameter SongUNet:
 | `dropout` | 0.13 |
 | `embedding_type` | positional |
 
-Sweep and loop defaults (all in `bench/config.py`):
+### Sweep and timing-loop settings (frozen across GPUs)
+
+All in `bench/config.py`:
 
 | key | value | notes |
 |---|---|---|
-| `MAX_GLOBAL_DOMAIN` | 8192 | upper bound of the sweep, overridable via CLI |
+| `MAX_GLOBAL_DOMAIN` | 8192 | upper bound of the sweep (override via `--max-global-domain`) |
 | `DOMAIN_SWEEP_FULL` | `(64, 128, 256, 512, 1024, 2048, 4096, 8192)` | global domain edges in pixels |
 | `CHANNELS` | 16 | data channels |
 | `BATCH_SIZE_TRAIN` | 4 | per-rank training batch size |
 | `BATCH_SIZE_INFER` | 1 | inference batch size |
+| `NPROC_PER_NODE_TRAIN` | 8 | DDP ranks per node for training (inference is single-GPU) |
 | `SOLVER_STEPS` | 18 | Heun steps for inference |
 | `WARMUP_STEPS` / `MEASURE_STEPS` | 6 / 15 | training timing loop |
 | `WARMUP_STEPS_INFER` / `MEASURE_STEPS_INFER` | 3 / 5 | inference timing loop |
 | `FULL_OPTS_TRAIN`, `FULL_OPTS_INFER` | `{amp_bf16, compile, apex_gn}` | "full opts" set |
 | `PATCH_ALIGN` | 16 | every MD patch edge is a multiple of 16 (5 UNet levels => 4 downsamples) |
 | `OBSERVATION_FRAC`, `OBSERVATION_STD`, `OBSERVATION_CHANNEL_FRAC` | 0.005 / 0.05 / 0.5 | sparse observation mask used by the DPS benchmark |
+| `MEM_FRAC_CAP` (in `calibrate.py`) | 0.90 | memory safety margin used by calibration |
+
+### Re-derived per GPU (do NOT hand-pick)
+
+| key | source | notes |
+|---|---|---|
+| `MAX_DOMAIN` | output of `calibrate.py`, in `results/_max_domain.yaml` | per-GPU multi-diffusion patch cap |
+| effective MD patch shape | `min(MAX_GLOBAL_DOMAIN, MAX_DOMAIN)` per sweep iteration | computed in `bench/calibration.patch_shape_for` |
+
+### GPU registration (one-time per device class)
+
+A new GPU needs three entries added to `bench/config.py`:
+
+| key | example |
+|---|---|
+| `GPU_PEAK_TFLOPS_BF16["H100-SXM-80GB"]` | `989.0` |
+| `GPU_TOTAL_MEMORY_GB["H100-SXM-80GB"]` | `80.0` |
+| `_DEVICE_NAME_PATTERNS` | regex matching `torch.cuda.get_device_name()` → short label |
+
+### When deviating from the H100 defaults is unavoidable
+
+If the target GPU truly cannot run the H100 reference set, the tunables
+below are acceptable to change (in priority order), at the cost of
+weakening the cross-GPU comparison. Annotate plots explicitly when any of
+these differ.
+
+| tunable | impact when changed |
+|---|---|
+| `MAX_GLOBAL_DOMAIN` lowered (or `--max-global-domain`) | curves end at a smaller `d`; smaller-`d` points remain comparable |
+| `NPROC_PER_NODE_TRAIN` lowered | per-rank NCCL & DDP overhead changes; `samples_per_sec_per_gpu` shifts |
+| `BATCH_SIZE_TRAIN` lowered | per-step FLOP count and activation footprint change |
+| `WARMUP_STEPS{,_INFER}` / `MEASURE_STEPS{,_INFER}` | only changes statistical precision, not the measured quantity (avoid for fairness, OK for time-budget reasons) |
 
 ---
 
@@ -107,11 +156,12 @@ Sweep and loop defaults (all in `bench/config.py`):
 # 1. Calibrate MAX_DOMAIN for this GPU (writes results/_max_domain.yaml).
 python -m examples.diffusion_perf.calibrate
 
-# 2. Run all three benchmark suites end-to-end (takes a few hours on L40s).
+# 2. Run all three benchmark suites end-to-end (a few hours on L40s,
+#    ~12h on H100; the heavy multi-diffusion DPS runs at large d dominate).
 python -m examples.diffusion_perf.run_sweep --suite all
 
 # 3. Plot results into results/plots/<device>/ .
-python -m examples.diffusion_perf.plot --device L40s
+python -m examples.diffusion_perf.plot --device H100-SXM-80GB
 
 ```
 
@@ -128,7 +178,8 @@ tuple; existing files are overwritten on re-run.
 calibration finds the largest global domain `D*` such that
 `train_physicsnemo` with `FULL_OPTS_TRAIN` fits in `<= MEM_FRAC_CAP`
 (default 90%) of GPU memory at the configured training batch size, with all
-4 ranks running in DDP. That `D*` is then used by all benchmarks as the
+`NPROC_PER_NODE_TRAIN` ranks running in DDP. That `D*` is then used by all
+benchmarks as the
 multi-diffusion patch cap:
 
 ```
@@ -146,17 +197,18 @@ so that multi-diffusion never OOMs. Internally:
 Output (`results/_max_domain.yaml`):
 
 ```yaml
-max_domain: 608
-max_domain_util: 0.882928...        # observed peak memory utilization at D*
+max_domain: 608                     # H100-SXM-80GB at 8 ranks; on L40s at
+                                    # 4 ranks calibration converged to 576
+max_domain_util: 0.871              # observed peak memory utilization at D*
 first_oom_domain: 624               # first domain that exceeded the cap
 mem_frac_cap: 0.9
 batch_size: 4
 patch_align: 16
 opts: [amp_bf16, apex_gn, compile]
-device: L40s
+device: H100-SXM-80GB
 timestamp: ...
 probe_log:                          # full sequence of probes
-- {domain: 64,  phase: doubling, status: ok,  util: 0.044}
+- {domain: 64,  phase: doubling, status: ok,  util: 0.027}
   - {domain: 128, phase: doubling, status: ok,  util: 0.073}
   - ...
 
@@ -228,24 +280,27 @@ python -m examples.diffusion_perf.run_sweep --suite all --skip-existing
 
 ```
 
-Training runs use `torchrun --nproc-per-node=4` automatically; inference
-runs are single-GPU.
+Training runs use `torchrun --nproc-per-node=$NPROC_PER_NODE_TRAIN`
+automatically (default 8); inference runs are single-GPU.
 
 ---
 
 ## Single-config invocations
 
 You can run any single configuration directly without going through
-`run_sweep.py`. This is what the orchestrator does under the hood.
+`run_sweep.py`. This is what the orchestrator does under the hood. The
+`--patch-shape` values below (`608`) are the H100 reference patch size;
+on a different GPU use the `max_domain` from your own
+`results/_max_domain.yaml` (e.g. 576 on L40s).
 
 ```bash
-# Training, framework, full opts, 256x256 domain, B=4/rank x 4 ranks DDP
-torchrun --nproc-per-node=4 -m examples.diffusion_perf.train \
+# Training, framework, full opts, 256x256 domain, B=4/rank x 8 ranks DDP
+torchrun --nproc-per-node=8 -m examples.diffusion_perf.train \
     --function train_physicsnemo --domain 256 --opts amp_bf16,compile,apex_gn \
     --batch-size 4 --warmup 6 --measure 15
 
 # Training, multi-diffusion, requires patch-shape
-torchrun --nproc-per-node=4 -m examples.diffusion_perf.train \
+torchrun --nproc-per-node=8 -m examples.diffusion_perf.train \
     --function train_physicsnemo_multidiffusion --domain 1024 \
     --opts amp_bf16,compile,apex_gn --batch-size 4 \
     --patch-shape 608 608
@@ -271,8 +326,10 @@ Common flags:
 | `--opts a,b,c` | all | comma-separated list, subset of `{amp_bf16, compile, apex_gn}` |
 | `--batch-size B` | train | per-rank batch size (default 4) |
 | `--patch-shape Hp Wp` | MD only | required for `*_multidiffusion` |
+| `--max-domain-train D` | train MD only | overrides the calibrated `MAX_DOMAIN` used to derive the patch shape |
 | `--chunk-size C` | MD inference only | patches denoised per backbone call; default 1 |
 | `--warmup N`, `--measure N` | all | timing loop sizes |
+| `--output-dir PATH` | train | overrides the directory the result YAML is written to (used by `calibrate.py` to redirect probe outputs to `results/<device>/calibration/`) |
 
 ---
 
@@ -285,10 +342,10 @@ identity:
 results/<function>_<device>_d<domain>_b<batch>_opt-<sorted-opts-or-"none">.yaml
 
 Examples:
-  train_physicsnemo_L40s_d256_b4_opt-amp_bf16-apex_gn-compile.yaml
-  train_baseline_L40s_d256_b4_opt-none.yaml
-  generate_physicsnemo_multidiffusion_L40s_d4096_b1_opt-amp_bf16-apex_gn-compile.yaml
-  generate_dps_baseline_L40s_d128_b1_opt-none.yaml
+  train_physicsnemo_H100-SXM-80GB_d256_b4_opt-amp_bf16-apex_gn-compile.yaml
+  train_baseline_H100-SXM-80GB_d256_b4_opt-none.yaml
+  generate_physicsnemo_multidiffusion_H100-SXM-80GB_d4096_b1_opt-amp_bf16-apex_gn-compile.yaml
+  generate_dps_baseline_H100-SXM-80GB_d128_b1_opt-none.yaml
 
 ```
 
@@ -302,18 +359,18 @@ Schema (one example):
 function: train_physicsnemo
 timestamp: 2026-05-13T22:23:09.399687+00:00Z
 device:
-  name: L40s                # short label used in filenames
-  raw_name: NVIDIA L40
-  bf16_peak_tflops: 362.0   # used for MFU
-  fp16_peak_tflops: 362.0
-  total_memory_gb: 48.0
-  capability: [8, 9]
+  name: H100-SXM-80GB       # short label used in filenames
+  raw_name: NVIDIA H100 80GB HBM3
+  bf16_peak_tflops: 989.0   # used for MFU
+  fp16_peak_tflops: 989.0
+  total_memory_gb: 84.94
+  capability: [9, 0]
   apex_gn_available: true
-world_size: 4
+world_size: 8
 config:
   domain: [256, 256]
   batch_size_per_rank: 4
-  channels: 10
+  channels: 16
   optimizations: [amp_bf16, apex_gn, compile]
   num_steps_measured: 15
   num_steps_warmup: 6
@@ -394,7 +451,7 @@ CLI:
 
 ```bash
 python -m examples.diffusion_perf.plot \
-    [--device L40s]                # device.name to filter on
+    [--device H100-SXM-80GB]       # device.name to filter on
     [--batch-size-train 4]         # per-rank training BS to filter on
     [--batch-size-infer 1]         # inference BS to filter on
     [--results-dir <path>]         # source YAML directory (default: results/)
@@ -420,12 +477,15 @@ The minimum steps are:
      entries to `GPU_PEAK_TFLOPS_BF16`, `GPU_TOTAL_MEMORY_GB`, and
      `_DEVICE_NAME_PATTERNS`. The short label you choose appears in every
      result YAML filename and in `plot.py`'s `--device` argument.
-2. **Pick `MAX_GLOBAL_DOMAIN`.** Default is 8192. On GPUs with more
-     memory, set it higher and extend `DOMAIN_SWEEP_FULL` to the next
-     power of 2; on lower-memory GPUs, leave it at 8192 (calibration will
-     just cap multi-diffusion patches earlier). Override at the CLI:
+2. **Keep `MAX_GLOBAL_DOMAIN` at the H100 reference value (8192).**
+     Calibration will cap the multi-diffusion patch shape automatically
+     to whatever fits this GPU. Only extend `DOMAIN_SWEEP_FULL` upward
+     if you have a strong reason to (e.g. studying scaling on a much
+     larger GPU); doing so weakens cross-GPU comparison. Truncating the
+     sweep from the top is harmless and can be done at the CLI without
+     editing config:
      ```bash
-     python -m examples.diffusion_perf.run_sweep --suite all --max-global-domain 16384
+     python -m examples.diffusion_perf.run_sweep --suite all --max-global-domain 4096
      ```
 3. **Re-run calibration** with `--force` (deletes the cached
      `_max_domain.yaml`):
@@ -441,12 +501,9 @@ The minimum steps are:
      python -m examples.diffusion_perf.plot --device <your-device-label>
      ```
 
-Tunables you may want to adjust per GPU:
-
-* `BATCH_SIZE_TRAIN`, `BATCH_SIZE_INFER` in `bench/config.py`.
-  * `MEM_FRAC_CAP` in `calibrate.py` (default 0.90; lower for more headroom).
-  * `WARMUP_STEPS{,_INFER}` and `MEASURE_STEPS{,_INFER}` for shorter /
-    longer timing windows.
+See [Reference configuration & cross-GPU fair comparison](#reference-configuration--cross-gpu-fair-comparison)
+for the list of frozen settings and the rare cases where deviation is
+acceptable.
 
 ---
 

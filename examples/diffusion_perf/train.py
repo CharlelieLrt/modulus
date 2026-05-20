@@ -83,6 +83,7 @@ def train_baseline(
     num_measured: int = MEASURE_STEPS,
     write: bool = True,
 ):
+    """Pure-PyTorch FP32 EDM training step — no framework code."""
     rank, local_rank, world_size, device = _init_distributed()
     H = W = domain
     B = batch_size
@@ -163,6 +164,7 @@ def train_physicsnemo(
     num_measured: int = MEASURE_STEPS,
     write: bool = True,
 ):
+    """Training step through ``physicsnemo.diffusion`` (preconditioner + scheduler + loss)."""
     rank, local_rank, world_size, device = _init_distributed()
     H = W = domain
     B = batch_size
@@ -257,6 +259,7 @@ def train_physicsnemo_multidiffusion(
     num_measured: int = MEASURE_STEPS,
     write: bool = True,
 ):
+    """Training step using ``MultiDiffusionModel2D`` over a patched backbone."""
     rank, local_rank, world_size, device = _init_distributed()
     H = W = domain
     B = batch_size
@@ -506,6 +509,7 @@ def _parse_opts(spec: str) -> frozenset[str]:
 
 
 def main():
+    """CLI entry point for training subprocesses."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--function", required=True, choices=list(_DISPATCH))
     parser.add_argument("--domain", type=int, default=FIXED_DOMAIN)
@@ -515,7 +519,21 @@ def main():
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE_TRAIN)
     parser.add_argument("--warmup", type=int, default=WARMUP_STEPS)
     parser.add_argument("--measure", type=int, default=MEASURE_STEPS)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Directory where the result YAML is written. Defaults to "
+            "examples/diffusion_perf/results/. Calibration probes pass a "
+            "subdirectory here to keep their outputs out of the sweep results."
+        ),
+    )
     args = parser.parse_args()
+
+    if args.output_dir is not None:
+        global _RESULTS_DIR
+        _RESULTS_DIR = Path(args.output_dir)
 
     fn = _DISPATCH[args.function]
     kwargs = dict(
