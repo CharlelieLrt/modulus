@@ -180,7 +180,12 @@ QOIS = {
 
 
 def _load_runs(device: str, results_dir: Path) -> list[dict]:
-    """Load every per-run YAML in ``results_dir`` filtered to ``device``."""
+    """Load every per-run YAML in ``results_dir`` filtered to ``device``.
+
+    Filters out calibration probe runs at non-power-of-2 domains (the
+    canonical sweep is on powers of 2; calibration probes leak per-run
+    YAMLs at intermediate sizes that should not appear in the bars).
+    """
     runs = []
     for p in sorted(results_dir.glob("*.yaml")):
         if p.name.startswith("_") or p.name == "summary.yaml":
@@ -189,6 +194,9 @@ def _load_runs(device: str, results_dir: Path) -> list[dict]:
         if d is None:
             continue
         if d.get("device", {}).get("name") != device:
+            continue
+        dom = (d.get("config", {}).get("domain") or [None])[0]
+        if not (isinstance(dom, int) and dom > 0 and (dom & (dom - 1)) == 0):
             continue
         d["_p"] = p.name
         runs.append(d)

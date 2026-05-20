@@ -1,0 +1,58 @@
+function: generate_physicsnemo_multidiffusion
+timestamp: 2026-05-14T22:16:52.757075+00:00Z
+device:
+  name: L40s
+  raw_name: NVIDIA L40
+  bf16_peak_tflops: 362.0
+  fp16_peak_tflops: 362.0
+  total_memory_gb: 48.0
+  capability:
+  - 8
+  - 9
+  apex_gn_available: true
+world_size: 1
+config:
+  domain:
+  - 1024
+  - 1024
+  batch_size_per_rank: 1
+  channels: 16
+  optimizations:
+  - amp_bf16
+  - apex_gn
+  - compile
+  num_steps_measured: 5
+  num_steps_warmup: 3
+  solver: heun
+  patch_shape:
+  - 576
+  - 576
+  num_patches: 4
+  chunk_size: 1
+  use_checkpointing: false
+  solver_steps: 18
+  guidance: none
+  positional_embedding: sinusoidal
+  positional_embedding_channels: 4
+backbone:
+  class: SongUNet
+  params: 81334928
+  flops_per_step: 996478638096384
+results:
+  status: ok
+  step_time_ms_median: 25288.31640625
+  step_time_ms_p25: 25287.69140625
+  step_time_ms_p75: 25290.12109375
+  samples_per_sec_per_gpu_median: 0.039543953181195184
+  samples_per_sec_per_gpu_p25: 0.039541131348996665
+  samples_per_sec_per_gpu_p75: 0.03954493053299615
+  num_measured: 5
+  peak_memory_allocated_gb_max_rank: 2.947779072
+  peak_memory_utilization: 0.061412063999999995
+  mfu: 0.1088527751683551
+  achieved_tflops_per_gpu: 39.40470461094455
+loc:
+  marked_lines: 38
+git:
+  commit: 4ed2e2997fc42d1571e991e31517356aa78f87d0
+  branch: diffusion-performance-profile

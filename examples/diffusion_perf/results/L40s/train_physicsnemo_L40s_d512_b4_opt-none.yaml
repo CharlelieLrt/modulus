@@ -1,0 +1,43 @@
+function: train_physicsnemo
+timestamp: 2026-05-14T21:50:22.958748+00:00Z
+device:
+  name: L40s
+  raw_name: NVIDIA L40
+  bf16_peak_tflops: 362.0
+  fp16_peak_tflops: 362.0
+  total_memory_gb: 48.0
+  capability:
+  - 8
+  - 9
+  apex_gn_available: true
+world_size: 4
+config:
+  domain:
+  - 512
+  - 512
+  batch_size_per_rank: 4
+  channels: 16
+  optimizations: []
+  num_steps_measured: 15
+  num_steps_warmup: 6
+  solver: null
+  solver_steps: null
+  patch_shape: null
+  num_patches: null
+backbone:
+  class: SongUNet
+  params: 81330320
+  flops_per_step: null
+results:
+  status: oom
+  error: CUDA out of memory. Tried to allocate 1024.00 MiB. GPU 0 has a total capacity
+    of 47.38 GiB of which 1012.88 MiB is free. Including non-PyTorch memory, this
+    process has 46.38 GiB memory in use. Of the allocated memory 45.74 GiB is allocated
+    by PyTorch, and 15.17 MiB is reserved by PyTorch but unallocated. If reserved
+    but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)
+loc:
+  marked_lines: 17
+git:
+  commit: 4ed2e2997fc42d1571e991e31517356aa78f87d0
+  branch: diffusion-performance-profile
