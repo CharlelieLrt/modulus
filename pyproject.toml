@@ -345,6 +345,9 @@ DhariwalUNet = "physicsnemo.models.diffusion_unets:DhariwalUNet"
 CorrDiffRegressionUNet = "physicsnemo.models.diffusion_unets:CorrDiffRegressionUNet"
 StormCastUNet = "physicsnemo.models.diffusion_unets:StormCastUNet"
 
+# DiT
+DiT = "physicsnemo.models.dit:DiT"
+
 # DLWP
 DLWP = "physicsnemo.models.dlwp:DLWP"
 
