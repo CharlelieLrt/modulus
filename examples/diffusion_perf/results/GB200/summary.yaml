@@ -1,0 +1,4175 @@
+runs:
+- max_domain: 1120
+  max_domain_util: 0.8877953341589732
+  first_oom_domain: 1136
+  mem_frac_cap: 0.9
+  batch_size: 4
+  patch_align: 16
+  opts:
+  - amp_bf16
+  - apex_gn
+  - compile
+  device: GB200
+  timestamp: 2026-06-09T01:03:20.931807+00:00Z
+  probe_log:
+  - domain: 64
+    phase: doubling
+    status: ok
+    util: 0.009952134693666013
+  - domain: 128
+    phase: doubling
+    status: ok
+    util: 0.017147218387192277
+  - domain: 256
+    phase: doubling
+    status: ok
+    util: 0.045925783518971225
+  - domain: 512
+    phase: doubling
+    status: ok
+    util: 0.16430131892373953
+  - domain: 1024
+    phase: doubling
+    status: ok
+    util: 0.7204700483586329
+  - domain: 2048
+    phase: doubling
+    status: oom
+    util: 0.0
+  - domain: 1536
+    phase: bisect
+    status: oom
+    util: 0.0
+  - domain: 1280
+    phase: bisect
+    status: oom
+    util: 0.0
+  - domain: 1152
+    phase: bisect
+    status: over_cap(95%)
+    util: 0.9490487246280895
+  - domain: 1088
+    phase: bisect
+    status: ok
+    util: 0.829342045637813
+  - domain: 1120
+    phase: bisect
+    status: ok
+    util: 0.8877953341589732
+  - domain: 1136
+    phase: bisect
+    status: over_cap(92%)
+    util: 0.918066170879809
+- function: generate_baseline
+  timestamp: 2026-06-09T02:36:37.506205+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 823351765893120
+  results:
+    status: ok
+    step_time_ms_median: 6390.337890625
+    step_time_ms_p25: 6389.45263671875
+    step_time_ms_p75: 6391.21337890625
+    samples_per_sec_per_gpu_median: 0.1564862480068634
+    samples_per_sec_per_gpu_p25: 0.15646481203403872
+    samples_per_sec_per_gpu_p75: 0.15650792906003003
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 9.460663296
+    peak_memory_utilization: 0.047805847386708115
+    mfu: 0.05153729145377588
+    achieved_tflops_per_gpu: 128.8432286344397
+  loc:
+    marked_lines: 37
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_baseline
+  timestamp: 2026-06-09T02:30:44.258077+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 12047268446208
+  results:
+    status: ok
+    step_time_ms_median: 2366.126708984375
+    step_time_ms_p25: 2336.03369140625
+    step_time_ms_p75: 2376.15771484375
+    samples_per_sec_per_gpu_median: 0.42263163515416097
+    samples_per_sec_per_gpu_p25: 0.420847485734236
+    samples_per_sec_per_gpu_p75: 0.4280760177726795
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.476464128
+    peak_memory_utilization: 0.002407629431018804
+    mfu: 0.0020366227050248064
+    achieved_tflops_per_gpu: 5.091556762562016
+  loc:
+    marked_lines: 37
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_baseline
+  timestamp: 2026-06-09T02:42:12.938313+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 2048
+    - 2048
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3931672077139968
+  results:
+    status: ok
+    step_time_ms_median: 28541.306640625
+    step_time_ms_p25: 28541.263671875
+    step_time_ms_p75: 28541.826171875
+    samples_per_sec_per_gpu_median: 0.03503693830809499
+    samples_per_sec_per_gpu_p25: 0.035036300549871474
+    samples_per_sec_per_gpu_p75: 0.03503699105605528
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 58.651526656
+    peak_memory_utilization: 0.29637308131446466
+    mfu: 0.0551015008057651
+    achieved_tflops_per_gpu: 137.75375201441275
+  loc:
+    marked_lines: 37
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_baseline
+  timestamp: 2026-06-09T02:32:39.217752+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 48343414210560
+  results:
+    status: ok
+    step_time_ms_median: 1774.0521240234375
+    step_time_ms_p25: 1770.3662109375
+    step_time_ms_p75: 1775.955078125
+    samples_per_sec_per_gpu_median: 0.5636812957513692
+    samples_per_sec_per_gpu_p25: 0.5630773054551413
+    samples_per_sec_per_gpu_p75: 0.5648548835952131
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.904283136
+    peak_memory_utilization: 0.004569449333670676
+    mfu: 0.010900111345301448
+    achieved_tflops_per_gpu: 27.250278363253617
+  loc:
+    marked_lines: 37
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_baseline
+  timestamp: 2026-06-09T03:04:08.580213+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 4096
+    - 4096
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: null
+  results:
+    status: oom
+    error: CUDA out of memory. Tried to allocate 256.00 GiB. GPU 0 has a total capacity
+      of 184.31 GiB of which 115.35 GiB is free. Including non-PyTorch memory, this
+      process has 68.94 GiB memory in use. Of the allocated memory 68.06 GiB is allocated
+      by PyTorch, and 25.61 MiB is reserved by PyTorch but unallocated. If reserved
+      but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  loc:
+    marked_lines: 37
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_baseline
+  timestamp: 2026-06-09T02:34:22.597832+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 195865399001088
+  results:
+    status: ok
+    step_time_ms_median: 2305.810791015625
+    step_time_ms_p25: 2265.82861328125
+    step_time_ms_p75: 2455.602783203125
+    samples_per_sec_per_gpu_median: 0.4336869286484416
+    samples_per_sec_per_gpu_p25: 0.40723198672041944
+    samples_per_sec_per_gpu_p75: 0.4413396468463933
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 2.615559168
+    peak_memory_utilization: 0.013216728944278165
+    mfu: 0.03397770532851335
+    achieved_tflops_per_gpu: 84.94426332128339
+  loc:
+    marked_lines: 37
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_baseline
+  timestamp: 2026-06-09T02:28:48.150828+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3009753907200
+  results:
+    status: ok
+    step_time_ms_median: 2138.7041015625
+    step_time_ms_p25: 2124.267333984375
+    step_time_ms_p75: 2179.077880859375
+    samples_per_sec_per_gpu_median: 0.46757286305731466
+    samples_per_sec_per_gpu_p25: 0.4589097107468341
+    samples_per_sec_per_gpu_p75: 0.47075054255264254
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.369509376
+    peak_memory_utilization: 0.001867174455355836
+    mfu: 0.0005629117005949774
+    achieved_tflops_per_gpu: 1.4072792514874433
+  loc:
+    marked_lines: 37
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_baseline
+  timestamp: 2026-06-09T05:32:54.347172+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 823351765893120
+  results:
+    status: ok
+    step_time_ms_median: 14415.4306640625
+    step_time_ms_p25: 14414.5693359375
+    step_time_ms_p75: 14416.384765625
+    samples_per_sec_per_gpu_median: 0.06937010924640553
+    samples_per_sec_per_gpu_p25: 0.06936551821122586
+    samples_per_sec_per_gpu_p75: 0.06937425438766753
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 133.784362496
+    peak_memory_utilization: 0.6760281616740261
+    mfu: 0.022846400779290663
+    achieved_tflops_per_gpu: 57.11600194822665
+  loc:
+    marked_lines: 46
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_baseline
+  timestamp: 2026-06-09T05:21:14.663733+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 12047268446208
+  results:
+    status: ok
+    step_time_ms_median: 4531.07177734375
+    step_time_ms_p25: 4462.048828125
+    step_time_ms_p75: 4607.9658203125
+    samples_per_sec_per_gpu_median: 0.22069833565652097
+    samples_per_sec_per_gpu_p25: 0.21701549859416766
+    samples_per_sec_per_gpu_p75: 0.22411229426644588
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 2.338840064
+    peak_memory_utilization: 0.011818434676644332
+    mfu: 0.0010635248381141709
+    achieved_tflops_per_gpu: 2.6588120952854273
+  loc:
+    marked_lines: 46
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_baseline
+  timestamp: 2026-06-09T05:44:39.136525+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 2048
+    - 2048
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3931672077139968
+  results:
+    status: oom
+    error: CUDA out of memory. Tried to allocate 16.00 GiB. GPU 0 has a total capacity
+      of 184.31 GiB of which 15.16 GiB is free. Including non-PyTorch memory, this
+      process has 169.14 GiB memory in use. Of the allocated memory 168.25 GiB is
+      allocated by PyTorch, and 33.57 MiB is reserved by PyTorch but unallocated.
+      If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  loc:
+    marked_lines: 46
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_baseline
+  timestamp: 2026-06-09T05:24:54.631337+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 48343414210560
+  results:
+    status: ok
+    step_time_ms_median: 4268.671875
+    step_time_ms_p25: 4253.0556640625
+    step_time_ms_p75: 4286.1845703125
+    samples_per_sec_per_gpu_median: 0.23426490235912079
+    samples_per_sec_per_gpu_p25: 0.2333077317589922
+    samples_per_sec_per_gpu_p75: 0.23512506747790937
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 8.344526336
+    peak_memory_utilization: 0.042165875695190015
+    mfu: 0.004530066083897348
+    achieved_tflops_per_gpu: 11.325165209743371
+  loc:
+    marked_lines: 46
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_baseline
+  timestamp: 2026-06-09T05:28:38.321547+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 195865399001088
+  results:
+    status: ok
+    step_time_ms_median: 5204.29345703125
+    step_time_ms_p25: 5197.64306640625
+    step_time_ms_p75: 5255.01611328125
+    samples_per_sec_per_gpu_median: 0.19214904160505247
+    samples_per_sec_per_gpu_p25: 0.19029437368853216
+    samples_per_sec_per_gpu_p75: 0.1923948965374837
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 32.620895744
+    peak_memory_utilization: 0.16483723336975004
+    mfu: 0.015054139480660103
+    achieved_tflops_per_gpu: 37.63534870165026
+  loc:
+    marked_lines: 46
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_baseline
+  timestamp: 2026-06-09T05:17:35.863041+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3009753907200
+  results:
+    status: ok
+    step_time_ms_median: 4327.91455078125
+    step_time_ms_p25: 4309.029296875
+    step_time_ms_p75: 4393.8837890625
+    samples_per_sec_per_gpu_median: 0.23105816629847412
+    samples_per_sec_per_gpu_p25: 0.22758908701437566
+    samples_per_sec_per_gpu_p75: 0.23207082874215346
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.841381376
+    peak_memory_utilization: 0.004251599322013804
+    mfu: 0.00027817128752291993
+    achieved_tflops_per_gpu: 0.6954282188072998
+  loc:
+    marked_lines: 46
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:38:08.774587+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 823351765893120
+  results:
+    status: ok
+    step_time_ms_median: 14397.259765625
+    step_time_ms_p25: 14397.0205078125
+    step_time_ms_p75: 14397.7001953125
+    samples_per_sec_per_gpu_median: 0.06945766182448185
+    samples_per_sec_per_gpu_p25: 0.0694555370951239
+    samples_per_sec_per_gpu_p75: 0.06945881611110806
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 63.146858496
+    peak_memory_utilization: 0.3190885232630764
+    mfu: 0.02287523540719771
+    achieved_tflops_per_gpu: 57.188088517994274
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:35:26.661284+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 823351765893120
+  results:
+    status: ok
+    step_time_ms_median: 14805.9814453125
+    step_time_ms_p25: 14803.78125
+    step_time_ms_p75: 14806.009765625
+    samples_per_sec_per_gpu_median: 0.0675402710515077
+    samples_per_sec_per_gpu_p25: 0.06754014186331907
+    samples_per_sec_per_gpu_p75: 0.06755030914821171
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 133.851472384
+    peak_memory_utilization: 0.6763672758527565
+    mfu: 0.022243760575663536
+    achieved_tflops_per_gpu: 55.60940143915884
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:22:56.057628+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 12047268446208
+  results:
+    status: ok
+    step_time_ms_median: 3757.47998046875
+    step_time_ms_p25: 3737.06884765625
+    step_time_ms_p75: 3784.436279296875
+    samples_per_sec_per_gpu_median: 0.266135815812184
+    samples_per_sec_per_gpu_p25: 0.26424014732936496
+    samples_per_sec_per_gpu_p75: 0.26758939713598334
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 1.394939904
+    peak_memory_utilization: 0.007048795848431521
+    mfu: 0.0012824838464959793
+    achieved_tflops_per_gpu: 3.2062096162399483
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:22:05.248044+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 12047268446208
+  results:
+    status: ok
+    step_time_ms_median: 4668.837890625
+    step_time_ms_p25: 4611.455078125
+    step_time_ms_p75: 4695.4462890625
+    samples_per_sec_per_gpu_median: 0.21418606159104267
+    samples_per_sec_per_gpu_p25: 0.21297230091405464
+    samples_per_sec_per_gpu_p75: 0.2168512938017378
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 2.339889664
+    peak_memory_utilization: 0.011823738429229872
+    mfu: 0.0010321427925693326
+    achieved_tflops_per_gpu: 2.5803569814233316
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:47:18.476121+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 2048
+    - 2048
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3931672077139968
+  results:
+    status: oom
+    error: CUDA out of memory. Tried to allocate 512.00 MiB. GPU 0 has a total capacity
+      of 184.31 GiB of which 255.50 MiB is free. Including non-PyTorch memory, this
+      process has 184.04 GiB memory in use. Of the allocated memory 183.06 GiB is
+      allocated by PyTorch, and 130.09 MiB is reserved by PyTorch but unallocated.
+      If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:46:03.590851+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 2048
+    - 2048
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3931672077139968
+  results:
+    status: oom
+    error: CUDA out of memory. Tried to allocate 16.00 GiB. GPU 0 has a total capacity
+      of 184.31 GiB of which 15.41 GiB is free. Including non-PyTorch memory, this
+      process has 168.88 GiB memory in use. Of the allocated memory 168.00 GiB is
+      allocated by PyTorch, and 29.57 MiB is reserved by PyTorch but unallocated.
+      If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:26:36.491594+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 48343414210560
+  results:
+    status: ok
+    step_time_ms_median: 3877.21630859375
+    step_time_ms_p25: 3869.443115234375
+    step_time_ms_p75: 3965.314453125
+    samples_per_sec_per_gpu_median: 0.25791700034468695
+    samples_per_sec_per_gpu_p25: 0.2521868093492349
+    samples_per_sec_per_gpu_p75: 0.2584351210805768
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 4.081883136
+    peak_memory_utilization: 0.020626236886846876
+    mfu: 0.0049874353518433385
+    achieved_tflops_per_gpu: 12.468588379608345
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:25:43.278383+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 48343414210560
+  results:
+    status: ok
+    step_time_ms_median: 4490.07763671875
+    step_time_ms_p25: 4470.3984375
+    step_time_ms_p75: 4532.46142578125
+    samples_per_sec_per_gpu_median: 0.22271329827846317
+    samples_per_sec_per_gpu_p25: 0.22063066975305418
+    samples_per_sec_per_gpu_p75: 0.22369370739115466
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 8.348721664
+    peak_memory_utilization: 0.04218707518235387
+    mfu: 0.004306688491550297
+    achieved_tflops_per_gpu: 10.766721228875744
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:30:42.903324+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 195865399001088
+  results:
+    status: ok
+    step_time_ms_median: 4687.3857421875
+    step_time_ms_p25: 4522.61376953125
+    step_time_ms_p75: 4713.4443359375
+    samples_per_sec_per_gpu_median: 0.2133385334600864
+    samples_per_sec_per_gpu_p25: 0.21215907704171516
+    samples_per_sec_per_gpu_p75: 0.22111107668246582
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 15.083280384
+    peak_memory_utilization: 0.07621759464088555
+    mfu: 0.016714254791386718
+    achieved_tflops_per_gpu: 41.78563697846679
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:29:40.420597+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 195865399001088
+  results:
+    status: ok
+    step_time_ms_median: 4921.72265625
+    step_time_ms_p25: 4917.42724609375
+    step_time_ms_p75: 5007.580078125
+    samples_per_sec_per_gpu_median: 0.2031808921069779
+    samples_per_sec_per_gpu_p25: 0.19969725583987713
+    samples_per_sec_per_gpu_p75: 0.20335837216389294
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 32.637673984
+    peak_memory_utilization: 0.1649220157952272
+    mfu: 0.015918442600772097
+    achieved_tflops_per_gpu: 39.79610650193024
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:19:12.345825+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3009753907200
+  results:
+    status: ok
+    step_time_ms_median: 3927.264404296875
+    step_time_ms_p25: 3696.122802734375
+    step_time_ms_p75: 4008.924072265625
+    samples_per_sec_per_gpu_median: 0.2546301692613021
+    samples_per_sec_per_gpu_p25: 0.249443487073791
+    samples_per_sec_per_gpu_p75: 0.2705537811839489
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.727166976
+    peak_memory_utilization: 0.003674460488833578
+    mfu: 0.00030654965873008056
+    achieved_tflops_per_gpu: 0.7663741468252013
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo
+  timestamp: 2026-06-09T05:18:22.882083+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3009753907200
+  results:
+    status: ok
+    step_time_ms_median: 4429.06396484375
+    step_time_ms_p25: 4427.400390625
+    step_time_ms_p75: 4435.365234375
+    samples_per_sec_per_gpu_median: 0.22578134069356984
+    samples_per_sec_per_gpu_p25: 0.22546057588443735
+    samples_per_sec_per_gpu_p75: 0.22586617693703406
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.841644544
+    peak_memory_utilization: 0.004252929140954764
+    mfu: 0.00027181850893013047
+    achieved_tflops_per_gpu: 0.6795462723253262
+  loc:
+    marked_lines: 21
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T05:40:34.738365+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 1024
+    - 1024
+    num_patches: 1
+    chunk_size: 1
+    use_checkpointing: true
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 823699658244096
+  results:
+    status: ok
+    step_time_ms_median: 26763.068359375
+    step_time_ms_p25: 26760.640625
+    step_time_ms_p75: 26837.15625
+    samples_per_sec_per_gpu_median: 0.03736492343000364
+    samples_per_sec_per_gpu_p25: 0.03726177210001525
+    samples_per_sec_per_gpu_p75: 0.03736831318850387
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 63.4572672
+    peak_memory_utilization: 0.3206570550527241
+    mfu: 0.012310989863844326
+    achieved_tflops_per_gpu: 30.777474659610814
+  loc:
+    marked_lines: 44
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T05:23:40.507868+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 128
+    - 128
+    num_patches: 1
+    chunk_size: 1
+    use_checkpointing: true
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 12052704264192
+  results:
+    status: ok
+    step_time_ms_median: 6893.35595703125
+    step_time_ms_p25: 6849.447265625
+    step_time_ms_p75: 6959.32666015625
+    samples_per_sec_per_gpu_median: 0.14506722215323817
+    samples_per_sec_per_gpu_p25: 0.1436920622975252
+    samples_per_sec_per_gpu_p75: 0.1459971821403244
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 1.399819776
+    peak_memory_utilization: 0.00707345441715971
+    mfu: 0.0006993809308163287
+    achieved_tflops_per_gpu: 1.7484523270408219
+  loc:
+    marked_lines: 44
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T05:59:57.734346+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 2048
+    - 2048
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 1120
+    - 1120
+    num_patches: 4
+    chunk_size: 1
+    use_checkpointing: true
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 3991490097315840
+  results:
+    status: ok
+    step_time_ms_median: 120279.3359375
+    step_time_ms_p25: 120231.9921875
+    step_time_ms_p75: 120325.8671875
+    samples_per_sec_per_gpu_median: 0.008313980054891755
+    samples_per_sec_per_gpu_p25: 0.008310764953322393
+    samples_per_sec_per_gpu_p75: 0.008317253850709841
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 79.059695104
+    peak_memory_utilization: 0.39949796333830956
+    mfu: 0.013274067623352735
+    achieved_tflops_per_gpu: 33.18516905838184
+  loc:
+    marked_lines: 44
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T05:27:22.780913+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 256
+    - 256
+    num_patches: 1
+    chunk_size: 1
+    use_checkpointing: true
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 48365157482496
+  results:
+    status: ok
+    step_time_ms_median: 7547.29052734375
+    step_time_ms_p25: 7520.2490234375
+    step_time_ms_p75: 7551.14599609375
+    samples_per_sec_per_gpu_median: 0.13249788071321902
+    samples_per_sec_per_gpu_p25: 0.13243022986409025
+    samples_per_sec_per_gpu_p75: 0.13297431998374182
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 4.101312
+    peak_memory_utilization: 0.020724413227999807
+    mfu: 0.0025633123467167225
+    achieved_tflops_per_gpu: 6.408280866791807
+  loc:
+    marked_lines: 44
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T06:16:29.530976+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 4096
+    - 4096
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 1120
+    - 1120
+    num_patches: 16
+    chunk_size: 1
+    use_checkpointing: true
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 15965960389263360
+  results:
+    status: ok
+    step_time_ms_median: 469756.09375
+    step_time_ms_p25: 469695.84375
+    step_time_ms_p75: 469823.9375
+    samples_per_sec_per_gpu_median: 0.002128764295566948
+    samples_per_sec_per_gpu_p25: 0.0021284568966858995
+    samples_per_sec_per_gpu_p75: 0.0021290373617448045
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 86.53709056
+    peak_memory_utilization: 0.43728212443098236
+    mfu: 0.013595106568440004
+    achieved_tflops_per_gpu: 33.98776642110001
+  loc:
+    marked_lines: 44
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T05:31:37.145082+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 512
+    - 512
+    num_patches: 1
+    chunk_size: 1
+    use_checkpointing: true
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 195952372088832
+  results:
+    status: ok
+    step_time_ms_median: 7499.931640625
+    step_time_ms_p25: 7493.92236328125
+    step_time_ms_p75: 7525.55517578125
+    samples_per_sec_per_gpu_median: 0.13333454862218796
+    samples_per_sec_per_gpu_p25: 0.1328805618511975
+    samples_per_sec_per_gpu_p75: 0.13344146783529595
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 15.160905216
+    peak_memory_utilization: 0.07660984207173745
+    mfu: 0.010450888433564575
+    achieved_tflops_per_gpu: 26.127221083911436
+  loc:
+    marked_lines: 44
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T05:19:57.043236+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 64
+    - 64
+    num_patches: 1
+    chunk_size: 1
+    use_checkpointing: true
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 3011112861696
+  results:
+    status: ok
+    step_time_ms_median: 7760.71337890625
+    step_time_ms_p25: 7757.486328125
+    step_time_ms_p75: 7958.39794921875
+    samples_per_sec_per_gpu_median: 0.12885413378595026
+    samples_per_sec_per_gpu_p25: 0.12565343004720778
+    samples_per_sec_per_gpu_p75: 0.12890773605033243
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.7284096
+    peak_memory_utilization: 0.0036807396144555807
+    mfu: 0.00015519773581022876
+    achieved_tflops_per_gpu: 0.3879943395255719
+  loc:
+    marked_lines: 44
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_dps_physicsnemo_multidiffusion
+  timestamp: 2026-06-10T01:49:28.205549+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 8192
+    - 8192
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 1120
+    - 1120
+    num_patches: 64
+    chunk_size: 1
+    use_checkpointing: true
+    solver_steps: 18
+    guidance: dps
+    observation_frac: 0.005
+    observation_channel_frac: 0.5
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 63863841557053440
+  results:
+    status: ok
+    step_time_ms_median: 1878348.625
+    step_time_ms_p25: 1878203.375
+    step_time_ms_p75: 1878546.125
+    samples_per_sec_per_gpu_median: 0.0005323825336204561
+    samples_per_sec_per_gpu_p25: 0.000532326561851123
+    samples_per_sec_per_gpu_p75: 0.0005324237051804893
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 116.446672384
+    peak_memory_utilization: 0.5884187688016735
+    mfu: 0.013599997509951793
+    achieved_tflops_per_gpu: 33.999993774879485
+  loc:
+    marked_lines: 44
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:38:50.218745+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 823351765893120
+  results:
+    status: ok
+    step_time_ms_median: 9042.3095703125
+    step_time_ms_p25: 9042.048828125
+    step_time_ms_p75: 9044.3427734375
+    samples_per_sec_per_gpu_median: 0.11059121480237491
+    samples_per_sec_per_gpu_p25: 0.1105663534709143
+    samples_per_sec_per_gpu_p75: 0.11059440387996274
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 7.495473664
+    peak_memory_utilization: 0.03787551240976687
+    mfu: 0.03642218879992029
+    achieved_tflops_per_gpu: 91.05547199980073
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:37:41.256074+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 823351765893120
+  results:
+    status: ok
+    step_time_ms_median: 6571.76953125
+    step_time_ms_p25: 6569.92333984375
+    step_time_ms_p75: 6572.25830078125
+    samples_per_sec_per_gpu_median: 0.1521660178806959
+    samples_per_sec_per_gpu_p25: 0.15215470150969707
+    samples_per_sec_per_gpu_p75: 0.15220877752643344
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 9.259337216
+    peak_memory_utilization: 0.04678852296089186
+    mfu: 0.05011446381239802
+    achieved_tflops_per_gpu: 125.28615953099505
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:31:43.118036+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 12047268446208
+  results:
+    status: ok
+    step_time_ms_median: 2141.841064453125
+    step_time_ms_p25: 2097.738037109375
+    step_time_ms_p75: 2227.490234375
+    samples_per_sec_per_gpu_median: 0.46688805093730396
+    samples_per_sec_per_gpu_p25: 0.44893575045485434
+    samples_per_sec_per_gpu_p75: 0.4767039460170024
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.592173568
+    peak_memory_utilization: 0.0029923228776379466
+    mfu: 0.0022498902735874145
+    achieved_tflops_per_gpu: 5.624725683968536
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:31:16.099880+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 12047268446208
+  results:
+    status: ok
+    step_time_ms_median: 1953.7362060546875
+    step_time_ms_p25: 1941.6121826171875
+    step_time_ms_p75: 1959.632568359375
+    samples_per_sec_per_gpu_median: 0.5118398261244121
+    samples_per_sec_per_gpu_p25: 0.5102997450370048
+    samples_per_sec_per_gpu_p75: 0.5150359113693108
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.473318912
+    peak_memory_utilization: 0.0023917362836368646
+    mfu: 0.002466508714712488
+    achieved_tflops_per_gpu: 6.16627178678122
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:51:10.769067+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 2048
+    - 2048
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3931672077139968
+  results:
+    status: ok
+    step_time_ms_median: 41084.65625
+    step_time_ms_p25: 41083.203125
+    step_time_ms_p75: 41085.65234375
+    samples_per_sec_per_gpu_median: 0.024339987023744417
+    samples_per_sec_per_gpu_p25: 0.024339396917282274
+    samples_per_sec_per_gpu_p75: 0.024340847936257404
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 49.606352384
+    peak_memory_utilization: 0.2506667489671084
+    mfu: 0.03827873893568203
+    achieved_tflops_per_gpu: 95.69684733920508
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:46:43.360847+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 2048
+    - 2048
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3931672077139968
+  results:
+    status: ok
+    step_time_ms_median: 29388.404296875
+    step_time_ms_p25: 29387.130859375
+    step_time_ms_p75: 29389.294921875
+    samples_per_sec_per_gpu_median: 0.03402702609839672
+    samples_per_sec_per_gpu_p25: 0.034025994929728014
+    samples_per_sec_per_gpu_p75: 0.03402850059726
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 57.8462208
+    peak_memory_utilization: 0.2923037758496104
+    mfu: 0.053513243351671735
+    achieved_tflops_per_gpu: 133.78310837917934
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:33:30.681371+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 48343414210560
+  results:
+    status: ok
+    step_time_ms_median: 1478.0469970703125
+    step_time_ms_p25: 1461.677978515625
+    step_time_ms_p75: 1503.6466064453125
+    samples_per_sec_per_gpu_median: 0.6765684731149512
+    samples_per_sec_per_gpu_p25: 0.6650498832062971
+    samples_per_sec_per_gpu_p75: 0.6841452185080656
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.920902144
+    peak_memory_utilization: 0.004653427141072658
+    mfu: 0.013083051975040885
+    achieved_tflops_per_gpu: 32.70762993760221
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:33:05.452478+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 48343414210560
+  results:
+    status: ok
+    step_time_ms_median: 1681.9063720703125
+    step_time_ms_p25: 1673.2947998046875
+    step_time_ms_p75: 1687.2938232421875
+    samples_per_sec_per_gpu_median: 0.5945634172067902
+    samples_per_sec_per_gpu_p25: 0.5926650037030711
+    samples_per_sec_per_gpu_p75: 0.5976233238259769
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.891700736
+    peak_memory_utilization: 0.004505868982553769
+    mfu: 0.011497290220989541
+    achieved_tflops_per_gpu: 28.743225552473852
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T03:10:08.777252+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 4096
+    - 4096
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: null
+  results:
+    status: oom
+    error: CUDA out of memory. Tried to allocate 256.00 GiB. GPU 0 has a total capacity
+      of 184.31 GiB of which 147.21 GiB is free. Including non-PyTorch memory, this
+      process has 37.08 GiB memory in use. Of the allocated memory 36.21 GiB is allocated
+      by PyTorch, and 21.84 MiB is reserved by PyTorch but unallocated. If reserved
+      but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T03:07:09.306712+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 4096
+    - 4096
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: null
+  results:
+    status: oom
+    error: CUDA out of memory. Tried to allocate 256.00 GiB. GPU 0 has a total capacity
+      of 184.31 GiB of which 116.33 GiB is free. Including non-PyTorch memory, this
+      process has 67.96 GiB memory in use. Of the allocated memory 67.06 GiB is allocated
+      by PyTorch, and 49.61 MiB is reserved by PyTorch but unallocated. If reserved
+      but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:35:26.435913+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 195865399001088
+  results:
+    status: ok
+    step_time_ms_median: 2275.51513671875
+    step_time_ms_p25: 2275.487548828125
+    step_time_ms_p75: 2275.697509765625
+    samples_per_sec_per_gpu_median: 0.4394609307859763
+    samples_per_sec_per_gpu_p25: 0.43942571264798297
+    samples_per_sec_per_gpu_p75: 0.4394662587870452
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 2.235816448
+    peak_memory_utilization: 0.0112978441948115
+    mfu: 0.03443007622151391
+    achieved_tflops_per_gpu: 86.07519055378476
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:34:54.903449+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 195865399001088
+  results:
+    status: ok
+    step_time_ms_median: 2057.015625
+    step_time_ms_p25: 1995.028076171875
+    step_time_ms_p75: 2072.311767578125
+    samples_per_sec_per_gpu_median: 0.4861411784366004
+    samples_per_sec_per_gpu_p25: 0.4825528743528213
+    samples_per_sec_per_gpu_p75: 0.5012460786611247
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 2.565228032
+    peak_memory_utilization: 0.012962399778221386
+    mfu: 0.03808729435413754
+    achieved_tflops_per_gpu: 95.21823588534384
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:29:47.496018+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3009753907200
+  results:
+    status: ok
+    step_time_ms_median: 2026.082763671875
+    step_time_ms_p25: 1987.497802734375
+    step_time_ms_p75: 2041.8104248046875
+    samples_per_sec_per_gpu_median: 0.4935632531554128
+    samples_per_sec_per_gpu_p25: 0.4897614332122222
+    samples_per_sec_per_gpu_p75: 0.5031452103364403
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.509991424
+    peak_memory_utilization: 0.002577046811779269
+    mfu: 0.0005942015718539386
+    achieved_tflops_per_gpu: 1.4855039296348465
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo
+  timestamp: 2026-06-09T02:29:17.809889+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations: []
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape: null
+    num_patches: null
+    solver_steps: 18
+    guidance: none
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 3009753907200
+  results:
+    status: ok
+    step_time_ms_median: 2152.59033203125
+    step_time_ms_p25: 2114.260009765625
+    step_time_ms_p75: 2165.654052734375
+    samples_per_sec_per_gpu_median: 0.46455657870411854
+    samples_per_sec_per_gpu_p25: 0.4617542671404007
+    samples_per_sec_per_gpu_p75: 0.4729787232322738
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.368723456
+    peak_memory_utilization: 0.0018632031089076385
+    mfu: 0.0005592803911480741
+    achieved_tflops_per_gpu: 1.3982009778701852
+  loc:
+    marked_lines: 22
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:40:20.216039+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 1024
+    - 1024
+    num_patches: 1
+    chunk_size: 1
+    use_checkpointing: false
+    solver_steps: 18
+    guidance: none
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 823699658244096
+  results:
+    status: ok
+    step_time_ms_median: 12202.501953125
+    step_time_ms_p25: 12202.0576171875
+    step_time_ms_p75: 12204.3271484375
+    samples_per_sec_per_gpu_median: 0.08195040687896837
+    samples_per_sec_per_gpu_p25: 0.08193815093919606
+    samples_per_sec_per_gpu_p75: 0.08195339108966557
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 7.696828928
+    peak_memory_utilization: 0.03889298430577698
+    mfu: 0.027001008855668345
+    achieved_tflops_per_gpu: 67.50252213917086
+  loc:
+    marked_lines: 38
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:32:12.950991+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 128
+    - 128
+    num_patches: 1
+    chunk_size: 1
+    use_checkpointing: false
+    solver_steps: 18
+    guidance: none
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 12052704264192
+  results:
+    status: ok
+    step_time_ms_median: 1773.43994140625
+    step_time_ms_p25: 1732.736083984375
+    step_time_ms_p75: 1776.3953857421875
+    samples_per_sec_per_gpu_median: 0.5638758757215367
+    samples_per_sec_per_gpu_p25: 0.5629377378630122
+    samples_per_sec_per_gpu_p75: 0.5771219340573377
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.595347968
+    peak_memory_utilization: 0.003008363495213728
+    mfu: 0.0027184916687135858
+    achieved_tflops_per_gpu: 6.796229171783964
+  loc:
+    marked_lines: 38
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:57:18.509917+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 2048
+    - 2048
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 1120
+    - 1120
+    num_patches: 4
+    chunk_size: 1
+    use_checkpointing: false
+    solver_steps: 18
+    guidance: none
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 3991490097315840
+  results:
+    status: ok
+    step_time_ms_median: 49211.61328125
+    step_time_ms_p25: 49211.4921875
+    step_time_ms_p75: 49214.02734375
+    samples_per_sec_per_gpu_median: 0.020320406776442902
+    samples_per_sec_per_gpu_p25: 0.020319410013230635
+    samples_per_sec_per_gpu_p75: 0.020320456778467808
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 10.420587008
+    peak_memory_utilization: 0.05265645511292926
+    mfu: 0.032443480968640616
+    achieved_tflops_per_gpu: 81.10870242160154
+  loc:
+    marked_lines: 38
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:33:55.457414+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 256
+    - 256
+    num_patches: 1
+    chunk_size: 1
+    use_checkpointing: false
+    solver_steps: 18
+    guidance: none
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 48365157482496
+  results:
+    status: ok
+    step_time_ms_median: 1712.1170654296875
+    step_time_ms_p25: 1668.9144287109375
+    step_time_ms_p75: 1881.826171875
+    samples_per_sec_per_gpu_median: 0.5840722110605395
+    samples_per_sec_per_gpu_p25: 0.5313987099050851
+    samples_per_sec_per_gpu_p75: 0.5991918955200093
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.933513728
+    peak_memory_utilization: 0.004717154962383406
+    mfu: 0.011299497787637055
+    achieved_tflops_per_gpu: 28.248744469092635
+  loc:
+    marked_lines: 38
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T03:13:17.767597+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 4096
+    - 4096
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 1120
+    - 1120
+    num_patches: 16
+    chunk_size: 1
+    use_checkpointing: false
+    solver_steps: 18
+    guidance: none
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 15965960389263360
+  results:
+    status: ok
+    step_time_ms_median: 185772.171875
+    step_time_ms_p25: 185768.9375
+    step_time_ms_p75: 185781.484375
+    samples_per_sec_per_gpu_median: 0.0053829375514480565
+    samples_per_sec_per_gpu_p25: 0.005382667725818681
+    samples_per_sec_per_gpu_p75: 0.005383031272383738
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 15.848933888
+    peak_memory_utilization: 0.08008653209464718
+    mfu: 0.034377507089719185
+    achieved_tflops_per_gpu: 85.94376772429797
+  loc:
+    marked_lines: 38
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:35:57.949300+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 512
+    - 512
+    num_patches: 1
+    chunk_size: 1
+    use_checkpointing: false
+    solver_steps: 18
+    guidance: none
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 195952372088832
+  results:
+    status: ok
+    step_time_ms_median: 3057.663818359375
+    step_time_ms_p25: 3043.361572265625
+    step_time_ms_p75: 3065.2685546875
+    samples_per_sec_per_gpu_median: 0.3270470723418383
+    samples_per_sec_per_gpu_p25: 0.32623568935608277
+    samples_per_sec_per_gpu_p75: 0.3285840266608715
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 2.286176768
+    peak_memory_utilization: 0.011552320831062118
+    mfu: 0.02563425984403642
+    achieved_tflops_per_gpu: 64.08564961009105
+  loc:
+    marked_lines: 38
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:30:15.701106+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 64
+    - 64
+    num_patches: 1
+    chunk_size: 1
+    use_checkpointing: false
+    solver_steps: 18
+    guidance: none
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 3011112861696
+  results:
+    status: ok
+    step_time_ms_median: 1991.5689697265625
+    step_time_ms_p25: 1973.4573974609375
+    step_time_ms_p75: 1994.84814453125
+    samples_per_sec_per_gpu_median: 0.5021166804669073
+    samples_per_sec_per_gpu_p25: 0.5012912901372653
+    samples_per_sec_per_gpu_p75: 0.50672489879265
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 0.510806528
+    peak_memory_utilization: 0.0025811656284213088
+    mfu: 0.0006047719978504021
+    achieved_tflops_per_gpu: 1.5119299946260052
+  loc:
+    marked_lines: 38
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: generate_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T03:38:23.804132+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 1
+  config:
+    domain:
+    - 8192
+    - 8192
+    batch_size_per_rank: 1
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 5
+    num_steps_warmup: 3
+    solver: heun
+    patch_shape:
+    - 1120
+    - 1120
+    num_patches: 64
+    chunk_size: 1
+    use_checkpointing: false
+    solver_steps: 18
+    guidance: none
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 63863841557053440
+  results:
+    status: ok
+    step_time_ms_median: 741224.375
+    step_time_ms_p25: 741219.125
+    step_time_ms_p75: 741240.5
+    samples_per_sec_per_gpu_median: 0.0013491191516738774
+    samples_per_sec_per_gpu_p25: 0.0013490898028372708
+    samples_per_sec_per_gpu_p75: 0.0013491287073846077
+    num_measured: 5
+    peak_memory_allocated_gb_max_rank: 43.6430592
+    peak_memory_utilization: 0.22053352522189454
+    mfu: 0.034463972697634744
+    achieved_tflops_per_gpu: 86.15993174408686
+  loc:
+    marked_lines: 38
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_baseline
+  timestamp: 2026-06-09T05:56:59.575060+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations: []
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: null
+  results:
+    status: oom
+    error: CUDA out of memory. Tried to allocate 256.00 MiB. GPU 0 has a total capacity
+      of 184.31 GiB of which 33.44 MiB is free. Including non-PyTorch memory, this
+      process has 184.26 GiB memory in use. Of the allocated memory 182.49 GiB is
+      allocated by PyTorch, and 11.17 MiB is reserved by PyTorch but unallocated.
+      If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  loc:
+    marked_lines: 29
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_baseline
+  timestamp: 2026-06-09T05:54:17.073306+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations: []
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 4013195001856
+  results:
+    status: ok
+    step_time_ms_median: 172.30271911621094
+    step_time_ms_p25: 163.8662872314453
+    step_time_ms_p75: 175.72328186035156
+    samples_per_sec_per_gpu_median: 23.214955750652827
+    samples_per_sec_per_gpu_p25: 22.763062228594308
+    samples_per_sec_per_gpu_p75: 24.410146025645812
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 6.406847488
+    peak_memory_utilization: 0.03237455595431036
+    mfu: 0.009316614438682811
+    achieved_tflops_per_gpu: 23.29153609670703
+  loc:
+    marked_lines: 29
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_baseline
+  timestamp: 2026-06-09T05:54:49.386585+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations: []
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 16104228388864
+  results:
+    status: ok
+    step_time_ms_median: 164.07852172851562
+    step_time_ms_p25: 162.29092407226562
+    step_time_ms_p75: 164.74331665039062
+    samples_per_sec_per_gpu_median: 24.378571661063607
+    samples_per_sec_per_gpu_p25: 24.280195890972525
+    samples_per_sec_per_gpu_p75: 24.64709608911255
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 21.715139584
+    peak_memory_utilization: 0.10972916131289495
+    mfu: 0.039259808582405596
+    achieved_tflops_per_gpu: 98.14952145601399
+  loc:
+    marked_lines: 29
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_baseline
+  timestamp: 2026-06-09T05:55:33.680928+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations: []
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 65247495847936
+  results:
+    status: ok
+    step_time_ms_median: 353.5492858886719
+    step_time_ms_p25: 353.48046875
+    step_time_ms_p75: 353.6621856689453
+    samples_per_sec_per_gpu_median: 11.313839851056999
+    samples_per_sec_per_gpu_p25: 11.310228127539494
+    samples_per_sec_per_gpu_p75: 11.316042479362588
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 83.94393088
+    peak_memory_utilization: 0.4241785827412724
+    mfu: 0.07381997187060545
+    achieved_tflops_per_gpu: 184.5499296765136
+  loc:
+    marked_lines: 29
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_baseline
+  timestamp: 2026-06-09T01:54:24.800355+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations: []
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 1002610622464
+  results:
+    status: ok
+    step_time_ms_median: 120.4862060546875
+    step_time_ms_p25: 106.82097625732422
+    step_time_ms_p75: 150.6344757080078
+    samples_per_sec_per_gpu_median: 33.1988211014333
+    samples_per_sec_per_gpu_p25: 26.554346083121512
+    samples_per_sec_per_gpu_p75: 37.4458289012851
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 2.595625984
+    peak_memory_utilization: 0.013116004214687792
+    mfu: 0.003328549068957902
+    achieved_tflops_per_gpu: 8.321372672394755
+  loc:
+    marked_lines: 29
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T02:10:29.179958+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 274286708260864
+  results:
+    status: ok
+    step_time_ms_median: 1091.3018798828125
+    step_time_ms_p25: 1091.1810913085938
+    step_time_ms_p75: 1091.382080078125
+    samples_per_sec_per_gpu_median: 3.6653469344610063
+    samples_per_sec_per_gpu_p25: 3.6650775864980902
+    samples_per_sec_per_gpu_p75: 3.665752670991594
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 142.579305984
+    peak_memory_utilization: 0.7204700483586329
+    mfu: 0.10053559452873582
+    achieved_tflops_per_gpu: 251.33898632183957
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T02:07:15.878908+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations: []
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: null
+  results:
+    status: oom
+    error: CUDA out of memory. Tried to allocate 1024.00 MiB. GPU 0 has a total capacity
+      of 184.31 GiB of which 33.44 MiB is free. Including non-PyTorch memory, this
+      process has 184.26 GiB memory in use. Of the allocated memory 182.49 GiB is
+      allocated by PyTorch, and 11.17 MiB is reserved by PyTorch but unallocated.
+      If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T01:58:06.902790+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 4013195001856
+  results:
+    status: ok
+    step_time_ms_median: 158.42649841308594
+    step_time_ms_p25: 155.85509490966797
+    step_time_ms_p75: 161.78973388671875
+    samples_per_sec_per_gpu_median: 25.248301515635863
+    samples_per_sec_per_gpu_p25: 24.7234475507618
+    samples_per_sec_per_gpu_p75: 25.664865189799276
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 3.393393664
+    peak_memory_utilization: 0.017147218387192277
+    mfu: 0.01013263574479031
+    achieved_tflops_per_gpu: 25.331589361975777
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T01:57:37.207238+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations: []
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 4013195001856
+  results:
+    status: ok
+    step_time_ms_median: 154.28099060058594
+    step_time_ms_p25: 151.95748901367188
+    step_time_ms_p75: 155.55518341064453
+    samples_per_sec_per_gpu_median: 25.926719710761365
+    samples_per_sec_per_gpu_p25: 25.71434723226512
+    samples_per_sec_per_gpu_p75: 26.323151467974792
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 6.406848
+    peak_memory_utilization: 0.03237455854150675
+    mfu: 0.010404898195774894
+    achieved_tflops_per_gpu: 26.012245489437234
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T02:15:46.974552+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 2048
+    - 2048
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: null
+  results:
+    status: oom
+    error: CUDA out of memory. Tried to allocate 64.00 GiB. GPU 0 has a total capacity
+      of 184.31 GiB of which 40.13 GiB is free. Including non-PyTorch memory, this
+      process has 144.16 GiB memory in use. Of the allocated memory 142.39 GiB is
+      allocated by PyTorch, and 15.65 MiB is reserved by PyTorch but unallocated.
+      If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T02:01:00.919643+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 16104228388864
+  results:
+    status: ok
+    step_time_ms_median: 170.70877075195312
+    step_time_ms_p25: 168.6352767944336
+    step_time_ms_p75: 173.36443328857422
+    samples_per_sec_per_gpu_median: 23.431719309912697
+    samples_per_sec_per_gpu_p25: 23.07278329310943
+    samples_per_sec_per_gpu_p75: 23.719829421432387
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 9.088603136
+    peak_memory_utilization: 0.045925783518971225
+    mfu: 0.03773497593105888
+    achieved_tflops_per_gpu: 94.3374398276472
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T02:00:22.367478+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations: []
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 16104228388864
+  results:
+    status: ok
+    step_time_ms_median: 156.17062377929688
+    step_time_ms_p25: 148.1137924194336
+    step_time_ms_p75: 168.02142333984375
+    samples_per_sec_per_gpu_median: 25.613011609999532
+    samples_per_sec_per_gpu_p25: 23.806488009029145
+    samples_per_sec_per_gpu_p75: 27.006262783905136
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 21.715140096
+    peak_memory_utilization: 0.10972916390009133
+    mfu: 0.04124777886940577
+    achieved_tflops_per_gpu: 103.11944717351442
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T02:04:40.391028+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 65247495847936
+  results:
+    status: ok
+    step_time_ms_median: 263.8474426269531
+    step_time_ms_p25: 263.70208740234375
+    step_time_ms_p75: 263.9879608154297
+    samples_per_sec_per_gpu_median: 15.160275802466252
+    samples_per_sec_per_gpu_p25: 15.1522061371452
+    samples_per_sec_per_gpu_p75: 15.168632297919567
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 32.514839552
+    peak_memory_utilization: 0.16430131892373953
+    mfu: 0.09891700324749814
+    achieved_tflops_per_gpu: 247.29250811874533
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T02:03:19.942507+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations: []
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 65247495847936
+  results:
+    status: ok
+    step_time_ms_median: 355.1753845214844
+    step_time_ms_p25: 355.04437255859375
+    step_time_ms_p75: 355.3428497314453
+    samples_per_sec_per_gpu_median: 11.26204172451045
+    samples_per_sec_per_gpu_p25: 11.25673417383535
+    samples_per_sec_per_gpu_p75: 11.266197436603143
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 83.943931392
+    peak_memory_utilization: 0.42417858532846875
+    mfu: 0.07348200206592775
+    achieved_tflops_per_gpu: 183.70500516481937
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T01:55:17.326003+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 1002610622464
+  results:
+    status: ok
+    step_time_ms_median: 163.61724853515625
+    step_time_ms_p25: 161.27865600585938
+    step_time_ms_p75: 166.24211883544922
+    samples_per_sec_per_gpu_median: 24.447300243779154
+    samples_per_sec_per_gpu_p25: 24.06129101349643
+    samples_per_sec_per_gpu_p75: 24.80179398230276
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 1.969503744
+    peak_memory_utilization: 0.009952134693666013
+    mfu: 0.002451112291497972
+    achieved_tflops_per_gpu: 6.12778072874493
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo
+  timestamp: 2026-06-09T01:54:51.724747+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations: []
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape: null
+    num_patches: null
+  backbone:
+    class: SongUNet
+    params: 81330320
+    flops_per_step: 1002610622464
+  results:
+    status: ok
+    step_time_ms_median: 114.993408203125
+    step_time_ms_p25: 107.95105361938477
+    step_time_ms_p75: 146.6457290649414
+    samples_per_sec_per_gpu_median: 34.784602548125
+    samples_per_sec_per_gpu_p25: 27.276621184300687
+    samples_per_sec_per_gpu_p75: 37.05383010066073
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 2.595626496
+    peak_memory_utilization: 0.013116006801884173
+    mfu: 0.0034875412012938447
+    achieved_tflops_per_gpu: 8.718853003234612
+  loc:
+    marked_lines: 17
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:13:03.911116+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 1024
+    - 1024
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape:
+    - 1024
+    - 1024
+    num_patches: 1
+    patches_per_sample_global: 1
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 274364017672192
+  results:
+    status: ok
+    step_time_ms_median: 1090.2655029296875
+    step_time_ms_p25: 1089.9879760742188
+    step_time_ms_p75: 1090.5669555664062
+    samples_per_sec_per_gpu_median: 3.6688311143033245
+    samples_per_sec_per_gpu_p25: 3.6678169823351428
+    samples_per_sec_per_gpu_p75: 3.6697652522798423
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 142.745125376
+    peak_memory_utilization: 0.7213079533024713
+    mfu: 0.10065952446810053
+    achieved_tflops_per_gpu: 251.64881117025132
+  loc:
+    marked_lines: 25
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T01:59:17.181080+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 128
+    - 128
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape:
+    - 128
+    - 128
+    num_patches: 1
+    patches_per_sample_global: 1
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 4014402961408
+  results:
+    status: ok
+    step_time_ms_median: 155.08364868164062
+    step_time_ms_p25: 150.518798828125
+    step_time_ms_p75: 155.81536102294922
+    samples_per_sec_per_gpu_median: 25.792532185074485
+    samples_per_sec_per_gpu_p25: 25.671409890138246
+    samples_per_sec_per_gpu_p75: 26.57475365962451
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 3.394264064
+    peak_memory_utilization: 0.0171516166210437
+    mfu: 0.010354161758597416
+    achieved_tflops_per_gpu: 25.88540439649354
+  loc:
+    marked_lines: 25
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:19:11.052161+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 2048
+    - 2048
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape:
+    - 1120
+    - 1120
+    num_patches: 1
+    patches_per_sample_global: 4
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 332381884383232
+  results:
+    status: ok
+    step_time_ms_median: 1308.89111328125
+    step_time_ms_p25: 1308.2410888671875
+    step_time_ms_p75: 1310.2389526367188
+    samples_per_sec_per_gpu_median: 0.7640054927816776
+    samples_per_sec_per_gpu_p25: 0.7632195623459406
+    samples_per_sec_per_gpu_p75: 0.7643851034107979
+    num_measured: 15
+    patches_per_sample_global: 4
+    samples_per_sec_per_gpu_median_per_patch: 3.0560219711267105
+    samples_per_sec_per_gpu_p25_per_patch: 3.0528782493837623
+    samples_per_sec_per_gpu_p75_per_patch: 3.0575404136431916
+    peak_memory_allocated_gb_max_rank: 176.317971968
+    peak_memory_utilization: 0.8909555065763634
+    mfu: 0.1015766341479655
+    achieved_tflops_per_gpu: 253.94158536991375
+  loc:
+    marked_lines: 25
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:02:13.411867+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 256
+    - 256
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape:
+    - 256
+    - 256
+    num_patches: 1
+    patches_per_sample_global: 1
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 16109060227072
+  results:
+    status: ok
+    step_time_ms_median: 159.3159637451172
+    step_time_ms_p25: 157.39339447021484
+    step_time_ms_p75: 164.44244384765625
+    samples_per_sec_per_gpu_median: 25.107339565791595
+    samples_per_sec_per_gpu_p25: 24.324620252577272
+    samples_per_sec_per_gpu_p75: 25.414027148114915
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 9.091832832
+    peak_memory_utilization: 0.04594210355375639
+    mfu: 0.04044556452068846
+    achieved_tflops_per_gpu: 101.11391130172115
+  loc:
+    marked_lines: 25
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:22:21.191505+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 4096
+    - 4096
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape:
+    - 1120
+    - 1120
+    num_patches: 1
+    patches_per_sample_global: 16
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 332381884383232
+  results:
+    status: ok
+    step_time_ms_median: 1306.4857177734375
+    step_time_ms_p25: 1306.3911743164062
+    step_time_ms_p75: 1306.71923828125
+    samples_per_sec_per_gpu_median: 0.1913530294277227
+    samples_per_sec_per_gpu_p25: 0.19131883320921275
+    samples_per_sec_per_gpu_p75: 0.191366877635879
+    num_measured: 15
+    patches_per_sample_global: 16
+    samples_per_sec_per_gpu_median_per_patch: 3.061648470843563
+    samples_per_sec_per_gpu_p25_per_patch: 3.061101331347404
+    samples_per_sec_per_gpu_p75_per_patch: 3.061870042174064
+    peak_memory_allocated_gb_max_rank: 178.129911296
+    peak_memory_utilization: 0.9001114496934772
+    mfu: 0.10176364880580242
+    achieved_tflops_per_gpu: 254.40912201450607
+  loc:
+    marked_lines: 25
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:06:01.686691+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 512
+    - 512
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape:
+    - 512
+    - 512
+    num_patches: 1
+    patches_per_sample_global: 1
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 65266823200768
+  results:
+    status: ok
+    step_time_ms_median: 265.2825622558594
+    step_time_ms_p25: 263.68202209472656
+    step_time_ms_p75: 270.22950744628906
+    samples_per_sec_per_gpu_median: 15.078262083966473
+    samples_per_sec_per_gpu_p25: 14.802232508953677
+    samples_per_sec_per_gpu_p75: 15.16978657939379
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 32.527506432
+    peak_memory_utilization: 0.16436532616225968
+    mfu: 0.09841102656090835
+    achieved_tflops_per_gpu: 246.02756640227088
+  loc:
+    marked_lines: 25
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T01:56:29.000838+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 64
+    - 64
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape:
+    - 64
+    - 64
+    num_patches: 1
+    patches_per_sample_global: 1
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 1002912612352
+  results:
+    status: ok
+    step_time_ms_median: 153.35586547851562
+    step_time_ms_p25: 152.06915283203125
+    step_time_ms_p75: 157.98777770996094
+    samples_per_sec_per_gpu_median: 26.083123638726292
+    samples_per_sec_per_gpu_p25: 25.318414234190502
+    samples_per_sec_per_gpu_p75: 26.30382247488562
+    num_measured: 15
+    peak_memory_allocated_gb_max_rank: 1.969680896
+    peak_memory_utilization: 0.009953029863614597
+    mfu: 0.002615909366681519
+    achieved_tflops_per_gpu: 6.539773416703797
+  loc:
+    marked_lines: 25
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+- function: train_physicsnemo_multidiffusion
+  timestamp: 2026-06-09T02:25:33.252638+00:00Z
+  device:
+    name: GB200
+    raw_name: NVIDIA GB200
+    bf16_peak_tflops: 2500.0
+    fp16_peak_tflops: 2500.0
+    total_memory_gb: 197.897617408
+    capability:
+    - 10
+    - 0
+    apex_gn_available: true
+  world_size: 4
+  config:
+    domain:
+    - 8192
+    - 8192
+    batch_size_per_rank: 4
+    channels: 16
+    optimizations:
+    - amp_bf16
+    - apex_gn
+    - compile
+    num_steps_measured: 15
+    num_steps_warmup: 6
+    solver: null
+    solver_steps: null
+    patch_shape:
+    - 1120
+    - 1120
+    num_patches: 1
+    patches_per_sample_global: 64
+    positional_embedding: sinusoidal
+    positional_embedding_channels: 4
+  backbone:
+    class: SongUNet
+    params: 81334928
+    flops_per_step: 332381884383232
+  results:
+    status: ok
+    step_time_ms_median: 1309.7384033203125
+    step_time_ms_p25: 1309.4976806640625
+    step_time_ms_p75: 1310.3275146484375
+    samples_per_sec_per_gpu_median: 0.04771945286292019
+    samples_per_sec_per_gpu_p25: 0.0476979986311047
+    samples_per_sec_per_gpu_p75: 0.04772822504603863
+    num_measured: 15
+    patches_per_sample_global: 64
+    samples_per_sec_per_gpu_median_per_patch: 3.054044983226892
+    samples_per_sec_per_gpu_p25_per_patch: 3.052671912390701
+    samples_per_sec_per_gpu_p75_per_patch: 3.0546064029464723
+    peak_memory_allocated_gb_max_rank: 185.377668608
+    peak_memory_utilization: 0.9367352221619325
+    mfu: 0.10151092265161106
+    achieved_tflops_per_gpu: 253.77730662902763
+  loc:
+    marked_lines: 25
+  git:
+    commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+    branch: diffusion-performance-profile
+n_runs: 80

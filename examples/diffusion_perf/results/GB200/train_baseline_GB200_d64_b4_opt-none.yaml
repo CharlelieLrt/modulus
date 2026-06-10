@@ -1,0 +1,48 @@
+function: train_baseline
+timestamp: 2026-06-09T01:54:24.800355+00:00Z
+device:
+  name: GB200
+  raw_name: NVIDIA GB200
+  bf16_peak_tflops: 2500.0
+  fp16_peak_tflops: 2500.0
+  total_memory_gb: 197.897617408
+  capability:
+  - 10
+  - 0
+  apex_gn_available: true
+world_size: 4
+config:
+  domain:
+  - 64
+  - 64
+  batch_size_per_rank: 4
+  channels: 16
+  optimizations: []
+  num_steps_measured: 15
+  num_steps_warmup: 6
+  solver: null
+  solver_steps: null
+  patch_shape: null
+  num_patches: null
+backbone:
+  class: SongUNet
+  params: 81330320
+  flops_per_step: 1002610622464
+results:
+  status: ok
+  step_time_ms_median: 120.4862060546875
+  step_time_ms_p25: 106.82097625732422
+  step_time_ms_p75: 150.6344757080078
+  samples_per_sec_per_gpu_median: 33.1988211014333
+  samples_per_sec_per_gpu_p25: 26.554346083121512
+  samples_per_sec_per_gpu_p75: 37.4458289012851
+  num_measured: 15
+  peak_memory_allocated_gb_max_rank: 2.595625984
+  peak_memory_utilization: 0.013116004214687792
+  mfu: 0.003328549068957902
+  achieved_tflops_per_gpu: 8.321372672394755
+loc:
+  marked_lines: 29
+git:
+  commit: 0d9c953ff6e8a9afeb04b722f06fe42a0c50774c
+  branch: diffusion-performance-profile

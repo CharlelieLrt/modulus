@@ -1,0 +1,61 @@
+max_domain: 1120
+max_domain_util: 0.8877953341589732
+first_oom_domain: 1136
+mem_frac_cap: 0.9
+batch_size: 4
+patch_align: 16
+opts:
+- amp_bf16
+- apex_gn
+- compile
+device: GB200
+timestamp: 2026-06-09T01:03:20.931807+00:00Z
+probe_log:
+- domain: 64
+  phase: doubling
+  status: ok
+  util: 0.009952134693666013
+- domain: 128
+  phase: doubling
+  status: ok
+  util: 0.017147218387192277
+- domain: 256
+  phase: doubling
+  status: ok
+  util: 0.045925783518971225
+- domain: 512
+  phase: doubling
+  status: ok
+  util: 0.16430131892373953
+- domain: 1024
+  phase: doubling
+  status: ok
+  util: 0.7204700483586329
+- domain: 2048
+  phase: doubling
+  status: oom
+  util: 0.0
+- domain: 1536
+  phase: bisect
+  status: oom
+  util: 0.0
+- domain: 1280
+  phase: bisect
+  status: oom
+  util: 0.0
+- domain: 1152
+  phase: bisect
+  status: over_cap(95%)
+  util: 0.9490487246280895
+- domain: 1088
+  phase: bisect
+  status: ok
+  util: 0.829342045637813
+- domain: 1120
+  phase: bisect
+  status: ok
+  util: 0.8877953341589732
+- domain: 1136
+  phase: bisect
+  status: over_cap(92%)
+  util: 0.918066170879809

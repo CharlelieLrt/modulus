@@ -118,9 +118,11 @@ CHANNELS: int = 16
 BATCH_SIZE_TRAIN: int = 4
 BATCH_SIZE_INFER: int = 1
 # Number of GPUs per node used for DDP training in the orchestrators
-# (calibrate.py, run_sweep.py). One full node per training run. Inference
-# remains single-GPU regardless.
-NPROC_PER_NODE_TRAIN: int = 8
+# (calibrate.py, run_sweep.py): one full node per training run, so this is
+# the node's GPU count (4 on GB200 / L40s, 8 on H100-SXM). Inference is
+# single-GPU regardless. Cross-GPU throughput comparisons should note the
+# rank count, since it shifts per-rank DDP overhead.
+NPROC_PER_NODE_TRAIN: int = 4
 SOLVER_STEPS: int = 18
 WARMUP_STEPS: int = 6
 MEASURE_STEPS: int = 15
@@ -145,6 +147,7 @@ GPU_PEAK_TFLOPS_BF16: dict[str, float] = {
     "H100-PCIe-80GB": 756.0,
     "L40s": 362.0,
     "B100": 1800.0,
+    "GB200": 2500.0,
     "A100-SXM-80GB": 312.0,
     "A100-SXM-40GB": 312.0,
 }
@@ -154,6 +157,7 @@ GPU_TOTAL_MEMORY_GB: dict[str, float] = {
     "H100-PCIe-80GB": 80.0,
     "L40s": 48.0,
     "B100": 192.0,
+    "GB200": 192.0,
     "A100-SXM-80GB": 80.0,
     "A100-SXM-40GB": 40.0,
 }
@@ -164,6 +168,7 @@ _DEVICE_NAME_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"NVIDIA H100", re.I), "H100-SXM-80GB"),
     (re.compile(r"NVIDIA L40S?", re.I), "L40s"),
     (re.compile(r"NVIDIA B100", re.I), "B100"),
+    (re.compile(r"NVIDIA GB200", re.I), "GB200"),
     (re.compile(r"NVIDIA A100[^\d]*80\s*GB", re.I), "A100-SXM-80GB"),
     (re.compile(r"NVIDIA A100[^\d]*40\s*GB", re.I), "A100-SXM-40GB"),
     (re.compile(r"NVIDIA A100", re.I), "A100-SXM-40GB"),
