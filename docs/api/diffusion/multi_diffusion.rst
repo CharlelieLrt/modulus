@@ -44,7 +44,7 @@ In both cases this trades GPU parallelism (and therefore throughput) for the
 ability to run on domains that would otherwise exhaust memory.
 
 .. _md_schematic_training:
-.. figure:: /img/diffusion/schematic_training.png
+.. figure:: ../../img/diffusion/schematic_training.png
    :alt: Patches extracted from a global tensor for training
    :width: 100%
 
@@ -53,7 +53,7 @@ ability to run on domains that would otherwise exhaust memory.
    elements.  No fusion is performed.
 
 .. _md_schematic_inference:
-.. figure:: /img/diffusion/schematic_inference.png
+.. figure:: ../../img/diffusion/schematic_inference.png
    :alt: Grid patching and fusing at inference, with overlap and boundary pixels
    :width: 100%
 
@@ -93,7 +93,7 @@ whose grids run into billions of points, far beyond what a single GPU could
 hold.  The benchmarks below report throughput and peak GPU memory as a function
 of the global domain size (pixels per edge).
 
-.. figure:: /img/diffusion/training_throughput.png
+.. figure:: ../../img/diffusion/training_throughput.png
    :alt: Training throughput versus global domain size on GB200
    :width: 100%
 
@@ -105,7 +105,7 @@ of the global domain size (pixels per edge).
    running: it lowers throughput but scales training to domains with up to 64x
    more pixels than the baseline can fit.
 
-.. figure:: /img/diffusion/training_peak_memory.png
+.. figure:: ../../img/diffusion/training_peak_memory.png
    :alt: Training peak memory versus global domain size on GB200
    :width: 100%
 
@@ -114,7 +114,7 @@ of the global domain size (pixels per edge).
    keeps peak memory bounded (set by the patch and chunk sizes), so training
    continues well past the baseline's limit.
 
-.. figure:: /img/diffusion/inference_dps_throughput.png
+.. figure:: ../../img/diffusion/inference_dps_throughput.png
    :alt: Guided-sampling (DPS) throughput versus global domain size on GB200
    :width: 100%
 
@@ -124,7 +124,7 @@ of the global domain size (pixels per edge).
    scales guided sampling to domains 64x larger in pixels, the regime that makes
    DPS-guided generation on large scientific domains practical.
 
-.. figure:: /img/diffusion/inference_dps_peak_memory.png
+.. figure:: ../../img/diffusion/inference_dps_peak_memory.png
    :alt: Guided-sampling (DPS) peak memory versus global domain size on GB200
    :width: 100%
 
