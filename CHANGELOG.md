@@ -86,6 +86,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (matching the training/validation loop), and reuses the trainer's
   dataloader / collate / metric tooling (refactored into `datasets.py`
   and `utils.py`).
+- Adds a kinetic Monte Carlo (KMC) surrogate example
+  (`examples/kinetic_monte_carlo`): a probabilistic autoregressive surrogate
+  (`ParticleGeoTransolver`) that emulates a KMC event stream, predicting the
+  next event (the new particle's features and inter-event delay) from the
+  current particle population, an optional background mesh, and the simulation
+  time. Independent rollouts form an ensemble for uncertainty quantification.
 
 ### Changed
 
