@@ -150,10 +150,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DataConsistencyDPSGuidance` (and their `physicsnemo.diffusion.multi_diffusion`
   counterparts) must now return an **elementwise** loss (same shape as its
   inputs) instead of a per-batch-element reduced scalar of shape `(B,)`.
-  Migration: drop the reduction from your `norm` — e.g. return
+  Migration: drop the reduction from your `norm`, e.g. return
   `(y_pred - y_true).abs().pow(2)` rather than
-  `(y_pred - y_true).pow(2).reshape(B, -1).sum(dim=1)`. The integer `norm`
-  selector (e.g. `norm=2`) is unaffected.
+  `(y_pred - y_true).pow(2).reshape(B, -1).sum(dim=1)`. For
+  `DataConsistencyDPSGuidance` (and its `multi_diffusion` counterpart) the
+  `norm` callback now also receives the **unmasked** `(x_0, y)` and the mask is
+  applied to its output (`mask * norm(x_0, y)`), where it previously received
+  the pre-masked `(mask * x_0, mask * y)`; the two agree for the built-in `Lp`
+  norms, but a custom `norm` that relies on unobserved entries being zeroed
+  before the call may differ. The integer `norm` selector (e.g. `norm=2`) is
+  unaffected.
 
 ### Deprecated
 
