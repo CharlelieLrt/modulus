@@ -551,25 +551,25 @@ class MaskedContextProjector(ContextProjector):
         else:
             projected_x = projection
             feature_projection = projection
-        slice_projections = self.in_project_slice(projected_x)  # (B, H, N, S)
+        slice_projections = self.in_project_slice(projected_x)  # (B, N, H, S)
 
         clamped_temp = torch.clamp(self.temperature, min=0.5, max=5).to(
             slice_projections.dtype
         )
         slice_weights = F.softmax(
             slice_projections / clamped_temp, dim=-1
-        )  # (B, H, N, S)
+        )  # (B, N, H, S)
 
         # Zero out absent tokens (broadcast over heads and slices).
         if kv_mask is not None:
-            slice_weights = slice_weights * kv_mask[:, None, :, None].to(
+            slice_weights = slice_weights * kv_mask[:, :, None, None].to(
                 slice_weights.dtype
             )
 
-        slice_norm = slice_weights.sum(2)  # (B, H, S)
-        normed_weights = slice_weights / (slice_norm[:, :, None, :] + 1e-2)
-        slice_tokens = torch.matmul(
-            normed_weights.transpose(2, 3), feature_projection
+        slice_norm = slice_weights.sum(1)  # (B, H, S)
+        normed_weights = slice_weights / (slice_norm[:, None, :, :] + 1e-2)
+        slice_tokens = torch.einsum(
+            "bnhs,bnhd->bhsd", normed_weights, feature_projection
         )  # (B, H, S, D)
 
         if self.output_dropout is not None:
