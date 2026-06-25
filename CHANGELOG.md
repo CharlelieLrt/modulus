@@ -94,6 +94,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (matching the training/validation loop), and reuses the trainer's
   dataloader / collate / metric tooling (refactored into `datasets.py`
   and `utils.py`).
+- DPS guidance now supports **non-uniform guidance strength**: the `std_y` and
+  `gamma` arguments of `physicsnemo.diffusion.guidance.ModelConsistencyDPSGuidance`
+  / `DataConsistencyDPSGuidance` and their
+  `physicsnemo.diffusion.multi_diffusion` counterparts accept tensors as well as
+  floats. A tensor assigns a different measurement-noise level / SDA scaling to
+  each observation component, e.g. per-channel (`(1, C, 1, 1)`) or pointwise
+  (full observation shape). Passing floats keeps the previous uniform
+  behavior unchanged.
 
 ### Changed
 
@@ -137,6 +145,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   use `torch.no_grad()`, not `torch.inference_mode()`). Also expands CI test
   coverage and adds an API documentation page for
   `physicsnemo.diffusion.multi_diffusion`.
+- &#9888;&#65039; **BC-impact (DPS guidance):** a custom `norm` callback passed to
+  `physicsnemo.diffusion.guidance.ModelConsistencyDPSGuidance` /
+  `DataConsistencyDPSGuidance` (and their `physicsnemo.diffusion.multi_diffusion`
+  counterparts) must now return an **elementwise** loss (same shape as its
+  inputs) instead of a per-batch-element reduced scalar of shape `(B,)`.
+  Migration: drop the reduction from your `norm` — e.g. return
+  `(y_pred - y_true).abs().pow(2)` rather than
+  `(y_pred - y_true).pow(2).reshape(B, -1).sum(dim=1)`. The integer `norm`
+  selector (e.g. `norm=2`) is unaffected.
 
 ### Deprecated
 
