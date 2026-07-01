@@ -825,9 +825,9 @@ class Mesh:
                     f"Required: n_manifold_dims = n_spatial_dims - 1 (codimension-1).\n"
                     f"Current codimension: {self.codimension}"
                 )
-            relative_vectors = (
-                self.points[self.cells[:, 1:]] - self.points[self.cells[:, [0]]]
-            )
+            rh_index = self.cells[:, 1:]
+            lh_index = self.cells[:, 0].unsqueeze(-1)
+            relative_vectors = self.points[rh_index] - self.points[lh_index]
             cached = compute_cell_normals(relative_vectors)
             self._cache["cell", "normals"] = cached
 
@@ -1582,6 +1582,74 @@ class Mesh:
             project_onto_nearest_cell=project_onto_nearest_cell,
             tolerance=tolerance,
             bvh=bvh,
+        )
+
+    def with_data(
+        self,
+        *,
+        point_data: TensorDict | dict[str, torch.Tensor] | None = None,
+        cell_data: TensorDict | dict[str, torch.Tensor] | None = None,
+        global_data: TensorDict | dict[str, torch.Tensor] | None = None,
+    ) -> "Mesh":
+        r"""Return a new mesh with selected field-data containers replaced.
+
+        Geometry and geometric/topological caches are preserved because
+        ``points`` and ``cells`` do not change. Any data argument left as
+        ``None`` is retained; pass an empty dictionary to clear that data
+        association. The source mesh is not modified.
+
+        Parameters
+        ----------
+        point_data : TensorDict or dict, optional
+            Replacement per-point data. ``None`` retains the current data.
+        cell_data : TensorDict or dict, optional
+            Replacement per-cell data. ``None`` retains the current data.
+        global_data : TensorDict or dict, optional
+            Replacement mesh-level data. ``None`` retains the current data.
+
+        Returns
+        -------
+        Mesh
+            New mesh sharing the immutable geometry tensors and cached
+            geometry values, with independent TensorDict containers for data
+            and cache entries.
+
+        Notes
+        -----
+        The TensorDict containers are shallow-copied. Their tensor leaves are
+        shared, matching PyTorch's usual view-like replacement semantics and
+        avoiding an unexpected copy of potentially large fields. Clone a
+        field explicitly before passing it when independent tensor storage is
+        required.
+
+        Examples
+        --------
+        >>> updated = mesh.with_data(  # doctest: +SKIP
+        ...     point_data={"pressure": predicted_pressure},
+        ... )
+        >>> cleared = updated.with_data(cell_data={})  # doctest: +SKIP
+        """
+
+        def _replacement(
+            value: TensorDict | dict[str, torch.Tensor] | None,
+            current: TensorDict,
+        ) -> TensorDict | dict[str, torch.Tensor]:
+            if value is None:
+                return current.copy()
+            if isinstance(value, TensorDict):
+                return value.copy()
+            return value
+
+        return Mesh(
+            points=self.points,
+            cells=self.cells,
+            point_data=_replacement(point_data, self.point_data),
+            cell_data=_replacement(cell_data, self.cell_data),
+            global_data=_replacement(global_data, self.global_data),
+            # Geometry is unchanged. Keep cached tensors, but give the result
+            # an independent cache container so later lazy population does not
+            # mutate the source mesh's cache structure.
+            _cache=self._cache.copy(),
         )
 
     def cell_data_to_point_data(self, overwrite_keys: bool = False) -> "Mesh":

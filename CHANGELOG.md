@@ -10,7 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Adds the experimental Strata weather-emulation models —
+  `physicsnemo.experimental.models.strata.Strata` and `StrataTransformer3D` — plus
+  the continuous / stereographic RoPE helpers `build_rope_cos_sin_1d_continuous`,
+  `build_axial_rope_cos_sin_2d_continuous`, `stereographic_projection`, and
+  `spherical_centroid` in `physicsnemo.experimental.nn`.
 - Adds Point-Transformer local vector-attention blocks to `physicsnemo.nn`.
+- Adds an `is_causal` option to `TimmSelfAttention` in `physicsnemo.nn` for
+  causal self-attention.
 - FSDP2 checkpoint support: full save/load round-trip for
   ``torch.distributed.fsdp`` v2 models, including DTensor edge cases,
   cross-mesh reloads, and optimizer state loading.
@@ -94,6 +101,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (matching the training/validation loop), and reuses the trainer's
   dataloader / collate / metric tooling (refactored into `datasets.py`
   and `utils.py`).
+- Adds a mesh-native signed distance field to `physicsnemo.mesh.spatial`
+  (`physicsnemo.mesh.spatial.signed_distance_field_mesh`), built on the `BVH`
+  and `ClusterTree` spatial structures it lives alongside.
+  The nearest-triangle query runs as a single-kernel per-thread BVH traversal
+  (Triton on CUDA, a bounded-stack PyTorch DFS as the CPU reference; per-query
+  indices are int64 so query counts past tens of millions do not overflow). The
+  sign is computed either from the angle-weighted pseudo-normal of the closest
+  mesh feature — face, edge, or vertex, which stays correct at sharp/non-convex
+  edges where a single face normal flips the sign — or, with
+  `use_sign_winding_number=True`, from
+  a `ClusterTree` dual-tree Barnes-Hut generalized-winding-number summation that
+  runs identically on CPU and GPU (robust on non-watertight meshes). The private
+  datapipes implementation (`physicsnemo.datapipes.transforms._sdf_torch` /
+  `_sdf_triton`, including its bespoke Triton winding kernel) is superseded and
+  removed; the public datapipes SDF transform delegates here.
 - DPS guidance now supports **non-uniform guidance strength**: the `std_y` and
   `gamma` arguments of `physicsnemo.diffusion.guidance.ModelConsistencyDPSGuidance`
   / `DataConsistencyDPSGuidance` and their
@@ -176,6 +198,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or any multi-column grid, which also broke `repair.fix_orientation`). Parent-cell
   vertices are now sorted into a global order before tessellation (the
   Freudenthal-Kuhn subdivision), a no-op for already-sorted inputs.
+- `physicsnemo.mesh.generate.marching_cubes` now accepts `bfloat16` fields by
+  converting them to `float32` before crossing the NumPy boundary.
 - `physicsnemo.mesh.projections.extrude` now returns consistently oriented cells
   for full-dimensional (codimension-0) output.
 - `physicsnemo.mesh.remesh` now preserves the input mesh's device and floating
@@ -200,6 +224,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   detached before `.numpy()`); and integer/bool data crashed (`safe_eps` on an
   integer dtype) or truncated via integer division during facet/scatter
   aggregation (now computed in a floating dtype).
+- `physicsnemo.mesh` Morton-code quantization now handles empty inputs, tiny
+  extents, half-precision coordinates, and one-dimensional endpoints correctly.
 - `physicsnemo.mesh`: fixed Loop subdivision pulling open boundaries inward (now
   applies the boundary/crease mask); subdivision zero-filling integer/bool
   `point_data` at new edge vertices (now inherits a parent label);
