@@ -177,8 +177,10 @@ def _gt_trajectory(
             }
             initial_time = float(cast(Tensor, sample["time"])[0].item())
             continue
-        # The most recently created particle lives at slot index (ts_id - 1).
-        j = ts_id - 1
+        # The most recently created particle is the newest occupied slot.
+        # Derived from the live particle count so a non-empty initial state
+        # (ts=0 already populated) is handled correctly.
+        j = int(cast(Tensor, sample["particle_state"])[0].sum().item()) - 1
         times_gt.append(float(cast(Tensor, sample["time"])[0].item()))
         positions_gt.append(coords[0, j].numpy())
         scalar_features_gt.append(scalars[0, j].numpy())
