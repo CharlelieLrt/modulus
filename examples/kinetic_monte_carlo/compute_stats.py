@@ -91,7 +91,13 @@ class Welford:
         if world_size < 2:
             return
 
-        triples = torch.tensor([self.count, self.mean, self.M2], dtype=torch.float64)
+        # NCCL collectives require tensors on the distributed device (it rejects
+        # CPU tensors), so build them on that device for multi-GPU runs. The
+        # tolist() calls below move the gathered values back to the host.
+        device = DistributedManager().device
+        triples = torch.tensor(
+            [self.count, self.mean, self.M2], dtype=torch.float64, device=device
+        )
         gathered = [torch.zeros_like(triples) for _ in range(world_size)]
         torch.distributed.all_gather(gathered, triples)
 
