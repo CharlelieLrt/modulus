@@ -39,7 +39,9 @@ rollout:
   # same initial state and mesh but diverge through independent GMM draws.
   num_ensemble: 8
   simulations:
-    - geometry: "2nm"
+    # "geometry" is a placeholder: replace it with one of your own
+    # geometry-group directory names under the data root.
+    - geometry: "my_geometry"
       sim_id: "all"
 
 # Output
