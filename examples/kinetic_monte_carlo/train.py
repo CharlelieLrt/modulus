@@ -105,6 +105,7 @@ def main(cfg: DictConfig) -> None:
     mesh_feature_names = list(cfg.dataset.mesh_feature_names)
     num_particle_features = 3 + len(particle_feature_names) + 1
     num_mesh_features = 3 + len(mesh_feature_names)
+    train_test_split = bool(cfg.dataset.train_test_split)
 
     # Pre-fetch stats up front -- the model needs the four time/delay
     # normalization scalars at construction time so the time embedding buffers
@@ -117,6 +118,7 @@ def main(cfg: DictConfig) -> None:
         n_steps=cfg.dataset.n_steps,
         num_particles_max=cfg.model.num_particles_max,
         stats_file=to_absolute_path(cfg.dataset.stats_file),
+        phase="train" if train_test_split else "all",
         shuffle=False,
         num_workers=0,
         process_rank=0,
@@ -203,6 +205,7 @@ def main(cfg: DictConfig) -> None:
         n_steps=cfg.dataset.n_steps,
         num_particles_max=cfg.model.num_particles_max,
         stats_file=to_absolute_path(cfg.dataset.stats_file),
+        phase="train" if train_test_split else "all",
         shuffle=True,
         num_workers=cfg.training.num_workers,
         process_rank=dist.rank,
@@ -213,6 +216,30 @@ def main(cfg: DictConfig) -> None:
     num_training_samples = len(train_loader.dataset)
     rank_zero.info(f"Training dataset: {num_training_samples} samples")
     train_iter = iter(train_loader)
+
+    # Optional held-out test split (config: dataset.train_test_split). When
+    # enabled, a test loss is evaluated on it every logging step and reported
+    # alongside the train loss.
+    test_iter = None
+    if train_test_split:
+        test_loader = ParticlesDataPipe(
+            data_dir=to_absolute_path(cfg.dataset.data_dir),
+            batch_size_per_device=cfg.training.batch_size_per_gpu,
+            particle_feature_names=particle_feature_names,
+            mesh_feature_names=mesh_feature_names,
+            n_steps=cfg.dataset.n_steps,
+            num_particles_max=cfg.model.num_particles_max,
+            stats_file=to_absolute_path(cfg.dataset.stats_file),
+            phase="test",
+            shuffle=True,
+            num_workers=cfg.training.num_workers,
+            process_rank=dist.rank,
+            world_size=dist.world_size,
+            start_idx=0,
+            seed=cfg.seed,
+        )
+        rank_zero.info(f"Test dataset: {len(test_loader.dataset)} samples")
+        test_iter = iter(test_loader)
 
     feature_stats_str = " | ".join(
         f"{name}: ({m:.3g}, {s:.3g})"
@@ -274,14 +301,21 @@ def main(cfg: DictConfig) -> None:
     loss_pf_ema: float | None = None
     loss_reg_ema: float | None = None
     grad_norm_ema: float | None = None
+    loss_test_ema: float | None = None
     rank_zero.info(
         f"Loss EMA: alpha={ema_alpha:.3e} "
         f"(tau ≈ {1.0 / ema_alpha:.0f} optimizer steps ≈ 0.5 epoch)"
     )
 
-    while current_samples_trained < cfg.training.max_training_samples:
-        model.train()
-        sample, _meta = next(train_iter)
+    underlying = model.module if dist.world_size > 1 else model
+
+    def compute_loss(sample: TensorDict) -> tuple[Tensor, dict[str, float]]:
+        """Normalize a batch, run the model, and return ``(loss, per-term dict)``.
+
+        Shared by the train step and the optional per-step test-loss
+        evaluation so both follow identical normalization, forward, and loss
+        patterns.
+        """
         sample = sample.to(dist.device, non_blocking=True)
 
         # Normalize every quantity by name (no positional column indexing). The
@@ -333,14 +367,11 @@ def main(cfg: DictConfig) -> None:
             mesh_features,
             t_normalized[:, 0],
         )
-        underlying = model.module if dist.world_size > 1 else model
         delay_params = underlying.predict_delay(h_g)
         particle_features_params = underlying.predict_particle_features(
             h_g, delay_target
         )
-
-        optimizer.zero_grad(set_to_none=True)
-        loss, parts = particle_gmm_loss(
+        return particle_gmm_loss(
             delay_target,
             particle_features_target,
             delay_params,
@@ -348,6 +379,12 @@ def main(cfg: DictConfig) -> None:
             lambda_particle_features=float(cfg.loss.lambda_particle_features),
             lambda_log_sigma=float(cfg.loss.lambda_log_sigma),
         )
+
+    while current_samples_trained < cfg.training.max_training_samples:
+        model.train()
+        train_sample, _meta = next(train_iter)
+        optimizer.zero_grad(set_to_none=True)
+        loss, parts = compute_loss(train_sample)
         loss.backward()
         # Global-norm gradient clipping (cfg.loss.grad_clip_norm = null
         # disables). clip_grad_norm_ returns the *pre-clip* total norm so we
@@ -392,6 +429,19 @@ def main(cfg: DictConfig) -> None:
             else ema_alpha * parts["grad_norm"] + (1.0 - ema_alpha) * grad_norm_ema
         )
 
+        # Held-out test loss: same forward/loss as training, no gradients.
+        if test_iter is not None:
+            model.eval()
+            with torch.no_grad():
+                test_sample, _ = next(test_iter)
+                test_loss, _ = compute_loss(test_sample)
+            test_val = test_loss.item()
+            loss_test_ema = (
+                test_val
+                if loss_test_ema is None
+                else ema_alpha * test_val + (1.0 - ema_alpha) * loss_test_ema
+            )
+
         current_samples_trained += total_batch_size
         samples_since_scheduler_update += total_batch_size
         samples_since_logging += total_batch_size
@@ -410,6 +460,11 @@ def main(cfg: DictConfig) -> None:
             loss_pf_sum = reduce_loss(loss_pf_ema, dst_rank=0)
             loss_reg_sum = reduce_loss(loss_reg_ema, dst_rank=0)
             grad_norm_sum = reduce_loss(grad_norm_ema, dst_rank=0)
+            test_sum = (
+                reduce_loss(loss_test_ema, dst_rank=0)
+                if loss_test_ema is not None
+                else None
+            )
             if dist.rank == 0:
                 reduced = loss_sum / dist.world_size
                 reduced_delay = loss_delay_sum / dist.world_size
@@ -418,6 +473,11 @@ def main(cfg: DictConfig) -> None:
                 reduced_grad_norm = grad_norm_sum / dist.world_size
                 elapsed = time.time() - tick_start
                 steps = samples_since_logging / total_batch_size
+                test_str = (
+                    f" | test_loss: {test_sum / dist.world_size:.3e}"
+                    if test_sum is not None
+                    else ""
+                )
                 rank_zero.info(
                     f"samples: {current_samples_trained:>10d} | "
                     f"loss: {reduced:.3e} "
@@ -426,7 +486,7 @@ def main(cfg: DictConfig) -> None:
                     f"grad_norm (pre-clip, EMA): {reduced_grad_norm:.3e} | "
                     f"lr: {optimizer.param_groups[0]['lr']:.2e} | "
                     f"throughput: {samples_since_logging / elapsed / 1000:.3f} ksamp/s | "
-                    f"step: {elapsed / steps:.3f}s"
+                    f"step: {elapsed / steps:.3f}s{test_str}"
                 )
             tick_start = time.time()
             samples_since_logging = 0

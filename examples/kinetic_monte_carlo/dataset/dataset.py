@@ -20,6 +20,7 @@ import json
 import re
 import warnings
 from pathlib import Path
+from typing import Literal
 
 import torch
 from tensordict import TensorDict
@@ -101,6 +102,10 @@ class ParticlesDataset(Dataset):
     stats_file : path or None, optional
         Path to a stats.json with per-variable z-score statistics.
         Default ``None`` (``get_stats()`` then raises).
+    phase : {"train", "test", "all"}, optional
+        Which split to read. ``"all"`` (default) reads ``samples`` and
+        ``maps`` directly under ``data_dir``; ``"train"`` / ``"test"`` read
+        them from a ``train`` / ``test`` subdirectory of ``data_dir``.
 
     Examples
     --------
@@ -125,6 +130,7 @@ class ParticlesDataset(Dataset):
         num_particles_max: int,
         n_steps: int = 2,
         stats_file: Path | str | None = None,
+        phase: Literal["train", "test", "all"] = "all",
     ) -> None:
         self._data_dir = Path(data_dir)
         self._n_steps = n_steps
@@ -143,11 +149,14 @@ class ParticlesDataset(Dataset):
         self._num_particle_features = 3 + len(self._particle_feature_names) + 1
         # (x, y, z) + named scalar fields.
         self._num_mesh_features = 3 + len(self._mesh_feature_names)
-        self._samples_root = self._data_dir / "samples"
-        self._maps_root = self._data_dir / "maps"
+        # "all" reads the data root directly; "train"/"test" read a same-named
+        # subdirectory of it (each still holding its own samples/ and maps/).
+        root = self._data_dir if phase == "all" else self._data_dir / phase
+        self._samples_root = root / "samples"
+        self._maps_root = root / "maps"
         if not self._samples_root.exists() or not self._maps_root.exists():
             raise FileNotFoundError(
-                f"Expected 'samples' and 'maps' subdirectories under {self._data_dir} "
+                f"Expected 'samples' and 'maps' subdirectories under {root} "
                 f"({self._samples_root}, {self._maps_root}). See the README for the "
                 "expected layout."
             )
@@ -418,6 +427,8 @@ class ParticlesDataPipe(DataLoader):
         Number of consecutive snapshots per sample window. Default ``2``.
     stats_file : path or None, optional
         Path to a stats.json. Default ``None``.
+    phase : {"train", "test", "all"}, optional
+        Forwarded to :class:`ParticlesDataset`. Default ``"all"``.
     shuffle : bool, optional
         Whether the sampler shuffles indices. Default ``True``.
     num_workers : int, optional
@@ -444,6 +455,7 @@ class ParticlesDataPipe(DataLoader):
         num_particles_max: int,
         n_steps: int = 2,
         stats_file: Path | str | None = None,
+        phase: Literal["train", "test", "all"] = "all",
         shuffle: bool = True,
         num_workers: int = 4,
         prefetch_factor: int = 4,
@@ -459,6 +471,7 @@ class ParticlesDataPipe(DataLoader):
             n_steps=n_steps,
             num_particles_max=num_particles_max,
             stats_file=stats_file,
+            phase=phase,
         )
         sampler = InfiniteSampler(
             dataset=dataset,

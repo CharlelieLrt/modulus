@@ -107,6 +107,11 @@ dataset:
   # Names of the scalar mesh fields stored alongside positions in each maps
   # file. Each name must have a matching entry in stats.json.
   mesh_feature_names: [temperature, voltage]
+  # Held-out evaluation. false: train on everything under data_dir (samples/
+  # and maps/ read directly). true: read the train split from data_dir/train/
+  # and a test split from data_dir/test/, and report a test loss each logging
+  # step alongside the train loss. See the README dataset-format section.
+  train_test_split: false
 
 # Loss weighting and regularization.
 loss:

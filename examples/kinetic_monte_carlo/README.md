@@ -118,6 +118,23 @@ convert your KMC solver's raw output into the layout the datapipe
 `<data_dir>` is any directory you choose; the datapipe reads the `samples/` and
 `maps/` subtrees directly from it.
 
+For a held-out evaluation split (training config `dataset.train_test_split:
+true`), put the two splits in `train/` and `test/` subdirectories, each with the
+same `samples/` and `maps/` layout:
+
+```text
+<data_dir>/
+├── train/
+│   ├── samples/
+│   └── maps/
+└── test/
+    ├── samples/
+    └── maps/
+```
+
+With `train_test_split: false` (the default) the datapipe reads `samples/` and
+`maps/` directly under `<data_dir>`, with no `train/` / `test/` subdirectories.
+
 - **`<geometry>`** is an arbitrary grouping directory. Use it to keep the
   simulations of one geometry (or one boundary-condition family) together. The
   names are auto-discovered and treated as opaque; the recipe attaches no
