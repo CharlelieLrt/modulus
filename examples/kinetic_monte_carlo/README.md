@@ -49,11 +49,12 @@ solver would produce. Its inputs are:
 - the **particle population**: each particle's coordinates $(x, y, z)$, scalar
   features $X_p$, and the delay since the previous event;
 - the current simulation **time** $t_n$;
-- *(optional)* a static background **mesh** describing the geometry the events
-  unfold in: a point cloud with coordinates $(x_m, y_m, z_m)$ and scalar fields
-  $X_m$ (e.g. a temperature or potential map encoding the boundary/initial
-  conditions). When it is not needed, the surrogate runs on the particle/event
-  stream alone.
+- a static background **mesh** describing the geometry the events unfold in: a
+  point cloud with coordinates $(x_m, y_m, z_m)$ and scalar fields $X_m$ (e.g. a
+  temperature or potential map encoding the boundary/initial conditions). As
+  shipped, the mesh is a **required** input (the datapipe expects a `maps/` file
+  per simulation); a mesh-free variant is a natural extension but is not
+  currently supported.
 
 It predicts the **next event**:
 
