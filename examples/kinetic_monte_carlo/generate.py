@@ -202,6 +202,7 @@ def _gt_trajectory(
     }
 
 
+@torch.no_grad()
 def _rollout_ensemble(
     model: ParticleGeoTransolver,
     gt: dict,
@@ -309,42 +310,41 @@ def _rollout_ensemble(
         delay_n = _z_score(delay_raw, stats["delay_mean"], stats["delay_std"])
         t_n = _z_score(t_raw, stats["delay_mean"], stats["delay_std"])
 
-        with torch.no_grad():
-            h_g = model(
-                coords_n,
-                scalars_n,
-                delay_n,
-                particle_state,
-                mesh_coords_n,
-                mesh_fields_n,
-                t_n,
-            )
-            delay_logits, delay_mu, delay_log_sigma, _ = model.predict_delay(
-                h_g
-            )  # mu, log_sigma: (B, G, 1)
-            # The delay head is a plain GMM on R; reject below-bound draws so
-            # every sampled inter-event delay is positive. The delay is the
-            # D == 1 case, so squeeze the trailing axis for the 1-D sampler.
-            delay_norm_sample, rejection_info = _sample_gmm_with_rejection(
-                delay_logits,
-                delay_mu.squeeze(-1),
-                delay_log_sigma.squeeze(-1),
-                lower_bound=delay_lower_bound_normalized,
-            )  # (B,)
-            delay_mix_mean_d, delay_mix_std_d = diagonal_gmm_mean_std(
-                delay_logits, delay_mu, delay_log_sigma
-            )  # (B, 1)
-            delay_norm_mix_mean = delay_mix_mean_d.squeeze(-1)  # (B,)
-            delay_norm_mix_std = delay_mix_std_d.squeeze(-1)  # (B,)
-            pf_logits, pf_mu, pf_log_sigma, _ = model.predict_particle_features(
-                h_g, delay_norm_sample
-            )
-            pf_norm_sample = sample_diagonal_gmm(
-                pf_logits, pf_mu, pf_log_sigma
-            )  # (B, 3 + P)
-            pf_norm_mix_mean, pf_norm_mix_std = diagonal_gmm_mean_std(
-                pf_logits, pf_mu, pf_log_sigma
-            )  # (B, 3 + P)
+        h_g = model(
+            coords_n,
+            scalars_n,
+            delay_n,
+            particle_state,
+            mesh_coords_n,
+            mesh_fields_n,
+            t_n,
+        )
+        delay_logits, delay_mu, delay_log_sigma, _ = model.predict_delay(
+            h_g
+        )  # mu, log_sigma: (B, G, 1)
+        # The delay head is a plain GMM on R; reject below-bound draws so
+        # every sampled inter-event delay is positive. The delay is the
+        # D == 1 case, so squeeze the trailing axis for the 1-D sampler.
+        delay_norm_sample, rejection_info = _sample_gmm_with_rejection(
+            delay_logits,
+            delay_mu.squeeze(-1),
+            delay_log_sigma.squeeze(-1),
+            lower_bound=delay_lower_bound_normalized,
+        )  # (B,)
+        delay_mix_mean_d, delay_mix_std_d = diagonal_gmm_mean_std(
+            delay_logits, delay_mu, delay_log_sigma
+        )  # (B, 1)
+        delay_norm_mix_mean = delay_mix_mean_d.squeeze(-1)  # (B,)
+        delay_norm_mix_std = delay_mix_std_d.squeeze(-1)  # (B,)
+        pf_logits, pf_mu, pf_log_sigma, _ = model.predict_particle_features(
+            h_g, delay_norm_sample
+        )
+        pf_norm_sample = sample_diagonal_gmm(
+            pf_logits, pf_mu, pf_log_sigma
+        )  # (B, 3 + P)
+        pf_norm_mix_mean, pf_norm_mix_std = diagonal_gmm_mean_std(
+            pf_logits, pf_mu, pf_log_sigma
+        )  # (B, 3 + P)
 
         # Split the predicted vector into coordinates (first 3) and scalar
         # features (the rest), then denormalize each. Means use mu + sigma * z,
