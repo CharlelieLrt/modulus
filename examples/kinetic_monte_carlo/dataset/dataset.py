@@ -207,22 +207,34 @@ class ParticlesDataset(Dataset):
         return self._num_mesh_features
 
     def _scan_samples(self) -> None:
-        """Populate ``_per_sim_count`` by scanning every geometry subtree."""
+        """Populate ``_per_sim_count`` by scanning every geometry subtree.
+
+        Each simulation's ``ts`` indices must form a contiguous
+        ``range(0, max_ts + 1)``. A gap is raised here, at construction, with
+        the offending simulation named, rather than surfacing later as a bare
+        ``FileNotFoundError`` from ``torch.load`` mid-training.
+        """
         for geometry_dir in sorted(self._samples_root.iterdir()):
             if not geometry_dir.is_dir():
                 continue
             geometry = geometry_dir.name
-            max_ts: dict[int, int] = {}
+            ts_by_sim: dict[int, set[int]] = {}
             for path in geometry_dir.glob("sample_*_*.pth"):
                 m = _SAMPLE_RE.fullmatch(path.name)
                 if m is None:
                     continue
                 sim_id = int(m.group(1))
                 ts = int(m.group(2))
-                if ts > max_ts.get(sim_id, -1):
-                    max_ts[sim_id] = ts
-            for sim_id, n_events in max_ts.items():
-                self._per_sim_count[(geometry, sim_id)] = n_events
+                ts_by_sim.setdefault(sim_id, set()).add(ts)
+            for sim_id, ts_set in ts_by_sim.items():
+                max_ts = max(ts_set)
+                if ts_set != set(range(max_ts + 1)):
+                    missing = sorted(set(range(max_ts + 1)) - ts_set)
+                    raise FileNotFoundError(
+                        f"{geometry}/sim_{sim_id}: sample ts indices are not "
+                        f"contiguous; missing {missing} (expected 0..{max_ts})."
+                    )
+                self._per_sim_count[(geometry, sim_id)] = max_ts
 
         if not self._per_sim_count:
             raise FileNotFoundError(
