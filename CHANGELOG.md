@@ -255,15 +255,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Splits the monolithic `physicsnemo.diffusion.noise_schedulers.noise_schedulers`
   and `physicsnemo.diffusion.samplers.solvers` modules into one module per class,
-  named after the schedule or solver it defines (`edm.py`, `vp.py`, `ve.py`,
-  `iddpm.py`, `edm_log_uniform.py`, `student_t_edm.py`, `linear_gaussian.py`,
-  `euler.py`, `heun.py`, `edm_stochastic_euler.py`, `edm_stochastic_heun.py`),
-  with the `NoiseScheduler` and `Solver` protocols in a `base.py` of their
-  respective sub-package. Class implementations are unchanged, and every class
-  is still re-exported from `physicsnemo.diffusion.noise_schedulers` and
-  `physicsnemo.diffusion.samplers`, so public import paths are unaffected.
-  Code importing a solver from the private `samplers.solvers` path should import
-  it from `physicsnemo.diffusion.samplers` instead.
+  named after the schedule or solver it defines, with the `NoiseScheduler` and
+  `Solver` protocols in a `base.py` of their respective sub-package.
+  Implementations are unchanged and every class is still re-exported from
+  `physicsnemo.diffusion.noise_schedulers` and `physicsnemo.diffusion.samplers`,
+  so public import paths are unaffected. Code importing a solver from the
+  private `samplers.solvers` path should import it from
+  `physicsnemo.diffusion.samplers` instead.
 - Optimizes the production container build by consolidating related filesystem
   operations, using BuildKit bind and cache mounts, and separating custom,
   declared, and project dependency installation. Reduces total physicsnemo layers
