@@ -76,6 +76,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   isosurface extraction, use `physicsnemo.mesh.generate.marching_cubes` instead
   of `sdf_to_stl`. For VTP/OBJ/STL file conversion (`combine_vtp_files`,
   `convert_tesselated_files_in_directory`), use VTK or PyVista directly.
+- Deprecates the CorrDiff example (`examples/weather/corrdiff`), which no longer
+  receives maintenance, bug fixes, or new features. Use the regional
+  high-resolution weather model example (`examples/weather/stormcast`) instead.
+  That example unifies regional diffusion-based weather models, and covers the
+  CorrDiff downscaling setting alongside other diffusion-based settings.
 
 ### Removed
 
