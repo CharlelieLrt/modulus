@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
+from jaxtyping import Float, Int
 
 if TYPE_CHECKING:
     from physicsnemo.mesh.mesh import Mesh
@@ -28,9 +29,9 @@ if TYPE_CHECKING:
 
 def sample_random_points_on_cells(
     mesh: "Mesh",
-    cell_indices: Sequence[int] | torch.Tensor | None = None,
+    cell_indices: Sequence[int] | Int[torch.Tensor, " n_samples"] | None = None,
     alpha: float = 1.0,
-) -> torch.Tensor:
+) -> Float[torch.Tensor, "n_samples n_spatial_dims"]:
     """Sample random points uniformly distributed on specified cells of the mesh.
 
     Uses a Dirichlet distribution to generate barycentric coordinates, which are
@@ -50,6 +51,7 @@ def sample_random_points_on_cells(
     alpha : float
         Concentration parameter for the Dirichlet distribution. Controls how
         samples are distributed within each cell:
+
         - alpha = 1.0: Uniform distribution over the simplex (default)
         - alpha > 1.0: Concentrates samples toward the center of each cell
         - alpha < 1.0: Concentrates samples toward vertices and edges
@@ -109,10 +111,14 @@ def sample_random_points_on_cells(
     n_samples = len(cell_indices)
 
     ### Sample from Gamma(alpha, 1) distribution and normalize to get Dirichlet
-    # When alpha=1, Gamma(1,1) is equivalent to Exponential(1), which is more efficient
+    # When alpha=1, Gamma(1,1) is equivalent to Exponential(1), which is more efficient.
+    # Build the distribution parameters in the mesh's dtype so the barycentric
+    # weights match the mesh precision (otherwise a float64 mesh silently samples
+    # weights in float32, halving precision).
+    dtype = mesh.points.dtype
     if alpha == 1.0:
         distribution = torch.distributions.Exponential(
-            rate=torch.ones((), device=mesh.points.device),
+            rate=torch.ones((), device=mesh.points.device, dtype=dtype),
         )
     else:
         if torch.compiler.is_compiling():
@@ -122,9 +128,9 @@ def sample_random_points_on_cells(
                 f"when using torch.compile. Use alpha=1.0 (uniform distribution) instead, or disable torch.compile.\n"
                 f"See https://github.com/pytorch/pytorch/issues/165751."
             )
-        _rate = torch.ones((), device=mesh.points.device)
+        _rate = torch.ones((), device=mesh.points.device, dtype=dtype)
         distribution = torch.distributions.Gamma(
-            concentration=torch.full((), alpha, device=mesh.points.device),
+            concentration=torch.full((), alpha, device=mesh.points.device, dtype=dtype),
             rate=_rate,
         )
 

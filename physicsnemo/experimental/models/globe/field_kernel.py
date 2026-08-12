@@ -17,28 +17,25 @@
 import itertools
 import logging
 import operator
-from functools import cached_property, reduce
-from math import ceil, comb, prod
-from typing import TYPE_CHECKING, Literal, Sequence
+from functools import cache, cached_property, reduce
+from math import comb, prod
+from typing import TYPE_CHECKING, Final, Literal, Sequence
 
+import psutil
 import torch
 import torch.nn as nn
-from jaxtyping import Float
+from jaxtyping import Float, Int
 from tensordict import TensorDict
 from torch.profiler import record_function
 from torch.utils.checkpoint import checkpoint
 
 from physicsnemo.core.module import Module
-from physicsnemo.experimental.models.globe.utilities.rank_spec import (
-    RankSpecDict,
-    flatten_rank_spec,
-    rank_counts,
-)
 from physicsnemo.experimental.models.globe.utilities.tensordict_utils import (
     concatenate_leaves,
     concatenated_length,
     split_by_leaf_rank,
 )
+from physicsnemo.mesh import RankSpecDict, flatten_rank_spec, rank_counts
 from physicsnemo.nn import Mlp, Pade
 from physicsnemo.nn.functional.equivariant_ops import (
     legendre_polynomials,
@@ -50,11 +47,76 @@ from physicsnemo.nn.functional.equivariant_ops import (
 logger = logging.getLogger("globe.field_kernel")
 
 if TYPE_CHECKING:
-    from physicsnemo.experimental.models.globe.cluster_tree import (
+    from physicsnemo.mesh.spatial.cluster_tree import (
         ClusterTree,
         DualInteractionPlan,
         SourceAggregates,
     )
+
+
+### Static, per-device memory-budget helpers used by chunk-size sizing.
+
+# Fraction of total device memory we are willing to spend on a single
+# kernel evaluation's chunked autograd state (peak intermediate footprint
+# for one (Phase A | B | C | D) call).  Conservative because parameters,
+# DDP buckets, and activations from other kernels coexist on-device.
+#
+# Expressed as an integer percent (rather than e.g. ``0.25``) so that
+# ``_device_chunk_budget_bytes`` stays in pure-integer arithmetic.  Under
+# ``torch.compile`` with the default ``specialize_float=False``, a
+# module-level Python float is treated as an unbacked symbolic float
+# ("zf" symbol), which then infects every ``chunk_size`` derivation
+# downstream and crashes Dynamo at the ``checkpoint`` boundary in
+# ``_gather_and_evaluate`` with "Source of '...' is None when lifting it
+# to input of top-level".
+_CHUNK_MEMORY_BUDGET_PERCENT: Final[int] = 25
+
+
+def _ceil_div(a: int, b: int) -> int:
+    """Integer ceiling division: equivalent to ``math.ceil(a / b)`` for
+    non-negative ``a`` and positive ``b``, but with no Python ``float``
+    intermediate.
+
+    Used here because, under ``torch.compile`` with the default
+    ``specialize_float=False``, a Python ``float`` in the trace is treated
+    as an unbacked symbolic free variable that propagates into the chunk
+    size and crashes Dynamo at the ``checkpoint`` boundary in
+    :meth:`BarnesHutKernel._gather_and_evaluate`.  ``-(-a // b)`` is the
+    standard Python idiom: floor division rounds toward negative infinity,
+    so negating both ends produces a ceiling on the original quotient.
+    """
+    return -(-a // b)
+
+
+@torch.compiler.disable
+@cache
+def _device_total_memory_bytes(device: torch.device) -> int:
+    """Cached lookup of total physical memory available on ``device``.
+
+    On CUDA, returns ``torch.cuda.get_device_properties.total_memory``.
+    On CPU, returns total system RAM via :func:`psutil.virtual_memory`.
+    The CPU path is debug-only - production runs on CUDA.
+
+    ``@torch.compiler.disable`` is layered above ``@cache`` so Dynamo
+    bails on the outer call and never traces the device query here.
+    Without this, Dynamo treats ``torch.cuda.get_device_properties``
+    as an opaque Python function and tries to evaluate it as a
+    constant during graph capture, which crashes on CPU-only hosts
+    (``RuntimeError: Found no NVIDIA driver``) and produces unbacked
+    symbolic ints on CUDA hosts that poison downstream chunk-size
+    arithmetic.
+    """
+    if device.type == "cuda":
+        return int(torch.cuda.get_device_properties(device).total_memory)
+    if device.type == "cpu":
+        return int(psutil.virtual_memory().total)
+    raise ValueError(f"Unsupported {device.type=!r}")
+
+
+@torch.compiler.disable
+def _device_chunk_budget_bytes(device: torch.device) -> int:
+    """Static memory budget for a single chunked kernel evaluation."""
+    return _device_total_memory_bytes(device) * _CHUNK_MEMORY_BUDGET_PERCENT // 100
 
 
 class Kernel(Module):
@@ -149,6 +211,7 @@ class Kernel(Module):
         network_type: Literal["pade", "mlp"] = "pade",
         spectral_norm: bool = False,
         use_gradient_checkpointing: bool = True,
+        self_regularization_beta: float | None = None,
     ):
         if hidden_layer_sizes is None:
             hidden_layer_sizes = [64]
@@ -168,6 +231,22 @@ class Kernel(Module):
         self.n_spherical_harmonics = n_spherical_harmonics
         self.use_gradient_checkpointing = use_gradient_checkpointing
 
+        ### Pre-squared smoothing radius as a registered tensor buffer.
+        ### A buffer (rather than a Python float) is required because
+        ### ``_evaluate_interactions`` adds this scalar to a TensorDict
+        ### inside a checkpoint sub-graph; Python free variables cannot
+        ### be lifted across nested Dynamo SubgraphTracers (the lift
+        ### chain bottoms out at the root tracer with no parent and
+        ### asserts ``lift_tracked_freevar_to_input should not be
+        ### called on root SubgraphTracer``).  As a buffer, the
+        ### tensor is a tracked module attribute that Dynamo treats as
+        ### a graph leaf, so no lift is needed.
+        self.register_buffer(
+            "_smoothing_radius_sq",
+            torch.tensor(smoothing_radius**2, dtype=torch.float32),
+            persistent=False,
+        )
+
         in_features = self.network_in_features
         hidden_features = list(self.hidden_layer_sizes)
         out_features = self.network_out_features
@@ -182,6 +261,7 @@ class Kernel(Module):
                 denominator_order=2,
                 use_separate_mlps=False,
                 share_denominator_across_channels=False,
+                self_regularization_beta=self_regularization_beta,
             )
         elif network_type == "mlp":
             self.network = nn.Sequential(
@@ -280,81 +360,23 @@ class Kernel(Module):
             + 2 * (n_vectors_in - 1)  # All non-r vectors
         )
 
-    def add_semantics(
-        self,
-        tensor: Float[torch.Tensor, "... total_dims"],
-        shape_for_scalars: torch.Size | None = None,
-        shape_for_vectors: torch.Size | None = None,
-    ) -> TensorDict[str, Float[torch.Tensor, "..."]]:
-        r"""Adds semantics to a tensor by splitting it into named fields.
+    @cached_property
+    def _output_packing(self) -> tuple[tuple[str, ...], tuple[int, ...], int]:
+        """Canonical-ordered output keys, per-key feature widths, and total width.
 
-        The input tensor is assumed to have its last dimension of size equal to the sum
-        of the flattened dimensions of all output fields. This function separates the
-        tensor into its constituent fields according to the model's output field
-        definitions, maintaining the proper shapes for scalar and vector fields.
-
-        Parameters
-        ----------
-        tensor : Float[torch.Tensor, "... total_dims"]
-            Tensor with shape :math:`(\ldots, D_{total})` where :math:`D_{total}` is
-            the sum of ``prod(shape)`` for all output fields.
-        shape_for_scalars : torch.Size or None, optional
-            Shape to use for scalar fields. If ``None``, defaults to ``()``.
-        shape_for_vectors : torch.Size or None, optional
-            Shape to use for vector fields. If ``None``, defaults to
-            :math:`(D,)`.
-
-        Returns
-        -------
-        TensorDict[str, Float[torch.Tensor, "..."]]
-            TensorDict with ``batch_size`` matching ``tensor.shape[:-1]``,
-            containing the separated fields with proper shapes. Each scalar field
-            has shape :math:`(\ldots, S)` and each vector field has shape
-            :math:`(\ldots, V)` where :math:`S` and :math:`V` are determined by
-            ``shape_for_scalars`` and ``shape_for_vectors`` respectively.
-
-        Raises
-        ------
-        ValueError
-            If the size of the last dimension does not match the expected total
-            number of flattened output dimensions.
+        Used by :class:`BarnesHutKernel` to pack the per-phase scatter
+        targets into a single ``(n_targets, total_features)`` buffer.  The
+        backward pass through ``aten::scatter_add`` was the largest single
+        GPU kernel time in profiling (``indexing_backward_kernel_stride_1``,
+        ~1 s out of 4.5 s total GPU time per training step), and packing
+        cuts that cost proportional to the number of output fields.
         """
-        if shape_for_scalars is None:
-            shape_for_scalars = torch.Size([])
-        if shape_for_vectors is None:
-            shape_for_vectors = torch.Size([self.n_spatial_dims])
-
-        shapes_by_rank: dict[int, torch.Size] = {
-            0: shape_for_scalars,
-            1: shape_for_vectors,
-        }
-
         ranks_dict = flatten_rank_spec(self.output_field_ranks)
-        output_field_shapes: dict[str, torch.Size] = {
-            field_name: shapes_by_rank[rank]
-            for field_name, rank in ranks_dict.items()
-        }
-
-        if not torch.compiler.is_compiling():
-            if not tensor.shape[-1] == sum(
-                prod(shape) for shape in output_field_shapes.values()
-            ):
-                raise ValueError(
-                    f"Expected an array with length {sum(prod(shape) for shape in output_field_shapes.values())} along dimension -1;\n"
-                    f"got {tensor.shape=!r}."
-                )
-
-        batch_size = tensor.shape[:-1]
-
-        ### Split the flat tensor into per-field views
-        fields: dict[str, torch.Tensor] = {}
-        i: int = 0
-        for field_name, shape in sorted(output_field_shapes.items()):
-            field_width = prod(shape)
-            slc = [slice(None)] * (tensor.ndim - 1) + [slice(i, i + field_width)]
-            fields[field_name] = tensor[tuple(slc)].reshape(batch_size + shape)
-            i += field_width
-        return TensorDict(fields, batch_size=batch_size)
+        keys = tuple(sorted(ranks_dict.keys()))
+        features_per_key = tuple(
+            1 if ranks_dict[k] == 0 else self.n_spatial_dims for k in keys
+        )
+        return keys, features_per_key, sum(features_per_key)
 
     def forward(
         self,
@@ -572,17 +594,11 @@ class Kernel(Module):
             dtype = torch.get_autocast_dtype(device.type)
             scalars = scalars.to(dtype=dtype)
             vectors = vectors.to(dtype=dtype)
-        else:
-            dtype = None
-
-        smoothing_radius = torch.tensor(
-            self.smoothing_radius, device=device, dtype=dtype
-        )
 
         ### Vector magnitude, direction, and log-magnitude features
         with record_function("kernel::feature_engineering"):
             vectors_mag_squared: TensorDict = (
-                (vectors * vectors).sum(dim=-1).apply(lambda x: x + smoothing_radius**2)
+                (vectors * vectors).sum(dim=-1) + self._smoothing_radius_sq
             )
             vectors_mag = vectors_mag_squared.sqrt()
             vectors_hat = vectors / vectors_mag.unsqueeze(-1)
@@ -653,32 +669,15 @@ class Kernel(Module):
                     (self.n_spatial_dims - 1) / 2
                 )
 
-            ### Add field-name semantics to the flat output channels
-            n_vectors_in = len(vectors.keys(include_nested=True, leaves_only=True))
-            result: TensorDict[str, Float[torch.Tensor, "..."]] = self.add_semantics(
-                output,
-                shape_for_scalars=torch.Size([]),
-                shape_for_vectors=torch.Size(
-                    [
-                        1  # r_hat
-                        + 2 * (n_vectors_in - 1),  # All non-r vectors
-                    ]
-                ),
-            )
-
-            ### Vector reprojection onto local rotationally-equivariant basis
+            ### Local rotationally-equivariant basis (built only when needed)
             ranks_dict = flatten_rank_spec(self.output_field_ranks)
-            vector_reprojection_needed = any(
-                rank == 1 for rank in ranks_dict.values()
-            )
+            needs_basis = any(rank == 1 for rank in ranks_dict.values())
 
-            if vector_reprojection_needed:
+            if needs_basis:
                 # Helmholtz-like decomposition: each vector field is expressed in a
                 # local basis derived from the input vectors (r_hat, source vectors,
                 # and their derived dipole/polar/spherical directions).
-                basis_vector_components: list[torch.Tensor] = []
-
-                basis_vector_components.append(vectors_hat["r"])
+                basis_vector_components: list[torch.Tensor] = [vectors_hat["r"]]
 
                 for k in sorted(
                     vectors.keys(include_nested=True, leaves_only=True),
@@ -688,7 +687,6 @@ class Kernel(Module):
                         continue
 
                     scale: torch.Tensor = vectors_log_mag[k][..., None]
-
                     basis_vector_components.append(scale * vectors_hat[k])
 
                     if self.n_spatial_dims == 2:
@@ -714,13 +712,32 @@ class Kernel(Module):
 
                 basis_vectors = torch.stack(basis_vector_components, dim=-1)
 
-                for field_name, rank in ranks_dict.items():
-                    if rank == 1:
-                        result[field_name] = torch.sum(
-                            basis_vectors
-                            * result[field_name].unsqueeze(-2),
-                            dim=-1,
-                        )
+            ### Build per-field outputs in a single pass over the flat tensor.
+            # One immutable dict + one TensorDict construction (no setitem on
+            # the result), sidestepping pytorch/tensordict#1680 under
+            # torch.compile + torch.utils.checkpoint.
+            n_vectors_in = len(vectors.keys(include_nested=True, leaves_only=True))
+            coeffs_per_vector = 1 + 2 * (n_vectors_in - 1)  # r_hat + (theta, kappa) per non-r vector
+
+            final_fields: dict[str, torch.Tensor] = {}
+            offset = 0
+            for name in sorted(ranks_dict):
+                if ranks_dict[name] == 0:
+                    final_fields[name] = output[..., offset]
+                    offset += 1
+                else:
+                    coeffs = output[..., offset : offset + coeffs_per_vector]
+                    final_fields[name] = torch.sum(
+                        basis_vectors * coeffs.unsqueeze(-2),
+                        dim=-1,
+                    )
+                    offset += coeffs_per_vector
+
+            result: TensorDict[str, Float[torch.Tensor, "..."]] = TensorDict(
+                final_fields,
+                batch_size=output.shape[:-1],
+                device=device,
+            )
 
         return result
 
@@ -801,6 +818,7 @@ class BarnesHutKernel(Kernel):
         spectral_norm: bool = False,
         use_gradient_checkpointing: bool = True,
         leaf_size: int = 1,
+        self_regularization_beta: float | None = None,
     ):
         super().__init__(
             n_spatial_dims=n_spatial_dims,
@@ -813,6 +831,7 @@ class BarnesHutKernel(Kernel):
             network_type=network_type,
             spectral_norm=spectral_norm,
             use_gradient_checkpointing=use_gradient_checkpointing,
+            self_regularization_beta=self_regularization_beta,
         )
         self.leaf_size = leaf_size
 
@@ -896,12 +915,12 @@ class BarnesHutKernel(Kernel):
         TensorDict[str, Float[torch.Tensor, "n_targets ..."]]
             Kernel output fields at target points.
         """
-        from physicsnemo.experimental.models.globe.cluster_tree import (
+        from physicsnemo.mesh.spatial._ragged import _ragged_arange
+        from physicsnemo.mesh.spatial.cluster_tree import (
             ClusterTree,
             DualInteractionPlan,
             SourceAggregates,
         )
-        from physicsnemo.mesh.spatial._ragged import _ragged_arange
 
         n_sources = source_points.shape[0]
         n_targets = target_points.shape[0]
@@ -990,9 +1009,6 @@ class BarnesHutKernel(Kernel):
                     100.0 * n_near / max(n_dense, 1),
                 )
 
-            if n_near == 0 and n_nf == 0 and n_fn == 0 and n_far_nodes == 0:
-                return self._empty_result(n_targets, device)
-
             ### Prepare aggregate data for far-field and (near,far) phases
             if n_far_nodes > 0 or n_nf > 0:
                 if aggregates.node_source_data is not None:
@@ -1009,8 +1025,31 @@ class BarnesHutKernel(Kernel):
                     [cluster_tree.n_nodes, self.n_spatial_dims]
                 )
 
-        ### Initialize output buffers
-        output_bufs: dict[str, torch.Tensor] = {}
+        ### Packed output buffer.  All four phases scatter into this single
+        ### tensor; the per-phase loops over output keys (one ``scatter_add_``
+        ### per key) are replaced with one packed ``scatter_add_`` per phase.
+        ### ``indexing_backward`` was the top GPU kernel by time in profiling
+        ### (~23% of total GPU time); packing cuts this by the number of
+        ### output fields (~4x for ``C_p`` + ``C_f`` on DrivAerML).
+        ###
+        ### Buffer dtype must match the dtype of ``weighted = chunk * weights``
+        ### that the four phases will scatter in (``index_add_`` requires
+        ### exact dtype match).  ``chunk`` comes from the MLP at the
+        ### autocast dtype (or ``source_points.dtype`` outside autocast);
+        ### ``weights`` carries ``source_strengths.dtype``.  Their product
+        ### is the type-promoted dtype, which is what the previous
+        ### lazy-allocated buffers used to capture - we now compute it
+        ### eagerly so a single buffer can be allocated up front.
+        _, _, total_features = self._output_packing
+        chunk_dtype = (
+            torch.get_autocast_dtype(device.type)
+            if torch.is_autocast_enabled(device.type)
+            else source_points.dtype
+        )
+        buffer_dtype = torch.promote_types(chunk_dtype, source_strengths.dtype)
+        packed_buf = torch.zeros(
+            (n_targets, total_features), dtype=buffer_dtype, device=device
+        )
 
         # ==================================================================
         # Phase A: Near-field (individual target-source pairs, chunked)
@@ -1037,39 +1076,19 @@ class BarnesHutKernel(Kernel):
                 # the gathered float data (~300 bytes/pair).  This is a
                 # ~37x reduction in checkpoint-saved memory per branch.
                 with record_function("bh_kernel::near_chunk"):
-                    if self.training and self.use_gradient_checkpointing:
-                        chunk_result = checkpoint(
-                            self._gather_and_evaluate,
-                            chunk_tgt_ids, chunk_src_ids,
-                            target_points, source_points,
-                            source_scalars, source_vectors,
-                            global_scalars, global_vectors,
-                            reference_length, device,
-                            use_reentrant=False,
-                        )
-                    else:
-                        chunk_result = self._gather_and_evaluate(
-                            chunk_tgt_ids, chunk_src_ids,
-                            target_points, source_points,
-                            source_scalars, source_vectors,
-                            global_scalars, global_vectors,
-                            reference_length, device,
-                        )
+                    chunk_result = self._maybe_checkpointed_evaluate(
+                        chunk_tgt_ids, chunk_src_ids,
+                        target_points, source_points,
+                        source_scalars, source_vectors,
+                        global_scalars, global_vectors,
+                        reference_length, device,
+                    )
 
                 with record_function("bh_kernel::near_scatter"):
                     chunk_strengths = source_strengths[chunk_src_ids]
-                    for k, v in chunk_result.items():
-                        weighted = v * chunk_strengths.view(-1, *([1] * (v.ndim - 1)))
-                        if k not in output_bufs:
-                            output_bufs[k] = torch.zeros(
-                                (n_targets,) + v.shape[1:],
-                                dtype=weighted.dtype,
-                                device=device,
-                            )
-                        idx = chunk_tgt_ids.view(
-                            -1, *([1] * (v.ndim - 1))
-                        ).expand_as(weighted)
-                        output_bufs[k].scatter_add_(0, idx, weighted)
+                    self._pack_and_scatter(
+                        chunk_result, chunk_strengths, chunk_tgt_ids, packed_buf
+                    )
 
         # ==================================================================
         # Phase B: Far-field node pairs (evaluate once, broadcast to targets)
@@ -1082,24 +1101,13 @@ class BarnesHutKernel(Kernel):
             # Same gather-inside-checkpoint pattern: the checkpoint saves
             # only the node ID indices, not the gathered aggregate data.
             with record_function("bh_kernel::far_node_evaluate"):
-                if self.training and self.use_gradient_checkpointing:
-                    far_result = checkpoint(
-                        self._gather_and_evaluate,
-                        far_tgt_nids, far_src_nids,
-                        target_centroids, aggregates.node_centroid,
-                        agg_scalars, agg_vectors,
-                        global_scalars, global_vectors,
-                        reference_length, device,
-                        use_reentrant=False,
-                    )
-                else:
-                    far_result = self._gather_and_evaluate(
-                        far_tgt_nids, far_src_nids,
-                        target_centroids, aggregates.node_centroid,
-                        agg_scalars, agg_vectors,
-                        global_scalars, global_vectors,
-                        reference_length, device,
-                    )
+                far_result = self._maybe_checkpointed_evaluate(
+                    far_tgt_nids, far_src_nids,
+                    target_centroids, aggregates.node_centroid,
+                    agg_scalars, agg_vectors,
+                    global_scalars, global_vectors,
+                    reference_length, device,
+                )
 
             ### Broadcast node-level results to individual targets.
             with record_function("bh_kernel::far_node_broadcast"):
@@ -1110,19 +1118,14 @@ class BarnesHutKernel(Kernel):
                 positions, pair_ids = _ragged_arange(node_starts, node_counts)
                 expanded_tgt_ids = target_tree.sorted_source_order[positions]
 
-                for k, v in far_result.items():
-                    weighted = v * far_strengths.view(-1, *([1] * (v.ndim - 1)))
-                    expanded = weighted[pair_ids]
-                    if k not in output_bufs:
-                        output_bufs[k] = torch.zeros(
-                            (n_targets,) + v.shape[1:],
-                            dtype=expanded.dtype,
-                            device=device,
-                        )
-                    idx = expanded_tgt_ids.view(
-                        -1, *([1] * (v.ndim - 1))
-                    ).expand_as(expanded)
-                    output_bufs[k].scatter_add_(0, idx, expanded)
+                ### Broadcast node-level outputs to individual targets via
+                ### ``pair_ids`` (which point back into the per-node result
+                ### tensor).  Packing the broadcast lets us do one expand +
+                ### one scatter_add instead of one per output field.
+                self._pack_and_scatter(
+                    far_result, far_strengths, expanded_tgt_ids,
+                    packed_buf, broadcast_pair_ids=pair_ids,
+                )
 
         # ==================================================================
         # Phase C: (near,far) - individual targets × source node centroids
@@ -1134,39 +1137,19 @@ class BarnesHutKernel(Kernel):
             ### Same evaluation as Phase B (source centroids + aggregates),
             # but same scatter as Phase A (per-target, no broadcast).
             with record_function("bh_kernel::nf_evaluate"):
-                if self.training and self.use_gradient_checkpointing:
-                    nf_result = checkpoint(
-                        self._gather_and_evaluate,
-                        nf_tgt_ids, nf_src_nids,
-                        target_points, aggregates.node_centroid,
-                        agg_scalars, agg_vectors,
-                        global_scalars, global_vectors,
-                        reference_length, device,
-                        use_reentrant=False,
-                    )
-                else:
-                    nf_result = self._gather_and_evaluate(
-                        nf_tgt_ids, nf_src_nids,
-                        target_points, aggregates.node_centroid,
-                        agg_scalars, agg_vectors,
-                        global_scalars, global_vectors,
-                        reference_length, device,
-                    )
+                nf_result = self._maybe_checkpointed_evaluate(
+                    nf_tgt_ids, nf_src_nids,
+                    target_points, aggregates.node_centroid,
+                    agg_scalars, agg_vectors,
+                    global_scalars, global_vectors,
+                    reference_length, device,
+                )
 
             with record_function("bh_kernel::nf_scatter"):
                 nf_strengths = node_total_strength[nf_src_nids]
-                for k, v in nf_result.items():
-                    weighted = v * nf_strengths.view(-1, *([1] * (v.ndim - 1)))
-                    if k not in output_bufs:
-                        output_bufs[k] = torch.zeros(
-                            (n_targets,) + v.shape[1:],
-                            dtype=weighted.dtype,
-                            device=device,
-                        )
-                    idx = nf_tgt_ids.view(
-                        -1, *([1] * (v.ndim - 1))
-                    ).expand_as(weighted)
-                    output_bufs[k].scatter_add_(0, idx, weighted)
+                self._pack_and_scatter(
+                    nf_result, nf_strengths, nf_tgt_ids, packed_buf
+                )
 
         # ==================================================================
         # Phase D: (far,near) - target node centroid × individual sources,
@@ -1180,24 +1163,13 @@ class BarnesHutKernel(Kernel):
             # Uses target centroids (like Phase B) but individual source
             # points and data (like Phase A).
             with record_function("bh_kernel::fn_evaluate"):
-                if self.training and self.use_gradient_checkpointing:
-                    fn_result = checkpoint(
-                        self._gather_and_evaluate,
-                        fn_tgt_nids, fn_src_ids,
-                        target_centroids, source_points,
-                        source_scalars, source_vectors,
-                        global_scalars, global_vectors,
-                        reference_length, device,
-                        use_reentrant=False,
-                    )
-                else:
-                    fn_result = self._gather_and_evaluate(
-                        fn_tgt_nids, fn_src_ids,
-                        target_centroids, source_points,
-                        source_scalars, source_vectors,
-                        global_scalars, global_vectors,
-                        reference_length, device,
-                    )
+                fn_result = self._maybe_checkpointed_evaluate(
+                    fn_tgt_nids, fn_src_ids,
+                    target_centroids, source_points,
+                    source_scalars, source_vectors,
+                    global_scalars, global_vectors,
+                    reference_length, device,
+                )
 
             ### Broadcast to stage-1 survivors via the ragged mapping.
             with record_function("bh_kernel::fn_broadcast"):
@@ -1209,35 +1181,156 @@ class BarnesHutKernel(Kernel):
                 )
                 expanded_tgt_ids = dual_plan.fn_broadcast_targets[positions]
 
-                for k, v in fn_result.items():
-                    weighted = v * fn_strengths.view(-1, *([1] * (v.ndim - 1)))
-                    expanded = weighted[pair_ids]
-                    if k not in output_bufs:
-                        output_bufs[k] = torch.zeros(
-                            (n_targets,) + v.shape[1:],
-                            dtype=expanded.dtype,
-                            device=device,
-                        )
-                    idx = expanded_tgt_ids.view(
-                        -1, *([1] * (v.ndim - 1))
-                    ).expand_as(expanded)
-                    output_bufs[k].scatter_add_(0, idx, expanded)
+                self._pack_and_scatter(
+                    fn_result, fn_strengths, expanded_tgt_ids,
+                    packed_buf, broadcast_pair_ids=pair_ids,
+                )
 
-        if not output_bufs:
-            return self._empty_result(n_targets, device)
+        return self._unpack_buf(packed_buf, n_targets, device)
 
-        return TensorDict(
-            output_bufs,
-            batch_size=torch.Size([n_targets]),
-            device=device,
-        )
+    def _maybe_checkpointed_evaluate(self, *args: object) -> TensorDict:
+        """Run :meth:`_gather_and_evaluate` with optional gradient checkpointing.
+
+        The four BH-kernel phases (near, far_node, nf, fn) all wrap the
+        same ``_gather_and_evaluate`` call in an
+        ``if self.use_gradient_checkpointing`` branch with identical
+        checkpoint kwargs.  Hoisting the branch removes ~30 lines of
+        duplicated forward/checkpoint plumbing across the four phases
+        and keeps the gradient-checkpointing policy in one place.
+
+        The wrap fires in **both** training and eval, not just training,
+        for two reasons:
+
+        1. Memory savings (the original purpose).  In eval no autograd
+           tape is active (``train.py`` wraps validation in
+           ``torch.no_grad()``), so ``checkpoint(use_reentrant=False)``
+           degenerates to a near-no-op forward call - no recompute, no
+           extra memory, no extra compute.
+        2. Workaround for a Dynamo+CUDA TensorDict bug.  When the same
+           ``_gather_and_evaluate`` body is inlined into the parent
+           graph (i.e. without the checkpoint wrapper), FakeTensor
+           tracing fails to propagate ``TensorDict.batch_size`` through
+           ``(vectors * vectors).sum(dim=-1)``: leaf tensors get
+           reduced to 1D but the TD still reports its 2D pre-reduction
+           batch size, and any downstream op that consults
+           ``batch_size`` (``.unsqueeze(-1)``, ``concatenate_leaves``'s
+           reshape) trips on the inconsistency.  Wrapping the call in
+           ``checkpoint`` gives Dynamo a fresh sub-tracer scope that
+           tracks the post-reduction batch size correctly, so the
+           identical eager-mode-correct body now also traces correctly.
+        """
+        if self.use_gradient_checkpointing:
+            return checkpoint(
+                self._gather_and_evaluate, *args, use_reentrant=False
+            )
+        return self._gather_and_evaluate(*args)
+
+    def _pack_and_scatter(
+        self,
+        chunk_result: TensorDict,
+        weights: Float[torch.Tensor, " n_pairs"],
+        tgt_ids: Int[torch.Tensor, " n_pairs_or_expanded"],
+        packed_buf: Float[torch.Tensor, "n_targets total_features"],
+        *,
+        broadcast_pair_ids: Int[torch.Tensor, " n_pairs_or_expanded"] | None = None,
+    ) -> None:
+        """Pack output fields, weight, and ``scatter_add_`` into ``packed_buf``.
+
+        Replaces the per-key ``scatter_add_`` loop inside each phase with
+        a single packed scatter.  Packing collapses the per-key
+        ``indexing_backward`` kernel calls (the largest GPU cost in
+        profiling) into one per phase, which roughly halves backward
+        scatter cost on DrivAerML (``C_p``: 1 ch + ``C_f``: 3 ch = 4 chs).
+
+        Parameters
+        ----------
+        chunk_result : TensorDict
+            Output of one ``_evaluate_interactions`` call.  Contains the
+            keys declared in ``self.output_field_ranks``; values have
+            ``batch_size=(n_pairs,)``.
+        weights : Float[torch.Tensor, "n_pairs"]
+            Per-pair scalar multipliers (e.g. source strengths).
+        tgt_ids : Int[torch.Tensor, "n_pairs_or_expanded"]
+            Target index for each scatter contribution.  When
+            ``broadcast_pair_ids`` is ``None``, length matches
+            ``n_pairs``; otherwise it matches the broadcast-expanded
+            length and ``broadcast_pair_ids`` indexes back into the
+            ``n_pairs`` dimension.
+        packed_buf : Float[torch.Tensor, "n_targets total_features"]
+            Shared output buffer for the four-phase loop.
+        broadcast_pair_ids : Int[torch.Tensor, "n_pairs_or_expanded"] | None
+            Used by Phase B and Phase D, where each evaluated pair is
+            broadcast to many targets via a ragged-arange mapping.  When
+            given, weighting is applied first (over ``n_pairs``) and
+            broadcasting second (lower memory than the reverse).
+        """
+        keys, _, _ = self._output_packing
+        ### Pack output fields in canonical order; trailing feature dims
+        ### are flattened so we end up with a 2D ``(n_pairs, total_F)``.
+        parts = [
+            chunk_result[k].reshape(chunk_result[k].shape[0], -1) for k in keys
+        ]
+        packed = torch.cat(parts, dim=-1)
+
+        weighted = packed * weights.unsqueeze(-1)
+        if broadcast_pair_ids is not None:
+            weighted = weighted[broadcast_pair_ids]
+
+        ### ``index_add_`` rather than ``scatter_add_`` with broadcasted
+        ### indices: equivalent semantics, but ``index_add_`` takes a 1-D
+        ### ``index`` and avoids the ``unsqueeze`` + ``expand_as`` overhead
+        ### that ``scatter_add_`` requires.  In addition to the direct
+        ### speedup, ``index_add_`` has a more compact backward (no index
+        ### broadcasting in the saved tensors), which compounds with the
+        ### packing optimization above.
+        packed_buf.index_add_(0, tgt_ids, weighted)
+
+    def _unpack_buf(
+        self,
+        packed_buf: Float[torch.Tensor, "n_targets total_features"],
+        n_targets: int,
+        device: torch.device,
+    ) -> TensorDict:
+        """Slice ``packed_buf`` back into a per-output-field TensorDict.
+
+        Counterpart to :meth:`_pack_and_scatter`.  Scalar fields lose the
+        trailing length-1 dim so the returned shapes are
+        ``(n_targets,)`` for scalars and ``(n_targets, D)`` for vectors.
+        Empty inputs flow through correctly: an all-zero ``packed_buf``
+        unpacks to all-zero per-field tensors, so the four-phase loop
+        does not need a separate degenerate-case branch.
+        """
+        keys, features_per_key, _ = self._output_packing
+        ranks_dict = flatten_rank_spec(self.output_field_ranks)
+        fields: dict[str, torch.Tensor] = {}
+        offset = 0
+        for key, n_features in zip(keys, features_per_key):
+            slice_ = packed_buf[:, offset : offset + n_features]
+            if ranks_dict[key] == 0:
+                ### Scalar fields: drop the trailing length-1 dim so
+                ### shape stays ``(n_targets,)`` as before packing.
+                fields[key] = slice_.squeeze(-1)
+            else:
+                fields[key] = slice_
+            offset += n_features
+        return TensorDict(fields, batch_size=torch.Size([n_targets]), device=device)
 
     def _compute_node_strengths(
         self,
         tree: "ClusterTree",
         source_strengths: Float[torch.Tensor, " n_sources"],
     ) -> Float[torch.Tensor, " n_nodes"]:
-        """Compute total source strength per tree node via bottom-up summation.
+        """Compute total source strength per tree node.
+
+        Each node covers a contiguous range
+        ``[node_range_start, node_range_start + node_range_count)`` in
+        morton-sorted source order, so the total strength in a node's
+        subtree is just a range sum: ``prefix_sum[end] - prefix_sum[start]``.
+        This replaces the previous bottom-up Python loop over tree levels
+        - which launched a fresh batch of gather + add + scatter kernels at
+        every level - with a single ``cumsum`` + gather + subtract.  In
+        profiling, the level loop was the largest single contributor to
+        ``cluster_tree::bottom_up_propagation`` GPU and CPU time.
 
         Parameters
         ----------
@@ -1253,62 +1346,23 @@ class BarnesHutKernel(Kernel):
         """
         device = source_strengths.device
         n_nodes = tree.n_nodes
-        node_strengths = torch.zeros(n_nodes, dtype=source_strengths.dtype, device=device)
+        if n_nodes == 0:
+            return torch.zeros(0, dtype=source_strengths.dtype, device=device)
 
-        is_leaf = tree.leaf_count > 0
-        leaf_ids = torch.where(is_leaf)[0]
-
-        if leaf_ids.numel() == 0:
-            return node_strengths
-
-        ### Sum strengths within each leaf
-        leaf_starts = tree.leaf_start[leaf_ids]
-        leaf_counts = tree.leaf_count[leaf_ids]
-        n_leaves = leaf_ids.shape[0]
-
-        if int(leaf_counts.sum()) > 0:
-            from physicsnemo.mesh.spatial._ragged import _ragged_arange
-
-            positions, seg_ids = _ragged_arange(
-                leaf_starts, leaf_counts, total=tree.n_sources,
-            )
-            sorted_strengths = source_strengths[tree.sorted_source_order[positions]]
-            leaf_sums = torch.zeros(n_leaves, dtype=source_strengths.dtype, device=device)
-            leaf_sums.scatter_add_(0, seg_ids, sorted_strengths)
-            node_strengths[leaf_ids] = leaf_sums
-
-        ### Bottom-up propagation using cached level ordering
-        for level_ids in reversed(tree.internal_nodes_per_level):
-            node_strengths[level_ids] = (
-                node_strengths[tree.node_left_child[level_ids]]
-                + node_strengths[tree.node_right_child[level_ids]]
-            )
-
-        return node_strengths
-
-    def _empty_result(
-        self,
-        n_targets: int,
-        device: torch.device,
-    ) -> TensorDict[str, Float[torch.Tensor, "n_targets ..."]]:
-        """Produce a zero-valued result TensorDict for the degenerate case."""
-        # Match the dtype that AMP autocast would produce for real activations,
-        # so downstream ops don't hit a float32-vs-half mismatch.
-        dtype = (
-            torch.get_autocast_dtype(device.type)
-            if torch.is_autocast_enabled(device.type)
-            else torch.float32
+        ### Cumsum and range-subtract in fp64 to avoid catastrophic
+        ### cancellation when ``cumsum_total >> range_sum`` - the regime
+        ### of small leaves in a large tree built over offset coordinates.
+        ### See the matching note in :meth:`ClusterTree.compute_source_aggregates`.
+        sorted_strengths_64 = source_strengths[tree.sorted_source_order].double()
+        ### Pad with a leading zero so that ``cumsum[i]`` is the sum of
+        ### sorted_strengths[:i] - both endpoints index identically.
+        prefix_sum = torch.nn.functional.pad(
+            torch.cumsum(sorted_strengths_64, dim=0), (1, 0)
         )
-        ranks_dict = flatten_rank_spec(self.output_field_ranks)
-        fields: dict[str, torch.Tensor] = {}
-        for name, rank in sorted(ranks_dict.items()):
-            if rank == 0:
-                fields[name] = torch.zeros(n_targets, device=device, dtype=dtype)
-            else:
-                fields[name] = torch.zeros(
-                    n_targets, self.n_spatial_dims, device=device, dtype=dtype
-                )
-        return TensorDict(fields, batch_size=torch.Size([n_targets]), device=device)
+
+        starts = tree.node_range_start
+        ends = starts + tree.node_range_count
+        return (prefix_sum[ends] - prefix_sum[starts]).to(source_strengths.dtype)
 
     def _gather_and_evaluate(
         self,
@@ -1399,26 +1453,33 @@ class BarnesHutKernel(Kernel):
 
         return self._evaluate_interactions(scalars=scalars, vectors=vectors, device=device)
 
+    @torch.compiler.disable
     def _auto_chunk_size(self, n_total_pairs: int, device: torch.device) -> int:
         """Determine chunk size for pair-batched kernel evaluation.
 
-        Estimates peak memory per pair from the kernel's feature engineering
-        pipeline and sizes chunks to fit within ~50% of GPU memory. During
-        inference (no grad), the autograd overhead multiplier is dropped,
-        allowing larger chunks.
+        Sizes chunks to fit within a fixed fraction of total device memory
+        from the kernel's per-pair feature-engineering footprint estimate.
+        During inference (no grad), the autograd overhead multiplier is
+        dropped, allowing larger chunks.
 
-        Returns ``n_total_pairs`` (i.e., no chunking) when the estimated
-        peak fits comfortably, or when running on CPU.
+        Uses a static budget derived from
+        :func:`_device_total_memory_bytes` (cached) instead of
+        ``torch.cuda.mem_get_info``.  ``mem_get_info`` is a synchronizing
+        driver query - calling it on every kernel evaluation produced
+        ~60 syncs per training step in profiling.  Trading "exactly fits
+        in current free memory" for "fits in 25% of total device memory"
+        is fine when total_memory is large (e.g. 197 GB GB200) and the
+        non-kernel resident state (parameters + activations elsewhere) is
+        well under the remaining 75%.
+
+        On CPU the same algorithm runs against system RAM (debug-only;
+        production runs on CUDA).  Returns at least 1.
         """
-        if device.type != "cuda":
-            return n_total_pairs
-
-        if torch.is_autocast_enabled(device.type):
-            element_bytes = torch.tensor(
-                [], dtype=torch.get_autocast_dtype(device.type)
-            ).element_size()
-        else:
-            element_bytes = 4  # fp32
+        element_bytes = (
+            torch.get_autocast_dtype(device.type).itemsize
+            if torch.is_autocast_enabled(device.type)
+            else 4  # fp32
+        )
 
         autograd_overhead = 5 if torch.is_grad_enabled() else 1
         approx_peak_bytes = (
@@ -1427,18 +1488,20 @@ class BarnesHutKernel(Kernel):
             * element_bytes
             * autograd_overhead
         )
-        free_bytes, total_bytes = torch.cuda.mem_get_info(device)
-        target_bytes = free_bytes // 2
+        target_bytes = _device_chunk_budget_bytes(device)
 
-        n_chunks = max(1, ceil(approx_peak_bytes / target_bytes))
-        chunk_size = max(1, ceil(n_total_pairs / n_chunks))
+        n_chunks = max(1, _ceil_div(approx_peak_bytes, target_bytes))
+        chunk_size = max(1, _ceil_div(n_total_pairs, n_chunks))
 
         if not torch.compiler.is_compiling():
             logger.debug(
                 "auto_chunk_size: %d pairs -> %d chunks of %d "
-                "(%.1f MB est. peak, %.1f MB free / %.1f MB total GPU)",
+                "(%.1f MB est. peak, %.1f MB budget / %.1f MB total %s)",
                 n_total_pairs, n_chunks, chunk_size,
-                approx_peak_bytes / 1e6, free_bytes / 1e6, total_bytes / 1e6,
+                approx_peak_bytes / 1e6,
+                target_bytes / 1e6,
+                _device_total_memory_bytes(device) / 1e6,
+                device.type.upper(),
             )
 
         return chunk_size
@@ -1575,6 +1638,7 @@ class MultiscaleKernel(Module):
         spectral_norm: bool = False,
         use_gradient_checkpointing: bool = True,
         leaf_size: int = 1,
+        self_regularization_beta: float | None = None,
     ):
         super().__init__()
 
@@ -1620,6 +1684,7 @@ class MultiscaleKernel(Module):
                     spectral_norm=spectral_norm,
                     use_gradient_checkpointing=use_gradient_checkpointing,
                     leaf_size=leaf_size,
+                    self_regularization_beta=self_regularization_beta,
                 )
                 for name in reference_length_names
             }
@@ -1688,7 +1753,7 @@ class MultiscaleKernel(Module):
         TensorDict[str, Float[torch.Tensor, "n_targets ..."]]
             Summed results from all kernel branches.
         """
-        from physicsnemo.experimental.models.globe.cluster_tree import ClusterTree
+        from physicsnemo.mesh.spatial.cluster_tree import ClusterTree
 
         n_sources: int = len(source_points)
         device = source_points.device
@@ -1781,7 +1846,9 @@ class MultiscaleKernel(Module):
         # (int64 checkpoint-saved indices + multiply/scatter graph nodes).
         # Branch checkpointing avoids holding all branches' graphs
         # simultaneously, which is essential at large N (800k+ faces)
-        # but a pure compute overhead at small N (20k faces).
+        # but a pure compute overhead at small N.  Compared against a
+        # static fraction of total device memory rather than free memory
+        # (mem_get_info is a synchronizing driver query).
         _AUTOGRAD_BYTES_PER_PAIR = 34
         n_branches = len(self.reference_length_names)
         use_branch_ckpt = False
@@ -1789,20 +1856,20 @@ class MultiscaleKernel(Module):
             n_total_pairs = dual_plan.n_near + dual_plan.n_nf + dual_plan.n_fn
             per_branch_bytes = n_total_pairs * _AUTOGRAD_BYTES_PER_PAIR
             all_branches_bytes = per_branch_bytes * n_branches
-            if device.type == "cuda":
-                free_bytes = torch.cuda.mem_get_info(device)[0]
-                use_branch_ckpt = all_branches_bytes > free_bytes * 0.1
-            else:
-                use_branch_ckpt = False
+            ### Compares against a fraction of total device memory
+            ### (CUDA: VRAM; CPU: RAM).  ``_device_chunk_budget_bytes``
+            ### handles both via ``_device_total_memory_bytes``.
+            budget_bytes = _device_chunk_budget_bytes(device)
+            use_branch_ckpt = all_branches_bytes > budget_bytes
 
             if not torch.compiler.is_compiling():
                 logger.debug(
                     "branch checkpoint: %s (est. %.1f MB/branch, "
-                    "%.1f MB all branches, %.1f MB free, %d branches)",
+                    "%.1f MB all branches, %.1f MB budget, %d branches)",
                     "ENABLED" if use_branch_ckpt else "DISABLED",
                     per_branch_bytes / 1e6,
                     all_branches_bytes / 1e6,
-                    free_bytes / 1e6 if device.type == "cuda" else 0,
+                    budget_bytes / 1e6,
                     n_branches,
                 )
 

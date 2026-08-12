@@ -18,6 +18,29 @@
 
 This module provides functions to convert between PhysicsNeMo Mesh and other
 mesh formats, particularly PyVista.
+
+Submodules that depend on optional packages are loaded lazily via the
+module-level ``__getattr__`` (PEP 562) so that ``import physicsnemo.mesh.io``
+succeeds without those packages installed; the import only fails when the
+attribute is actually accessed.
 """
 
-from physicsnemo.mesh.io.io_pyvista import from_pyvista, to_pyvista
+from typing import TYPE_CHECKING
+
+__all__ = ["from_pyvista", "to_pyvista", "from_zarr", "to_zarr"]
+
+if TYPE_CHECKING:
+    from physicsnemo.mesh.io.io_pyvista import from_pyvista, to_pyvista
+    from physicsnemo.mesh.io.io_zarr import from_zarr, to_zarr
+
+
+def __getattr__(name: str):  # PEP 562
+    if name in {"from_pyvista", "to_pyvista"}:
+        from physicsnemo.mesh.io import io_pyvista
+
+        return getattr(io_pyvista, name)
+    if name in {"from_zarr", "to_zarr"}:
+        from physicsnemo.mesh.io import io_zarr
+
+        return getattr(io_zarr, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -14,54 +14,52 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from contextlib import nullcontext
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Literal
 
-from hydra import compose, initialize
-from omegaconf import DictConfig
 import pytest
 import torch
-from torch.distributed.checkpoint.state_dict import get_state_dict, StateDictOptions
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import (
-    StateDictType,
-    ShardedStateDictConfig,
-    ShardedOptimStateDictConfig,
-)
+import train
+from hydra import compose, initialize
+from omegaconf import DictConfig
+from torch.distributed.checkpoint.state_dict import StateDictOptions, get_state_dict
 from torch.distributed.tensor import DTensor
+from utils import parallel, trainer
 
 from physicsnemo.distributed import DistributedManager
-
-import train
-from utils import trainer
 
 DistributedManager.initialize()
 
 
 # Retrieve and fixture configs
 def _load_config(config_name: str) -> DictConfig:
+    """Load a StormCast test configuration through Hydra."""
     with initialize(version_base=None, config_path="config", job_name="test_training"):
         return compose(config_name=config_name)
 
 
 @pytest.fixture
 def cfg_regression():
+    """Return the regression UNet test configuration."""
     return _load_config(config_name="test_regression_unet.yaml")
 
 
 @pytest.fixture
 def cfg_diffusion():
+    """Return the diffusion DiT test configuration."""
     return _load_config(config_name="test_diffusion.yaml")
 
 
 @pytest.fixture
 def cfg_diffusion_unet():
+    """Return the diffusion UNet test configuration."""
     return _load_config(config_name="test_diffusion_unet.yaml")
 
 
 def _setup_rundir(tmp_path, num_procs):
+    """Create and share a temporary run directory across all test ranks."""
     # Set up rundir in the temporary directory
     _rundir = tmp_path / "rundir"
     _rundir.mkdir()
@@ -75,6 +73,42 @@ def _setup_rundir(tmp_path, num_procs):
         rundir = output_list[0]
 
     return rundir
+
+
+def test_distribute_model_syncs_before_sharding(monkeypatch):
+    """Verify startup synchronization precedes spatial and FSDP sharding."""
+    helper = object.__new__(parallel.ParallelHelper)
+    helper.use_shard_tensor = True
+    domain_mesh = object()
+    ddp_mesh = object()
+    helper.mesh = {"domain": domain_mesh, "ddp": ddp_mesh}
+    model = torch.nn.Linear(2, 2)
+    calls = []
+
+    monkeypatch.setattr(
+        parallel,
+        "sync_module_over_mesh",
+        lambda module, mesh: calls.append(("sync", module, mesh)),
+    )
+    monkeypatch.setattr(
+        helper,
+        "_shard_spatial_params",
+        lambda module: calls.append(("spatial", module)),
+    )
+    monkeypatch.setattr(
+        parallel,
+        "fully_shard",
+        lambda module, mesh: calls.append(("fsdp", module, mesh)),
+    )
+
+    result = helper.distribute_model(model)
+
+    assert result is model
+    assert calls == [
+        ("sync", model, domain_mesh),
+        ("spatial", model),
+        ("fsdp", model, ddp_mesh),
+    ]
 
 
 @pytest.mark.parametrize("net_architecture", ["unet", "dit"])
@@ -241,22 +275,33 @@ def test_checkpointing(
     )
 
 
+@pytest.mark.parametrize("force_sharding", [False, True])
 def test_checkpoint_integrity(
     tmp_path: Path,
     cfg_diffusion: DictConfig,
     *,
+    force_sharding: bool,
     net_architecture: Literal["unet", "dit"] = "dit",
 ):
     """Test that model and optimizer states are intact and sharded correctly after checkpoint save/load."""
 
     dist = DistributedManager()
-    if not dist.world_size == 4:
+    if dist.world_size not in (1, 4):
         pytest.skip(
-            f"Skipping: test_checkpoint_integrity is only run with exactly 4 processes, current: {dist.world_size}."
+            f"Skipping: test_checkpoint_integrity is only run with 1 or 4 processes, current: {dist.world_size}."
         )
 
-    cfg_diffusion.training.domain_parallel_size = 2
-    cfg_diffusion.training.batch_size = 2
+    if dist.world_size == 4:
+        if force_sharding:
+            pytest.skip(
+                "Skipping: force_sharding is redundant with domain_parallel_size = 2"
+            )
+        cfg_diffusion.training.domain_parallel_size = 2
+        cfg_diffusion.training.batch_size = 2
+    else:
+        cfg_diffusion.training.domain_parallel_size = 1
+        cfg_diffusion.training.batch_size = 1
+        cfg_diffusion.training.force_sharding = force_sharding
     cfg_diffusion.training.rundir = _setup_rundir(tmp_path, dist.world_size)
     cfg_diffusion.training.seed = 0
 
@@ -281,6 +326,13 @@ def test_checkpoint_integrity(
     (params0, opt_params0) = get_state_dict(net0, opt0, options=options)
     (params1, opt_params1) = get_state_dict(net1, opt1, options=options)
 
+    assert set(params0.keys()) == set(params1.keys()), (
+        "State dicts before and after checkpointing have different keys"
+    )
+    assert set(opt_params0.keys()) == set(opt_params1.keys()), (
+        "Optimizer state dicts before and after checkpointing have different keys"
+    )
+
     for key, param0 in params0.items():
         param1 = params1[key]
         assert (param0 == param1).all().cpu().item(), (
@@ -288,11 +340,50 @@ def test_checkpoint_integrity(
         )
 
     for key, opt_param0 in opt_params0["state"].items():
-        opt_param1 = opt_params0["state"][key]
+        opt_param1 = opt_params1["state"][key]
         for opt_var in opt_param0:
             assert (opt_param0[opt_var] == opt_param1[opt_var]).all().cpu().item(), (
                 f"Optimizer parameter {key} before and after checkpointing is not equal"
             )
+
+    for _ in range(5):
+        t1.train_step()
+    t1.save_checkpoint()
+
+    torch.distributed.barrier()
+
+    # flip sharding setting to test that sharded checkpoints load ok in non-sharded mode and vice versa
+    cfg_diffusion.training.force_sharding = not cfg_diffusion.training.force_sharding
+    t2 = trainer.Trainer(cfg_diffusion.copy())
+    net2 = t2.net
+    opt2 = t2.optimizer
+
+    options = StateDictOptions(full_state_dict=True)
+    (params1, opt_params1) = get_state_dict(net1, opt1, options=options)
+    (params2, opt_params2) = get_state_dict(net2, opt2, options=options)
+
+    assert set(params1.keys()) == set(params2.keys()), (
+        "Model state dicts before and after checkpointing have different keys"
+    )
+    assert set(opt_params1.keys()) == set(opt_params2.keys()), (
+        "Optimizer state dicts before and after checkpointing have different keys"
+    )
+
+    for key, param1 in params1.items():
+        param2 = params2[key]
+        assert (param1 == param2).all().cpu().item(), (
+            f"Model parameter {key} before (force_sharding={force_sharding}) and after force_sharding={not force_sharding} checkpointing is not equal"
+        )
+
+    for key, opt_param1 in opt_params1["state"].items():
+        opt_param2 = opt_params2["state"][key]
+        for opt_var in opt_param1:
+            assert (opt_param1[opt_var] == opt_param2[opt_var]).all().cpu().item(), (
+                f"Optimizer parameter {key} before (force_sharding={force_sharding}) and after force_sharding={not force_sharding} checkpointing is not equal"
+            )
+
+    if dist.world_size != 4:
+        return  # remaining tests are for the 4-GPU setup
 
     # get positional embedding tensors for model and optimizer
     posembed = params1["model.model.tokenizer.pos_embed"]
@@ -467,6 +558,173 @@ def test_seeding(
     _check_sigma_pattern("after training/validation/checkpoint")
 
     torch.distributed.barrier()
+
+
+@pytest.mark.parametrize(
+    "world_size, domain_parallel_size, batch_size",
+    [(1, 1, 1), (2, 2, 1), (4, 2, 2)],
+    ids=["single", "domain_parallel", "data_domain_parallel"],
+)
+def test_masking(
+    tmp_path: Path,
+    cfg_diffusion: DictConfig,
+    *,
+    world_size: int,
+    domain_parallel_size: int,
+    batch_size: int,
+):
+    """Exercise the DiT masking pathway end-to-end across parallelism schemes.
+
+    Verifies that training and validation run correctly when:
+    - The dataset serves a per-sample ``"mask"`` key (right-half valid).
+    - The DiT is built with ``use_nan_mask_tokens=True``, enabling token-level
+      mask-token substitution inside every NATTEN block.
+    - The loss weight is computed at token granularity (patch-level pooling +
+      nearest-neighbour expansion) rather than at pixel level.
+
+    Three launch configurations are covered (each run targets one and skips the
+    others, matching the world size pytest was launched with):
+
+    - ``single`` (1 GPU): no sharding; pixel tensors are plain ``torch.Tensor``
+      and the mask pooling runs on ordinary tensors.
+    - ``domain_parallel`` (2 GPUs): ``domain_parallel_size=2``, which shards the
+      height dimension and exercises the ShardTensor ``max_pool2d`` /
+      ``interpolate`` path used to pool the mask to token granularity.
+    - ``data_domain_parallel`` (4 GPUs): a (2, 2) mesh combining data
+      parallelism (``batch_size=2``) with domain parallelism
+      (``domain_parallel_size=2``).
+    """
+    dist = DistributedManager()
+    if dist.world_size != world_size:
+        pytest.skip(
+            f"Skipping: this configuration requires {world_size} process(es), "
+            f"current: {dist.world_size}."
+        )
+
+    rundir = _setup_rundir(tmp_path, dist.world_size)
+
+    cfg = cfg_diffusion.copy()
+    cfg.training.rundir = rundir
+    cfg.training.validation_freq = 5
+    cfg.training.domain_parallel_size = domain_parallel_size
+    cfg.training.batch_size = batch_size
+
+    # Enable dataloader mask in the mock dataset
+    cfg.dataset.use_mask = True
+
+    # Enable DiT token-level masking
+    cfg.model.architecture = "dit"
+    cfg.model.hyperparameters.use_nan_mask_tokens = True
+
+    if "regression" in cfg.model.diffusion_conditions:
+        cfg.model.diffusion_conditions.remove("regression")
+
+    train.main(cfg)
+
+    if dist.world_size > 1:
+        torch.distributed.barrier()
+
+    ckpt_path = os.path.join(
+        rundir, "checkpoints_diffusion", "EDMPreconditioner.0.10.mdlus"
+    )
+    assert os.path.isfile(ckpt_path), (
+        "Diffusion checkpoint not found after masked training"
+    )
+
+
+@pytest.mark.parametrize(
+    "world_size, domain_parallel_size, batch_size",
+    [(1, 1, 1), (2, 2, 1), (4, 2, 2)],
+    ids=["single", "domain_parallel", "data_domain_parallel"],
+)
+def test_channel_loss_weights(
+    tmp_path: Path,
+    cfg_diffusion_unet: DictConfig,
+    *,
+    world_size: int,
+    domain_parallel_size: int,
+    batch_size: int,
+):
+    """Verify that channel_loss_weights composes correctly with the dataset mask.
+
+    Mirrors the parallelism parametrisation of ``test_masking`` but exercises
+    the channel-weight path instead of token masking.  Uses the UNet model
+    (no channels_last memory format) to keep weight-value assertions simple.
+
+    - A dataset spatial mask: right half of the domain is valid (1), left half
+      is invalid (0).  Image is (H=32, W=16) so the boundary is at column 8.
+    - ``channel_loss_weights``: ``state_0`` zeroed out (0.0), ``state_2``
+      doubled (2.0), ``state_1`` left at the default (1.0).
+
+    Expected per-pixel weight after composition (broadcast to B, C, H, W):
+
+    - ``state_0``: all zeros (channel weight 0 overrides spatial validity).
+    - ``state_1``: 0 on the left half, 1 on the right half (spatial mask only).
+    - ``state_2``: 0 on the left half, 2 on the right half (spatial × channel).
+
+    Under domain parallelism the weight tensor is a height-sharded
+    ``ShardTensor``; the width-based spatial pattern is still fully visible on
+    every rank's local shard, so the same value assertions apply.
+    """
+    dist = DistributedManager()
+    if dist.world_size != world_size:
+        pytest.skip(
+            f"Skipping: this configuration requires {world_size} process(es), "
+            f"current: {dist.world_size}."
+        )
+
+    rundir = _setup_rundir(tmp_path, dist.world_size)
+
+    cfg = cfg_diffusion_unet.copy()
+    cfg.training.rundir = rundir
+    cfg.training.domain_parallel_size = domain_parallel_size
+    cfg.training.batch_size = batch_size
+    cfg.dataset.image_size = [32, 16]  # small image: W=16, mask boundary at col 8
+    cfg.dataset.use_mask = True
+    cfg.training.channel_loss_weights = {"state_0": 0.0, "state_2": 2.0}
+
+    t = trainer.Trainer(cfg)
+
+    # --- Check the channel weight tensor (replicated across all ranks) ---
+    ch_w = t._channel_loss_weight
+    # Under domain parallelism ch_w is a DTensor; extract local copy.
+    ch_w_local = ch_w.to_local() if isinstance(ch_w, DTensor) else ch_w
+    assert ch_w_local.shape == (1, 3, 1, 1)
+    assert ch_w_local[0, 0, 0, 0].item() == pytest.approx(0.0)
+    assert ch_w_local[0, 1, 0, 0].item() == pytest.approx(1.0)
+    assert ch_w_local[0, 2, 0, 0].item() == pytest.approx(2.0)
+
+    # --- Intercept loss_fn to capture the composed weight during train_step ---
+    captured_weights: list[torch.Tensor] = []
+    _orig_loss = t.loss_fn
+
+    def _capturing_loss(target, weight, **kwargs):
+        # Under domain parallelism weight is a ShardTensor; .to_local() gives
+        # the local height shard (B, C, H_local, W).  The width-based spatial
+        # pattern (columns 0-7 invalid, 8-15 valid) is fully visible locally.
+        w_local = weight.to_local() if isinstance(weight, DTensor) else weight
+        captured_weights.append(w_local.detach().cpu())
+        return _orig_loss(target, weight, **kwargs)
+
+    t.loss_fn = _capturing_loss
+    t.train_step()
+
+    assert captured_weights, "loss_fn was never called during train_step"
+    w = captured_weights[0]  # (B, C, H_local, W)
+
+    # Image width = 16; left half = columns 0-7 (invalid), right = 8-15 (valid).
+    assert w[:, 0].eq(0.0).all(), "state_0 should be zero everywhere"
+    assert w[:, 1, :, :8].eq(0.0).all(), "state_1 left half should be 0"
+    assert w[:, 1, :, 8:].eq(1.0).all(), "state_1 right half should be 1"
+    assert w[:, 2, :, :8].eq(0.0).all(), "state_2 left half should be 0"
+    assert w[:, 2, :, 8:].eq(2.0).all(), "state_2 right half should be 2"
+
+    # Validation path should also run without error.
+    t.total_steps += 1
+    t.validate()
+
+    if dist.world_size > 1:
+        torch.distributed.barrier()
 
 
 @pytest.mark.parametrize("net_architecture", ["unet", "dit"])

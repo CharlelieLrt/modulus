@@ -47,8 +47,8 @@ from torch.distributed.checkpoint.state_dict import (
     set_model_state_dict,
     set_optimizer_state_dict,
 )
+from torch.distributed.fsdp import FSDPModule, ShardingStrategy
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import ShardingStrategy
 from torch.distributed.tensor import DTensor, distribute_tensor
 from torch.optim.lr_scheduler import LRScheduler
 
@@ -68,8 +68,15 @@ checkpoint_logging = PythonLogger("checkpoint")
 
 
 def _is_distributed_model(model: torch.nn.Module) -> bool:
-    """Return ``True`` when *model* is FSDP-wrapped or has DTensor params."""
-    if isinstance(model, FSDP):
+    """
+    A simple helper function to determine whether to save/load using DCP or not.
+
+    Return ``True`` when *model* is FSDP-wrapped or has DTensor params.
+    FSDP: FSDP1
+    FSDPModule: FSDP2 (fully_shard)
+
+    """
+    if isinstance(model, (FSDP, FSDPModule)):
         return True
     return any(isinstance(p, DTensor) for p in model.parameters())
 
@@ -77,7 +84,9 @@ def _is_distributed_model(model: torch.nn.Module) -> bool:
 def _unwrap_ddp_compile(
     model: torch.nn.Module, loading: bool = False
 ) -> torch.nn.Module:
-    """Strip DDP / DataParallel / ``torch.compile`` wrappers, keep FSDP."""
+    """
+    Strip DDP / DataParallel / ``torch.compile`` wrappers, keep FSDP.
+    """
     if isinstance(
         model,
         (torch.nn.DataParallel, torch.nn.parallel.DistributedDataParallel),
@@ -94,10 +103,33 @@ def _unwrap_ddp_compile(
 
 
 def _unwrap_fsdp(model: torch.nn.Module) -> torch.nn.Module:
-    """Unwrap one FSDP layer (if present) to reach the user module."""
+    """
+    Unwrap one FSDP layer (if present) to reach the user module.
+    FSDP1 only.
+    """
     if isinstance(model, FSDP):
         return model.module
     return model
+
+
+def _unwrapped_class_name(model: torch.nn.Module) -> str:
+    """
+    Return the user-facing class name, peeling FSDP1/FSDP2 wrappers.
+
+    FSDP2's ``fully_shard`` rebinds ``model.__class__`` to a dynamically
+    generated ``FSDP{ClassName}`` subclass with bases ``(FSDPModule, original_cls)``.
+
+    Without this fix, saving an FSDP2-wrapped model produces a ``.mdlus``
+    file named after the synthetic class (e.g. ``FSDPFullyConnected.mdlus``)
+    instead of the original (``FullyConnected.mdlus``).
+    """
+    inner = _unwrap_fsdp(model)
+    if isinstance(inner, FSDPModule):
+        for cls in type(inner).__mro__:
+            if issubclass(cls, FSDPModule) or cls in (torch.nn.Module, object):
+                continue
+            return cls.__name__
+    return type(inner).__name__
 
 
 def _cpu_offload_state_dict(state_dict: dict[str, Any]) -> dict[str, Any]:
@@ -113,15 +145,66 @@ def _cpu_offload_state_dict(state_dict: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _materialize_dtensors_to_full(state_dict: dict[str, Any]) -> dict[str, Any]:
+    """Replace DTensor entries with their fully-gathered plain tensor.
+
+    DCP's ``get_model_state_dict`` / ``get_optimizer_state_dict`` with
+    ``StateDictOptions(full_state_dict=True)`` is documented to gather
+    DTensor shards into full plain tensors, but for FSDP2 (``fully_shard``)
+    models on some PyTorch versions the returned dict still contains
+    DTensors whose ``_local_tensor`` is just the local shard.  When that
+    output is then serialized via ``torch.save`` and reloaded on a model
+    with a different mesh shape (e.g. ``(ddp=N,)`` -> ``(ddp=1, domain=N)``),
+    only rank 0's local shard survives the round-trip -- producing a
+    silent half-sized parameter and a ``size mismatch`` ``RuntimeError``
+    on ``load_state_dict``.
+
+    This helper compensates: every rank calls ``DTensor.full_tensor()``
+    (a collective all-gather) on any remaining DTensors, so the resulting
+    dict on every rank contains only plain tensors with the full data.
+
+    Without this fix, ``test_checkpointing[None-1-1-1-1-False-unet]`` fails
+    with ``RuntimeError: found no DeviceMesh from dtensor args for
+    c10d::broadcast_`` when reloading a checkpoint saved on a different mesh.
+
+    **Collective** -- must be called on the same keys in the same order
+    on every rank.
+    """
+    out: dict[str, Any] = {}
+    for k, v in state_dict.items():
+        if isinstance(v, DTensor):
+            out[k] = v.full_tensor()
+        elif isinstance(v, dict):
+            out[k] = _materialize_dtensors_to_full(v)
+        else:
+            out[k] = v
+    return out
+
+
+def _force_standard_contiguous(state_dict: dict[str, Any]) -> dict[str, Any]:
+    """
+    Before broadcasting model/optim state from rank 0,
+    converts channels_last tensors to standard NCHW layout via .contiguous().
+
+    This is necessary because DCP's broadcast_from_rank0 does not handle channels_last tensors (torch bug)
+    Needed for both FSDP1 + FSDP2.
+    """
+    out: dict[str, Any] = {}
+    for k, v in state_dict.items():
+        if isinstance(v, torch.Tensor) and not isinstance(v, DTensor) and v.dim() > 0:
+            out[k] = v.contiguous()
+        elif isinstance(v, dict):
+            out[k] = _force_standard_contiguous(v)
+        else:
+            out[k] = v
+    return out
+
+
 def _get_dtensor_param_placements(
     model: torch.nn.Module,
 ) -> dict[str, tuple[Any, tuple[Any, ...]]]:
-    """Map parameter names to ``(device_mesh, placements)`` for DTensor params.
-
-    Uses ``get_model_state_dict`` with native (non-full) format so that the
-    DCP layer unflattens FlatParameters back to original names and preserves
-    each parameter's DTensor placement.  This works correctly for both
-    ``use_orig_params=True`` and ``use_orig_params=False``.
+    """
+    Builds a map {param_name: (device_mesh, placements)} for every DTensor param.
 
     **Collective** — all ranks must call this together.
     """
@@ -133,18 +216,31 @@ def _get_dtensor_param_placements(
     return info
 
 
-def _has_non_fsdp_dtensors(
+def _needs_dcp_broadcast_bypass(
     model: torch.nn.Module,
     dtensor_plc: dict[str, tuple[Any, tuple[Any, ...]]],
 ) -> bool:
-    """Return ``True`` when *dtensor_plc* contains placements not managed by FSDP.
-
-    FSDP with ``FULL_SHARD`` or ``SHARD_GRAD_OP`` wraps parameters as
-    DTensors on its own mesh.  ``broadcast_from_rank0`` handles these
-    natively, so manual redistribution should be skipped.  Only
-    user-created DTensors (e.g. ShardTensor on a separate domain mesh)
-    require explicit redistribution.
     """
+    Return ``True`` when loading should bypass DCP's ``broadcast_from_rank0``.
+
+    Use the explicit ``broadcast_object_list`` /
+    ``_redistribute_sd_for_dtensor`` path instead for:
+
+    * Plain modules with user-managed DTensor params (domain mesh)
+    * FSDP1 + NO_SHARD
+    * FSDP2 with a degenerate mesh axis (size == 1)
+    * FSDP2 with no materialized DTensor params (e.g. 1-GPU)
+
+    Without this fix, loading a checkpoint with FSDP2 on 1-GPU crashes with
+    ``KeyError: 'state.0.step'`` or ``RuntimeError: found no DeviceMesh`` depending on the mesh configuration.
+
+    FSDP: FSDP1
+    FSDPModule: FSDP2
+    """
+    if isinstance(model, FSDPModule):
+        if not dtensor_plc:
+            return True
+        return any(any(s == 1 for s in mesh.shape) for mesh, _ in dtensor_plc.values())
     if not dtensor_plc:
         return False
     if not isinstance(model, FSDP):
@@ -158,22 +254,46 @@ def _redistribute_sd_for_dtensor(
     placements: dict[str, tuple[Any, tuple[Any, ...]]],
     state_dict: dict[str, Any],
 ) -> dict[str, Any]:
-    """Convert plain tensors in *state_dict* to DTensors matching *placements*.
-
-    Entries whose key appears in *placements* are converted via
-    ``distribute_tensor`` so that each rank receives its correct local shard.
     """
+    Converts tensors in *state_dict* to DTensors matching *placements*.
+
+    Entries whose key appears in *placements* are converted to DTensors via
+    distribute_tensor so that each rank receives its correct local shard.
+
+    When *placements* is empty (e.g. FSDP2 on world_size == 1 materialises
+    no DTensor parameters), the state dict is returned as-is.
+
+    Without this fix, cross-mesh checkpoint reloads (e.g. save with
+    ddp=4, load with ddp=1, domain=4) fail because
+    distribute_tensor refuses to re-mesh an existing DTensor.
+    """
+    if not placements:
+        return dict(state_dict)
 
     target_device = next(iter(placements.values()))[0].device_type
     out: dict[str, Any] = {}
     for key, value in state_dict.items():
-        if not isinstance(value, torch.Tensor) or isinstance(value, DTensor):
+        if not isinstance(value, torch.Tensor):
             out[key] = value
             continue
 
         if key in placements:
             mesh, plc = placements[key]
+            if isinstance(value, DTensor):
+                if value.device_mesh == mesh:
+                    # Same mesh; ``distribute_tensor`` would no-op and
+                    # passing the DTensor straight through avoids an
+                    # unnecessary collective.
+                    out[key] = value
+                    continue
+                # Cross-mesh: peel back to plain data, then redistribute.
+                value = value.to_local()
             out[key] = distribute_tensor(value.to(mesh.device_type), mesh, list(plc))
+        elif isinstance(value, DTensor):
+            # Non-distributed key but the input is still a DTensor; keep
+            # it as-is so the caller can pass it through to ``set_*_state_dict``
+            # untouched.
+            out[key] = value
         else:
             out[key] = value.to(target_device)
     return out
@@ -183,15 +303,23 @@ def _redistribute_optim_sd_for_dtensor(
     placements: dict[str, tuple[Any, tuple[Any, ...]]],
     optim_sd: dict[str, Any],
 ) -> dict[str, Any]:
-    """Shard optimizer state tensors to local chunks matching model placements.
+    """
+    Shard optimizer state tensors to local chunks matching model placements.
 
-    FSDP's ``optim_state_dict_to_load`` expects each optimizer state tensor
-    (``exp_avg``, ``exp_avg_sq``, …) to be a **plain tensor** whose shape
-    matches the parameter's *local* shape — not a DTensor.  We use
-    ``distribute_tensor(...).to_local()`` to extract each rank's shard.
-    Scalar state entries (e.g. ``step``) are left unchanged.
+    FSDP's optim_state_dict_to_load expects each optimizer state tensor
+    (exp_avg, exp_avg_sq, ...) to be a plain tensor whose shape
+    matches the parameter's local_shape - not a DTensor.  We use
+    distribute_tensor(...).to_local() to extract each rank's shard.
+    Scalar state entries (e.g. step) are left unchanged.
+
+    When placements is empty (e.g. FSDP2 on world_size == 1 materialises no DTensor parameters),
+    the optimizer state dict is returned as-is - the live optimizer expects plain tensors and the serialized data already matches.
+
+    Without this fix, optimizer reload fails on cross-mesh scenarios for the same reason as _redistribute_sd_for_dtensor.
     """
     if "state" not in optim_sd:
+        return optim_sd
+    if not placements:
         return optim_sd
 
     target_device = next(iter(placements.values()))[0].device_type
@@ -205,14 +333,26 @@ def _redistribute_optim_sd_for_dtensor(
         new_ps: dict[str, Any] = {}
         mesh_plc = placements.get(param_name)
         for k, v in param_state.items():
-            if (
-                not isinstance(v, torch.Tensor)
-                or isinstance(v, DTensor)
-                or v.dim() == 0
-            ):
+            if not isinstance(v, torch.Tensor) or v.dim() == 0:
+                new_ps[k] = v
+            elif isinstance(v, DTensor) and mesh_plc is None:
+                # No target placement for this entry; leave the DTensor
+                # untouched so the caller can pass it through.
                 new_ps[k] = v
             elif mesh_plc is not None:
                 mesh, plc = mesh_plc
+                if isinstance(v, DTensor):
+                    if v.device_mesh == mesh:
+                        # Already on the target mesh -- ``to_local`` already
+                        # yields the per-rank local shard.
+                        new_ps[k] = v.to_local()
+                        continue
+                    # Cross-mesh DTensor: peel to plain data before
+                    # redistributing.  Assumes save materialised the full
+                    # tensor on every rank (see
+                    # :func:`_redistribute_sd_for_dtensor` for the same
+                    # assumption).
+                    v = v.to_local()
                 new_ps[k] = distribute_tensor(
                     v.to(mesh.device_type), mesh, list(plc)
                 ).to_local()
@@ -223,8 +363,176 @@ def _redistribute_optim_sd_for_dtensor(
     return {**optim_sd, "state": new_state}
 
 
+def _materialize_optimizer_state_for_dcp(
+    optimizer: torch.optim.Optimizer,
+    loaded_state: dict[Any, Any],
+) -> None:
+    """
+    Pre-fills optimizer.state[p] with zero placeholders (step, exp_avg, etc.) before set_optimizer_state_dict.
+
+    Without this fix, loading a trained checkpoint into a freshly
+    constructed FSDP2 optimizer raises ``KeyError: 'state.0.step'``
+    inside DCP's ``_unflatten_state_dict``.
+    """
+    if not loaded_state:
+        return
+
+    # Loaded state is keyed by *index* (0, 1, ...) on save; pick any entry
+    # to learn the per-param state keys.
+    sample = next(iter(loaded_state.values()), None)
+    if not isinstance(sample, dict):
+        return
+    state_keys = list(sample.keys())
+    if not state_keys:
+        return
+    for group in optimizer.param_groups:
+        for p in group["params"]:
+            slot = optimizer.state[p]
+            for k in state_keys:
+                if k in slot:
+                    continue
+                ref = sample.get(k)
+                if isinstance(ref, torch.Tensor) and ref.dim() == 0:
+                    # Scalar state (typically ``step``).  Match dtype/device
+                    # of the live param so subsequent .copy_ inside DCP
+                    # doesn't trip on a mismatch.
+                    slot[k] = torch.zeros((), dtype=ref.dtype, device=p.device)
+                else:
+                    # Tensor-shaped state (``exp_avg``, ``exp_avg_sq``, ...);
+                    # zeros_like matches dtype/device/sharding of the live
+                    # param, which is what DCP will copy into.
+                    slot[k] = torch.zeros_like(p)
+
+
+def _fsdp_uses_flat_param_optim(model: torch.nn.Module | None) -> bool:
+    """
+    Returns True only for FSDP1 with use_orig_params=False (FlatParameter optimizer path).
+    Not needed after dropping FSDP1 support.
+    """
+    if not isinstance(model, FSDP):
+        return False
+    return not getattr(model, "_use_orig_params", True)
+
+
+def _strides_match_channels_last(
+    shape: tuple[int, ...] | torch.Size,
+    stride: tuple[int, ...],
+) -> bool:
+    """
+    Checks whether a tensor’s strides match canonical channels_last (4D) or channels_last_3d (5D) layout.
+
+    Used to determine whether to remap optimizer state for channels_last tensors.
+    Not needed after dropping FSDP1 support (only affects FSDP1 with use_orig_params=False).
+    """
+    if len(shape) != len(stride):
+        return False
+    if len(shape) == 4:
+        n, c, h, w = shape
+        return tuple(stride) == (c * h * w, 1, w * c, c)
+    if len(shape) == 5:
+        n, c, d, h, w = shape
+        return tuple(stride) == (d * h * w * c, 1, h * w * c, w * c, c)
+    return False
+
+
+def _get_cl_param_fqns(opt_model: torch.nn.Module | None) -> set[str]:
+    """
+    Scans FSDP1 FlatParameter metadata (_fqns, _strides, _contiguities) to find which original
+    params are stored in channels_last byte order.
+
+    Returns their fully-qualified names (FQNs).
+    Returns an empty set when opt_model is not FSDP1 with use_orig_params=False.
+
+    Not needed after dropping FSDP1 support (only affects FSDP1 with use_orig_params=False).
+    """
+    if not _fsdp_uses_flat_param_optim(opt_model):
+        return set()
+
+    cl_fqns: set[str] = set()
+    for module_name, module in opt_model.named_modules():
+        if not isinstance(module, FSDP):
+            continue
+        flat_param = getattr(module, "_flat_param", None)
+        if flat_param is None:
+            continue
+        # DCP's ``_get_fqns`` skips the ``_fsdp_wrapped_module`` attribute
+        # when building parameter FQNs; mirror that by removing the segment
+        # from the module path.
+        path_segments = [
+            seg
+            for seg in module_name.split(".")
+            if seg and seg != "_fsdp_wrapped_module"
+        ]
+        prefix = ".".join(path_segments)
+        if prefix:
+            prefix += "."
+        for fqn, shape, stride, contig in zip(
+            flat_param._fqns,
+            flat_param._shapes,
+            flat_param._strides,
+            flat_param._contiguities,
+        ):
+            if contig:
+                continue
+            if _strides_match_channels_last(shape, stride):
+                cl_fqns.add((prefix + fqn).removeprefix("_orig_mod."))
+    return cl_fqns
+
+
+def _remap_channels_last_optim_sd(
+    opt_model: torch.nn.Module | None,
+    optim_sd: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Fixes FSDP1 FlatParameter flatten/unflatten asymmetry:
+     - save reads bytes in storage order, load reads in logical order.
+
+    For channels_last conv weights, permutes optimizer state tensors so the load-side flatten sees the correct byte layout.
+    Also normalizes non-CL tensors to standard contiguity.
+
+    Not needed after dropping FSDP1 support (only affects FSDP1 with use_orig_params=False).
+    """
+    if "state" not in optim_sd:
+        return optim_sd
+    if not _fsdp_uses_flat_param_optim(opt_model):
+        return optim_sd
+
+    cl_fqns = _get_cl_param_fqns(opt_model)
+
+    def _normalize(t: torch.Tensor, is_cl_dest: bool) -> torch.Tensor:
+        if isinstance(t, DTensor) or t.dim() == 0:
+            return t
+        # Force standard contiguity first so any saved-CL bytes are
+        # rewritten in NCHW storage order before the layout decision; this
+        # makes the subsequent broadcast inside DCP layout-safe whether or
+        # not we permute.
+        t = t.contiguous()
+        if not is_cl_dest:
+            return t
+        if t.dim() == 4:
+            return t.permute(0, 2, 3, 1).contiguous().view(*t.shape)
+        if t.dim() == 5:
+            return t.permute(0, 2, 3, 4, 1).contiguous().view(*t.shape)
+        return t
+
+    new_state: dict[str, Any] = {}
+    for pname, pstate in optim_sd["state"].items():
+        if not isinstance(pstate, dict):
+            new_state[pname] = pstate
+            continue
+        is_cl_dest = pname.removeprefix("_orig_mod.") in cl_fqns
+        new_ps: dict[str, Any] = {}
+        for k, v in pstate.items():
+            new_ps[k] = _normalize(v, is_cl_dest) if isinstance(v, torch.Tensor) else v
+        new_state[pname] = new_ps
+
+    return {**optim_sd, "state": new_state}
+
+
 def _is_mdlus_archive(path: str) -> bool:
-    """Return ``True`` if *path* is a ``.mdlus`` archive (tar or zip containing ``model.pt``)."""
+    """
+    Checks if a path is a .mdlus archive (tar or zip containing model.pt).
+    """
     cached = _cache_if_needed(path)
     if tarfile.is_tarfile(cached):
         with tarfile.open(cached, "r") as tar:
@@ -238,7 +546,10 @@ def _is_mdlus_archive(path: str) -> bool:
 def _extract_mdlus_state_dict(
     file_name: str, device: str | torch.device = "cpu"
 ) -> dict[str, Any]:
-    """Read only the ``state_dict`` from a ``.mdlus`` archive."""
+    """
+    Reads only the state_dict from a .mdlus file without instantiating the full model.
+    Used in distributed load where rank 0 reads the file and broadcasts tensors.
+    """
     cached = _cache_if_needed(file_name)
     fmt = Module._detect_checkpoint_format(cached)
 
@@ -264,16 +575,8 @@ def _get_checkpoint_filename(
     model_type: str = "mdlus",
     distributed: bool = False,
 ) -> str:
-    r"""Build the filename for a numbered checkpoint.
-
-    Resolution logic:
-
-    * **Explicit index** (``index`` is not ``None``): returns that exact
-      checkpoint path.
-    * **Latest** (``index is None``, ``saving=False``): scans for existing
-      checkpoints and returns the one with the largest index.
-    * **Next** (``index is None``, ``saving=True``): returns the path for
-      the *next* index after the largest existing one.
+    """
+    Builds the filename for a numbered checkpoint.
 
     When no existing checkpoints are found, the returned path uses index 0.
 
@@ -401,7 +704,7 @@ def _unique_model_names(
     model_dict: dict[str, list[torch.nn.Module]] = {}
     for model0 in models:
         model0 = _unwrap_ddp_compile(model0, loading=loading)
-        base_name = type(_unwrap_fsdp(model0)).__name__
+        base_name = _unwrapped_class_name(model0)
         if base_name in model_dict:
             model_dict[base_name].append(model0)
         else:
@@ -559,6 +862,12 @@ def save_checkpoint(
             # hangs for FSDP NO_SHARD + DTensor topologies.
             options = StateDictOptions(full_state_dict=True)
             state_dict = get_model_state_dict(model, options=options)
+            # FSDP2 (``fully_shard``) does not always honour
+            # ``full_state_dict=True``; the result can still contain DTensors
+            # with sharded ``_local_tensor`` on each rank.  Calling
+            # ``full_tensor()`` collectively materialises full plain
+            # tensors so the serialized file is mesh-shape-agnostic.
+            state_dict = _materialize_dtensors_to_full(state_dict)
             if should_write:
                 state_dict = _cpu_offload_state_dict(state_dict)
                 if isinstance(inner, physicsnemo.core.Module):
@@ -592,6 +901,11 @@ def save_checkpoint(
                 opt_state_dict = get_optimizer_state_dict(
                     opt_model, optimizer, options=options
                 )
+                # See note above ``_materialize_dtensors_to_full`` -- the
+                # same FSDP2 ``full_state_dict`` gap affects optimizer
+                # state (``exp_avg``, ``exp_avg_sq``, ...), so we gather
+                # those too.
+                opt_state_dict = _materialize_dtensors_to_full(opt_state_dict)
                 if should_write:
                     opt_state_dict = _cpu_offload_state_dict(opt_state_dict)
             else:
@@ -911,7 +1225,7 @@ def load_model_weights(
             state_dict = torch.load(cached, map_location=device, weights_only=False)
 
     dtensor_plc = _get_dtensor_param_placements(model)
-    if _has_non_fsdp_dtensors(model, dtensor_plc):
+    if _needs_dcp_broadcast_bypass(model, dtensor_plc):
         sd_list: list[Any] = [state_dict]
         torch.distributed.broadcast_object_list(sd_list, src=0)
         state_dict = _redistribute_sd_for_dtensor(dtensor_plc, sd_list[0])
@@ -942,7 +1256,9 @@ def _load_checkpoint_distributed(
     optimizer_model: torch.nn.Module | None,
     is_rank0: bool,
 ) -> int:
-    """Distributed load: rank 0 reads files, DCP broadcasts to all ranks."""
+    """
+    Distributed load: rank 0 reads files, DCP broadcasts to all ranks.
+    """
     broadcast_options = StateDictOptions(
         full_state_dict=True, broadcast_from_rank0=True
     )
@@ -1009,7 +1325,7 @@ def _load_checkpoint_distributed(
             # This is needed because use_orig_params=False flattens DTensor
             # params into a plain FlatParameter, hiding them from inspection.
             dtensor_plc = _get_dtensor_param_placements(model)
-            if _has_non_fsdp_dtensors(model, dtensor_plc):
+            if _needs_dcp_broadcast_bypass(model, dtensor_plc):
                 # broadcast_from_rank0 does not handle user-managed DTensor
                 # redistribution (e.g. ShardTensor on a domain mesh), so we
                 # broadcast the full state dict ourselves and convert entries
@@ -1020,10 +1336,24 @@ def _load_checkpoint_distributed(
                 torch.distributed.broadcast_object_list(sd_list, src=0)
                 sd = _redistribute_sd_for_dtensor(dtensor_plc, sd_list[0])
                 set_model_state_dict(model, sd, options=full_options)
+            elif isinstance(model, FSDPModule):
+                # FSDP2 (fully_shard): DCP's broadcast_from_rank0 can hang
+                # for FSDPModule on multi-rank meshes.  Broadcast the full
+                # state dict explicitly and let DCP handle the DTensor
+                # sharding locally on each rank via full_state_dict=True.
+                sd_list = [model_state_dicts.get(name, {}) if is_rank0 else {}]
+                torch.distributed.broadcast_object_list(sd_list, src=0)
+                sd = _force_standard_contiguous(sd_list[0])
+                set_model_state_dict(model, sd, options=full_options)
             else:
                 # FSDP-managed DTensors (FULL_SHARD/SHARD_GRAD_OP) or no
-                # DTensors at all — broadcast_from_rank0 handles both.
+                # DTensors at all — broadcast_from_rank0 handles both. Force
+                # standard contiguity on rank 0 first so the per-tensor
+                # broadcast inside DCP doesn't permute channels_last params on
+                # receive (see ``_force_standard_contiguous`` for the why).
                 sd = model_state_dicts.get(name, {}) if is_rank0 else {}
+                if is_rank0:
+                    sd = _force_standard_contiguous(sd)
                 set_model_state_dict(model, sd, options=broadcast_options)
         else:
             # A mix of distributed and non-distributed models is valid
@@ -1043,16 +1373,32 @@ def _load_checkpoint_distributed(
         path, index=epoch, model_type="pt", distributed=True
     )
 
+    # Broadcast file existence so all ranks agree on whether to enter the
+    # (collective) optimizer load. Without this, a rundir that has model
+    # weights but no training checkpoint -- e.g. fine-tuning from a
+    # weights-only export -- would have rank 0 enter ``set_optimizer_state_dict``
+    # with an empty dict and trip the "missing 'state'" error inside DCP.
+    ckpt_exists = fs.exists(checkpoint_filename) if is_rank0 else None
+    ckpt_flags: list[Any] = [ckpt_exists]
+    torch.distributed.broadcast_object_list(ckpt_flags, src=0)
+    ckpt_exists = ckpt_flags[0]
+
+    if not ckpt_exists:
+        checkpoint_logging.warning(
+            f"No training checkpoint at {checkpoint_filename}; "
+            "skipping optimizer/scheduler/scaler load"
+        )
+        return 0
+
     checkpoint_dict: dict[str, Any] = {}
     if is_rank0:
-        if fs.exists(checkpoint_filename):
-            file_to_load = _cache_if_needed(checkpoint_filename)
-            checkpoint_dict = torch.load(
-                file_to_load, map_location=device, weights_only=False
-            )
-            checkpoint_logging.success(
-                f"Loaded checkpoint file {checkpoint_filename} to device {device}"
-            )
+        file_to_load = _cache_if_needed(checkpoint_filename)
+        checkpoint_dict = torch.load(
+            file_to_load, map_location=device, weights_only=False
+        )
+        checkpoint_logging.success(
+            f"Loaded checkpoint file {checkpoint_filename} to device {device}"
+        )
 
     # Optimizer state via DCP (collective)
     if optimizer:
@@ -1063,14 +1409,53 @@ def _load_checkpoint_distributed(
         optim_sd = checkpoint_dict.get("optimizer_state_dict", {}) if is_rank0 else {}
         if opt_model is not None and _is_distributed_model(opt_model):
             dtensor_plc = _get_dtensor_param_placements(opt_model)
-            if _has_non_fsdp_dtensors(opt_model, dtensor_plc):
+            if isinstance(opt_model, FSDPModule) and _needs_dcp_broadcast_bypass(
+                opt_model, dtensor_plc
+            ):
+                # FSDP2 with a degenerate mesh axis (e.g. ddp=1, domain=2):
+                # broadcast_from_rank0 hangs on degenerate axes, so broadcast
+                # manually and use full_state_dict=True (no broadcast_from_rank0).
                 osd_list: list[Any] = [optim_sd]
                 torch.distributed.broadcast_object_list(osd_list, src=0)
+                optim_sd = osd_list[0]
+                optim_sd = _remap_channels_last_optim_sd(opt_model, optim_sd)
+                # Pre-populate live optimizer ``state[p]`` so DCP's
+                # flatten/unflatten round-trip has the ``state.X.*`` keys
+                # the checkpoint provides.  Without this, a freshly
+                # constructed optimizer (which has empty ``state``) trips
+                # ``KeyError: 'state.0.step'`` inside DCP's
+                # ``_unflatten_state_dict``.  The placeholders are
+                # overwritten by the following ``set_optimizer_state_dict``.
+                _materialize_optimizer_state_for_dcp(
+                    optimizer, optim_sd.get("state", {})
+                )
+                set_optimizer_state_dict(
+                    opt_model, optimizer, optim_sd, options=full_options
+                )
+            elif isinstance(opt_model, FSDPModule):
+                # FSDP2 with a fully non-degenerate mesh (e.g. ddp=2, domain=2):
+                # use broadcast_from_rank0 which redistributes shards correctly.
+                optim_sd = _remap_channels_last_optim_sd(opt_model, optim_sd)
+                set_optimizer_state_dict(
+                    opt_model, optimizer, optim_sd, options=broadcast_options
+                )
+            elif _needs_dcp_broadcast_bypass(opt_model, dtensor_plc):
+                # FSDP1 NO_SHARD / plain DTensor: redistribute full tensors to
+                # per-rank local shards before loading.
+                osd_list = [optim_sd]
+                torch.distributed.broadcast_object_list(osd_list, src=0)
                 optim_sd = _redistribute_optim_sd_for_dtensor(dtensor_plc, osd_list[0])
+                optim_sd = _remap_channels_last_optim_sd(opt_model, optim_sd)
+                _materialize_optimizer_state_for_dcp(
+                    optimizer, optim_sd.get("state", {})
+                )
                 set_optimizer_state_dict(
                     opt_model, optimizer, optim_sd, options=full_options
                 )
             else:
+                # Remap on rank 0 only -- DCP broadcasts the rank-0 dict to
+                # the others as part of broadcast_from_rank0.
+                optim_sd = _remap_channels_last_optim_sd(opt_model, optim_sd)
                 set_optimizer_state_dict(
                     opt_model, optimizer, optim_sd, options=broadcast_options
                 )
@@ -1110,30 +1495,30 @@ def _load_checkpoint_distributed(
 def get_checkpoint_dir(base_dir: Path | str, model_name: str) -> str:
     r"""Build a model-specific checkpoint directory path.
 
-    Returns ``"{base_dir}/checkpoints_{model_name}"``, handling both
-    local paths and ``msc://`` URIs.
+    Returns ``"{base_dir}/checkpoints_{model_name}"``, handling both local
+    paths and ``fsspec`` URIs (e.g. ``msc://``).  Always uses ``/`` as the
+    appended separator so the result is identical across operating systems
+    and remains a valid URI when ``base_dir`` is a remote scheme. This
+    matches the path convention used elsewhere in this module (see e.g.
+    :func:`_get_checkpoint_filename`).
 
     Parameters
     ----------
     base_dir : Path | str
         Root directory under which the checkpoint subdirectory is placed.
+        Any trailing ``/`` or ``\\`` is stripped before concatenation, so
+        ``"foo"``, ``"foo/"``, and (on Windows) ``"foo\\"`` all behave
+        identically.
     model_name : str
         Model name used as the directory suffix.
 
     Returns
     -------
     str
-        Full path to the checkpoint directory.
+        Full path to the checkpoint directory, always joined with ``/``.
     """
-    base_dir = str(base_dir)
-    top_level_dir = f"checkpoints_{model_name}"
-    protocol = fsspec.utils.get_protocol(base_dir)
-    if protocol == "msc":
-        if not base_dir.endswith("/"):
-            base_dir += "/"
-        return base_dir + top_level_dir
-    else:
-        return os.path.join(base_dir, top_level_dir)
+    base_dir = str(base_dir).rstrip("/\\")
+    return f"{base_dir}/checkpoints_{model_name}"
 
 
 def _cache_if_needed(path: str) -> str:

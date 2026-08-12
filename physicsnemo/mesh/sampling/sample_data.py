@@ -41,7 +41,7 @@ if TYPE_CHECKING:
 
 
 def _ensure_bvh(mesh: "Mesh", bvh: BVH | None) -> BVH:
-    """Return the given BVH, or build one from *mesh* if ``None``."""
+    """Return the given BVH, or build one from ``mesh`` if ``None``."""
     if bvh is not None:
         return bvh
     return BVH.from_mesh(mesh)
@@ -59,39 +59,45 @@ def _solve_barycentric_system(
     Float[torch.Tensor, "*batch n_vertices_per_cell"],
     Float[torch.Tensor, " *batch"],
 ]:
-    """Core barycentric coordinate solver (shared by both variants).
+    r"""Core barycentric coordinate solver (shared by both variants).
 
-    Solves the linear system to find barycentric coordinates w_1, ..., w_n such that:
-        query_relative = sum(w_i * relative_vectors[i])
+    Solves the linear system to find barycentric coordinates
+    :math:`w_1, \ldots, w_n` such that:
 
-    Then computes w_0 = 1 - sum(w_i) and returns all coordinates [w_0, w_1, ..., w_n].
+    .. math::
+        \texttt{query\_relative} = \sum_{i=1}^{n} w_i \, \texttt{relative\_vectors}[i]
 
-    For codimension != 0 manifolds (n_spatial_dims != n_manifold_dims), this uses
-    least squares which projects the query point onto the simplex's affine hull.
-    The reconstruction error measures how far the query point is from this projection.
+    Then computes :math:`w_0 = 1 - \sum_{i=1}^{n} w_i` and returns all
+    coordinates :math:`[w_0, w_1, \ldots, w_n]`.
+
+    For codimension != 0 manifolds (``n_spatial_dims != n_manifold_dims``),
+    this uses least squares which projects the query point onto the simplex's
+    affine hull. The reconstruction error measures how far the query point is
+    from this projection.
 
     Parameters
     ----------
     relative_vectors : torch.Tensor
         Edge vectors from first vertex to others,
-        shape (..., n_manifold_dims, n_spatial_dims)
+        shape ``(..., n_manifold_dims, n_spatial_dims)``.
     query_relative : torch.Tensor
-        Query point relative to first vertex,
-        shape (..., n_spatial_dims)
+        Query point relative to first vertex, shape ``(..., n_spatial_dims)``.
 
     Returns
     -------
     tuple[torch.Tensor, torch.Tensor]
-        Tuple of (barycentric_coords, reconstruction_error):
-        - barycentric_coords: shape (..., n_vertices_per_cell)
-            where n_vertices_per_cell = n_manifold_dims + 1
-        - reconstruction_error: L2 distance from query point to its projection
-            onto the simplex's affine hull, shape (...). Zero for codimension-0.
+        Tuple of ``(barycentric_coords, reconstruction_error)``:
+
+        - ``barycentric_coords``: shape ``(..., n_vertices_per_cell)``
+          where ``n_vertices_per_cell = n_manifold_dims + 1``.
+        - ``reconstruction_error``: L2 distance from query point to its
+          projection onto the simplex's affine hull, shape ``(...)``.
+          Zero for codimension-0.
 
     Notes
     -----
-    For square systems (n_spatial_dims == n_manifold_dims): uses direct solve.
-    For over/under-determined systems: uses least squares.
+    For square systems (``n_spatial_dims == n_manifold_dims``): uses direct
+    solve. For over/under-determined systems: uses least squares.
     """
     n_manifold_dims = relative_vectors.shape[-2]
     n_spatial_dims = relative_vectors.shape[-1]
@@ -152,6 +158,7 @@ def compute_barycentric_coordinates(
     -------
     tuple[torch.Tensor, torch.Tensor]
         (barycentric_coords, reconstruction_error):
+
         - barycentric_coords: shape (n_queries, n_cells, n_vertices_per_cell)
         - reconstruction_error: shape (n_queries, n_cells). Zero for codimension-0.
     """
@@ -188,6 +195,7 @@ def compute_barycentric_coordinates_pairwise(
     -------
     tuple[torch.Tensor, torch.Tensor]
         (barycentric_coords, reconstruction_error):
+
         - barycentric_coords: shape (n_pairs, n_vertices_per_cell)
         - reconstruction_error: shape (n_pairs,). Zero for codimension-0.
 
@@ -239,6 +247,7 @@ def _find_containing_pairs(
     -------
     tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]
         (query_indices, cell_indices, bary_coords):
+
         - query_indices: shape (n_containing,)
         - cell_indices: shape (n_containing,)
         - bary_coords: shape (n_containing, n_vertices_per_cell) or None if empty
@@ -267,10 +276,12 @@ def _find_containing_pairs(
 
     is_inside = (bary_cand >= -tolerance).all(dim=-1) & (recon_cand <= tolerance)
 
-    ### Filter to confirmed containments
-    query_indices = query_idx_cand[is_inside]
-    cell_indices = cell_idx_cand[is_inside]
-    bary_coords = bary_cand[is_inside] if len(query_indices) > 0 else None
+    ### Filter to confirmed containments. Reuse one integer compaction for all
+    ### three arrays instead of independently compacting the same CUDA mask.
+    keep_indices = is_inside.nonzero(as_tuple=True)[0]
+    query_indices = query_idx_cand[keep_indices]
+    cell_indices = cell_idx_cand[keep_indices]
+    bary_coords = bary_cand[keep_indices] if len(keep_indices) > 0 else None
 
     return query_indices, cell_indices, bary_coords
 
@@ -291,19 +302,20 @@ def find_containing_cells(
     mesh : Mesh
         The mesh to query.
     query_points : torch.Tensor
-        Query point locations, shape (n_queries, n_spatial_dims).
+        Query point locations, shape ``(n_queries, n_spatial_dims)``.
     tolerance : float
         Tolerance for considering a point inside a cell.
     bvh : BVH or None, optional
-        Pre-built BVH. Auto-built from *mesh* if ``None``.
+        Pre-built BVH. Auto-built from ``mesh`` if ``None``.
 
     Returns
     -------
     tuple[torch.Tensor, torch.Tensor]
-        (cell_indices, barycentric_coords):
-        - cell_indices: shape (n_queries,). Value is -1 if no cell contains
-          the point, otherwise the first containing cell index.
-        - barycentric_coords: shape (n_queries, n_vertices_per_cell).
+        ``(cell_indices, barycentric_coords)``:
+
+        - ``cell_indices``: shape ``(n_queries,)``. Value is ``-1`` if no
+          cell contains the point, otherwise the first containing cell index.
+        - ``barycentric_coords``: shape ``(n_queries, n_vertices_per_cell)``.
           NaN if no containing cell.
 
     Notes
@@ -360,16 +372,16 @@ def find_all_containing_cells(
     mesh : Mesh
         The mesh to query.
     query_points : torch.Tensor
-        Query point locations, shape (n_queries, n_spatial_dims).
+        Query point locations, shape ``(n_queries, n_spatial_dims)``.
     tolerance : float
         Tolerance for considering a point inside a cell.
     bvh : BVH or None, optional
-        Pre-built BVH. Auto-built from *mesh* if ``None``.
+        Pre-built BVH. Auto-built from ``mesh`` if ``None``.
 
     Returns
     -------
     Adjacency
-        Adjacency where containing cells for query *i* are at
+        Adjacency where containing cells for query ``i`` are at
         ``result.indices[result.offsets[i]:result.offsets[i+1]]``.
     """
     bvh = _ensure_bvh(mesh, bvh)
@@ -381,6 +393,7 @@ def find_all_containing_cells(
         source_indices=query_indices,
         target_indices=cell_indices,
         n_sources=len(query_points),
+        n_targets=mesh.n_cells,
     )
 
 
@@ -412,6 +425,7 @@ def find_nearest_cells(
     -------
     tuple[torch.Tensor, torch.Tensor]
         ``(cell_indices, projected_points)``:
+
         - cell_indices: shape ``(n_queries,)``
         - projected_points: centroids of nearest cells, shape
           ``(n_queries, n_spatial_dims)``
@@ -452,7 +466,7 @@ def match_points(
     -------
     tuple[torch.Tensor, torch.Tensor]
         ``(source_indices, target_indices)`` -- matched index pairs, both
-        shape :math:`(K,)` where *K* is the number of matches found.
+        shape :math:`(K,)` where :math:`K` is the number of matches found.
 
     Notes
     -----
@@ -507,29 +521,50 @@ def _accumulate_sampled_data(
     """
     device = mesh.points.device
 
-    ### Count how many cells contain each query point
-    query_containment_count = torch.zeros(n_queries, dtype=torch.long, device=device)
-    if len(query_indices) > 0:
-        query_containment_count.scatter_add_(
-            0, query_indices, torch.ones_like(query_indices)
+    if multiple_cells_strategy not in ("mean", "nan"):
+        raise ValueError(
+            f"Invalid {multiple_cells_strategy=!r}. Must be 'mean' or 'nan'."
         )
+
+    ### Count how many cells contain each query point. ``torch.bincount`` reads
+    ### back the maximum bin on CUDA; fixed-size scatter avoids that host sync.
+    query_containment_count = torch.zeros(n_queries, dtype=torch.long, device=device)
+    query_containment_count.scatter_add_(
+        0, query_indices, torch.ones_like(query_indices)
+    )
+    if multiple_cells_strategy == "mean":
+        invalid_queries = query_containment_count == 0
+    else:
+        invalid_queries = query_containment_count != 1
 
     source_data = mesh.cell_data if data_source == "cells" else mesh.point_data
     cells = mesh.cells  # captured for point-data interpolation below
 
     def _accumulate_field(values: torch.Tensor) -> torch.Tensor:
         """Scatter-accumulate a single data field across query points."""
+        if values.is_floating_point() or values.is_complex():
+            output_dtype = (
+                torch.promote_types(values.dtype, mesh.points.dtype)
+                if data_source == "points"
+                else values.dtype
+            )
+        else:
+            # Missing and ambiguous samples are represented by NaN. Integer and
+            # boolean fields therefore need a floating output dtype. Float64
+            # minimizes precision loss, but cannot exactly represent every int64
+            # value outside the range [-2**53, 2**53].
+            output_dtype = torch.float64
+
         output_shape = (n_queries,) + values.shape[1:]
-        output = torch.full(
-            output_shape, float("nan"), dtype=values.dtype, device=device
-        )
 
         if len(query_indices) == 0:
-            return output
+            return torch.full(
+                output_shape, float("nan"), dtype=output_dtype, device=device
+            )
 
         ### Compute per-pair values
         if data_source == "cells":
-            pair_values = values[cell_indices]
+            pair_values = values[cell_indices].to(output_dtype)
         elif data_source == "points":
             if (
                 bary_coords is None
@@ -538,7 +573,7 @@ def _accumulate_sampled_data(
                     "bary_coords is unexpectedly None for non-empty query set."
                 )
             point_idx = cells[cell_indices]
-            point_vals = values[point_idx]
+            point_vals = values[point_idx].to(output_dtype)
 
             bary_expanded = bary_coords.view(
                 bary_coords.shape[0],
@@ -549,28 +584,24 @@ def _accumulate_sampled_data(
         else:
             raise ValueError(f"Invalid {data_source=!r}. Must be 'cells' or 'points'.")
 
-        ### Scatter-accumulate into output
+        ### Scatter directly into the result buffer. The following in-place
+        ### normalization and masking preserve autograd while avoiding redundant
+        ### full-sized output, division, and ``where`` tensors.
+        output = torch.zeros(output_shape, dtype=output_dtype, device=device)
+        idx_expanded = query_indices.view(-1, *([1] * (values.ndim - 1))).expand_as(
+            pair_values
+        )
+        output.scatter_add_(0, idx_expanded, pair_values)
+
+        count_shape = (-1,) + (1,) * (values.ndim - 1)
         if multiple_cells_strategy == "mean":
-            output_sum = torch.zeros(output_shape, dtype=values.dtype, device=device)
-            idx_expanded = query_indices.view(-1, *([1] * (values.ndim - 1))).expand_as(
-                pair_values
-            )
-            output_sum.scatter_add_(0, idx_expanded, pair_values)
+            # Clamp in integer space because ``clamp_min`` rejects complex dtypes.
+            divisor = query_containment_count.clamp_min(1)
+            output.div_(divisor.view(count_shape))
 
-            valid = query_containment_count > 0
-            output[valid] = output_sum[valid] / query_containment_count[valid].to(
-                values.dtype
-            ).view(-1, *([1] * (values.ndim - 1)))
-
-        elif multiple_cells_strategy == "nan":
-            single_cell_mask = query_containment_count == 1
-            if single_cell_mask.any():
-                has_single = single_cell_mask[query_indices]
-                output[query_indices[has_single]] = pair_values[has_single]
-        else:
-            raise ValueError(
-                f"Invalid {multiple_cells_strategy=!r}. Must be 'mean' or 'nan'."
-            )
+        # Mask in place instead of compacting a CUDA boolean mask. Together with
+        # the fixed-size count scatter above, this reduces host synchronizations.
+        output.masked_fill_(invalid_queries.view(count_shape), float("nan"))
 
         return output
 
@@ -620,6 +651,7 @@ def sample_data_at_points(
         - "points": Interpolate point data using barycentric coordinates.
     multiple_cells_strategy : {"mean", "nan"}, optional
         How to handle query points contained in multiple cells:
+
         - "mean": Return arithmetic mean of values from all containing cells.
         - "nan": Return NaN for ambiguous points.
     project_onto_nearest_cell : bool, optional
@@ -639,13 +671,21 @@ def sample_data_at_points(
     -------
     TensorDict
         Sampled data for each query point, with the same keys as
-        ``mesh.cell_data`` or ``mesh.point_data`` (depending on *data_source*).
-        Values are NaN for query points outside the mesh.
+        ``mesh.cell_data`` or ``mesh.point_data`` (depending on
+        ``data_source``). Values are NaN for query points outside the mesh, and
+        for ambiguous points when ``multiple_cells_strategy="nan"``.
+
+        Floating-point and complex cell data retain their source dtype. For
+        floating-point and complex point data, interpolation uses the dtype
+        resulting from promoting the field dtype with ``mesh.points.dtype``.
+        Integer and boolean data are promoted to ``torch.float64`` so that NaN
+        and non-integral interpolated or mean values can be represented. This
+        conversion may round integer values whose magnitude exceeds ``2**53``.
 
     Raises
     ------
     ValueError
-        If *data_source* or *multiple_cells_strategy* is invalid.
+        If ``data_source`` or ``multiple_cells_strategy`` is invalid.
 
     Examples
     --------

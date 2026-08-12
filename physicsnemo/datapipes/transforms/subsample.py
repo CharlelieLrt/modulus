@@ -30,64 +30,14 @@ from tensordict import TensorDict
 
 from physicsnemo.datapipes.registry import register
 from physicsnemo.datapipes.transforms.base import Transform
-
-
-def poisson_sample_indices_fixed(N: int, k: int, device=None) -> torch.Tensor:
-    """
-    Near-uniform sampler of indices for very large arrays.
-
-    This function provides nearly uniform sampling for cases where the number
-    of indices is very large (> 2^24) and :func:`torch.multinomial` cannot work.
-    Unlike using :func:`torch.randperm`, there is no need to materialize and
-    randomize the entire tensor of indices.
-
-    The sampling uses exponentially distributed gaps to achieve near-uniform
-    coverage without replacement.
-
-    Parameters
-    ----------
-    N : int
-        Total number of available indices.
-    k : int
-        Number of indices to sample.
-    device : torch.device, optional
-        Device for the output tensor.
-
-    Returns
-    -------
-    torch.Tensor
-        Tensor of shape :math:`(k,)` containing sampled indices.
-
-    Examples
-    --------
-    >>> indices = poisson_sample_indices_fixed(1000000, 10000)
-    >>> print(indices.shape)
-    torch.Size([10000])
-    """
-    # Draw exponential gaps off of random initializations
-    gaps = torch.rand(k, device=device).exponential_()
-
-    summed = gaps.sum()
-
-    # Normalize so total cumulative sum == N
-    gaps *= N / summed
-
-    # Compute cumulative positions
-    idx = torch.cumsum(gaps, dim=0)
-
-    # Shift down so range starts at 0 and ends below N
-    idx -= gaps[0] / 2
-
-    # Round to nearest integer index
-    idx = torch.clamp(idx.floor().long(), min=0, max=N - 1)
-
-    return idx
+from physicsnemo.nn.functional import weighted_multinomial
 
 
 def shuffle_array(
     points: torch.Tensor,
     n_points: int,
     weights: Optional[torch.Tensor] = None,
+    generator: torch.Generator | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Sample points with or without weights.
@@ -101,6 +51,8 @@ def shuffle_array(
     weights : torch.Tensor, optional
         Optional weights for sampling, shape :math:`(N,)`.
         If None, uses uniform sampling.
+    generator : torch.Generator, optional
+        Random generator for reproducibility.
 
     Returns
     -------
@@ -117,17 +69,17 @@ def shuffle_array(
         indices = torch.arange(N, device=device)
         return points, indices
 
-    if weights is not None:
-        # Weighted sampling
-        indices = torch.multinomial(weights, n_points, replacement=False)
-    else:
-        # Uniform sampling
-        if N > 2**24:
-            # Use Poisson sampling for very large arrays
-            indices = poisson_sample_indices_fixed(N, n_points, device=device)
-        else:
-            # Use standard multinomial for smaller arrays
-            indices = torch.randperm(N, device=device)[:n_points]
+    strategy = (
+        "poisson_gap" if weights is None and N > 2**24 and n_points < N else "exact"
+    )
+    sampling_input = weights if weights is not None else N
+    indices = weighted_multinomial(
+        sampling_input,
+        n_points,
+        strategy=strategy,
+        device=device,
+        generator=generator,
+    )
 
     sampled_points = points[indices]
     return sampled_points, indices
@@ -145,8 +97,8 @@ class SubsamplePoints(Transform):
 
     Supports two sampling algorithms:
 
-    - ``"poisson_fixed"``: Near-uniform sampling for very large datasets (> 2^24 points)
-    - ``"uniform"``: Standard uniform sampling
+    - ``"poisson_fixed"``: Poisson-gap coverage for very large datasets
+    - ``"uniform"``: Exact uniform sampling
 
     Optionally supports weighted sampling (e.g., area-weighted for surface meshes)
     by providing a ``weights_key``.
@@ -159,7 +111,8 @@ class SubsamplePoints(Transform):
     n_points : int
         Number of points to sample.
     algorithm : {"poisson_fixed", "uniform"}, default="poisson_fixed"
-        Sampling algorithm to use.
+        Sampling algorithm to use. ``"poisson_fixed"`` selects the low-memory
+        Poisson-gap approximation above :math:`2^{24}` candidates.
     weights_key : str, optional
         Optional key for sampling weights (e.g., ``"surface_areas"``
         for area-weighted surface sampling). When provided, samples
@@ -225,7 +178,9 @@ class SubsamplePoints(Transform):
         n_points : int
             Number of points to sample.
         algorithm : {"poisson_fixed", "uniform"}, default="poisson_fixed"
-            Sampling algorithm to use.
+            Sampling algorithm to use. ``"poisson_fixed"`` selects the
+            low-memory Poisson-gap approximation above :math:`2^{24}`
+            candidates.
         weights_key : str, optional
             Optional key for sampling weights (e.g., ``"surface_areas"``
             for area-weighted surface sampling). When provided, samples
@@ -236,6 +191,7 @@ class SubsamplePoints(Transform):
         self.n_points = n_points
         self.algorithm = algorithm
         self.weights_key = weights_key
+        self._generator: torch.Generator | None = None
 
     def __call__(self, data: TensorDict) -> TensorDict:
         """
@@ -300,12 +256,28 @@ class SubsamplePoints(Transform):
         device = first_tensor.device
         if weights is not None:
             # Weighted sampling
-            _, indices = shuffle_array(first_tensor, self.n_points, weights=weights)
+            _, indices = shuffle_array(
+                first_tensor,
+                self.n_points,
+                weights=weights,
+                generator=self._generator,
+            )
         elif self.algorithm == "poisson_fixed" and N > 2**24:
-            indices = poisson_sample_indices_fixed(N, self.n_points, device=device)
+            indices = weighted_multinomial(
+                N,
+                self.n_points,
+                strategy="poisson_gap",
+                device=device,
+                generator=self._generator,
+            )
         else:
-            # Use uniform sampling
-            indices = torch.randperm(N, device=device)[: self.n_points]
+            indices = weighted_multinomial(
+                N,
+                self.n_points,
+                strategy="exact",
+                device=device,
+                generator=self._generator,
+            )
 
         # Apply indices to all keys
         updates = {}

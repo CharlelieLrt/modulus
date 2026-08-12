@@ -20,7 +20,7 @@ import pytest
 import torch
 
 from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
-from physicsnemo.diffusion.samplers.solvers import (
+from physicsnemo.diffusion.samplers import (
     EDMStochasticEulerSolver,
     EDMStochasticHeunSolver,
     EulerSolver,
@@ -302,6 +302,7 @@ class TestStepNonRegression:
     SPATIAL_CONFIGS,
     ids=[c[0] for c in SPATIAL_CONFIGS],
 )
+@pytest.mark.usefixtures("nop_compile")
 class TestStepCompile:
     """Double-call compile tests for solver step()."""
 

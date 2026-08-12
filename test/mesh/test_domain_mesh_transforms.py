@@ -16,6 +16,7 @@
 
 """Tests for DomainMesh transform passthrough methods."""
 
+import inspect
 import math
 
 import pytest
@@ -103,49 +104,51 @@ class TestProperties:
         assert tet_domain.boundary_names == ["inlet", "wall"]
 
 
-### apply
+### apply_to_meshes
 
 
-class TestApply:
-    """Tests for DomainMesh.apply."""
+class TestApplyToMeshes:
+    """Tests for DomainMesh.apply_to_meshes."""
 
     def test_applies_fn_to_interior(self, tet_domain):
         original_points = tet_domain.interior.points.clone()
-        dm2 = tet_domain.apply(lambda m: m.translate([1, 0, 0]))
+        dm2 = tet_domain.apply_to_meshes(lambda m: m.translate([1, 0, 0]))
         expected = original_points + torch.tensor([1.0, 0.0, 0.0])
         assert torch.allclose(dm2.interior.points, expected)
 
     def test_applies_fn_to_all_boundaries(self, tet_domain):
         offset = torch.tensor([0.0, 0.0, 1.0])
-        dm2 = tet_domain.apply(lambda m: m.translate([0, 0, 1]))
+        dm2 = tet_domain.apply_to_meshes(lambda m: m.translate([0, 0, 1]))
         for name in tet_domain.boundary_names:
             original = tet_domain.boundaries[name].points
             assert torch.allclose(dm2.boundaries[name].points, original + offset)
 
     def test_preserves_global_data(self, tet_domain):
-        dm2 = tet_domain.apply(lambda m: m.translate([1, 1, 1]))
+        dm2 = tet_domain.apply_to_meshes(lambda m: m.translate([1, 1, 1]))
         assert torch.equal(dm2.global_data["Re"], tet_domain.global_data["Re"])
         assert torch.equal(dm2.global_data["AoA"], tet_domain.global_data["AoA"])
 
     def test_global_data_is_independent_copy(self, tet_domain):
         """Mutating transformed domain's global_data must not affect original."""
         original_re = tet_domain.global_data["Re"].clone()
-        dm2 = tet_domain.apply(lambda m: m.translate([1, 0, 0]))
+        dm2 = tet_domain.apply_to_meshes(lambda m: m.translate([1, 0, 0]))
         dm2.global_data["Re"].fill_(0.0)
         assert torch.equal(tet_domain.global_data["Re"], original_re)
 
     def test_works_with_no_boundaries(self, no_boundary_domain):
-        dm2 = no_boundary_domain.apply(lambda m: m.translate([1, 0, 0]))
+        dm2 = no_boundary_domain.apply_to_meshes(lambda m: m.translate([1, 0, 0]))
         assert dm2.n_boundaries == 0
         assert dm2.interior.points[0, 0].item() == pytest.approx(1.0)
 
     def test_returns_domain_mesh(self, tet_domain):
-        dm2 = tet_domain.apply(lambda m: m)
+        dm2 = tet_domain.apply_to_meshes(lambda m: m)
         assert isinstance(dm2, DomainMesh)
 
     def test_interior_only(self, tet_domain):
-        """apply with boundaries=False should leave boundaries unchanged."""
-        dm2 = tet_domain.apply(lambda m: m.translate([1, 0, 0]), boundaries=False)
+        """apply_to_meshes with boundaries=False should leave boundaries unchanged."""
+        dm2 = tet_domain.apply_to_meshes(
+            lambda m: m.translate([1, 0, 0]), boundaries=False
+        )
         assert not torch.equal(dm2.interior.points, tet_domain.interior.points)
         for name in tet_domain.boundary_names:
             assert torch.equal(
@@ -153,8 +156,10 @@ class TestApply:
             )
 
     def test_boundaries_only(self, tet_domain):
-        """apply with interior=False should leave interior unchanged."""
-        dm2 = tet_domain.apply(lambda m: m.translate([1, 0, 0]), interior=False)
+        """apply_to_meshes with interior=False should leave interior unchanged."""
+        dm2 = tet_domain.apply_to_meshes(
+            lambda m: m.translate([1, 0, 0]), interior=False
+        )
         assert torch.equal(dm2.interior.points, tet_domain.interior.points)
         for name in tet_domain.boundary_names:
             assert not torch.equal(
@@ -358,6 +363,16 @@ class TestComputeCellDerivatives:
 class TestValidate:
     """Tests for DomainMesh.validate passthrough."""
 
+    def test_options_match_mesh_validate(self):
+        """Domain validation should expose the canonical per-mesh options."""
+        mesh_options = list(inspect.signature(Mesh.validate).parameters.values())[1:]
+        domain_options = list(
+            inspect.signature(DomainMesh.validate).parameters.values()
+        )[1:]
+        assert [
+            (option.name, option.kind, option.default) for option in domain_options
+        ] == [(option.name, option.kind, option.default) for option in mesh_options]
+
     def test_report_structure(self, tet_domain):
         report = tet_domain.validate()
         assert "interior" in report
@@ -384,6 +399,15 @@ class TestValidate:
         dm = DomainMesh(interior=interior)
         report = dm.validate()
         assert not report["valid"]
+
+    def test_self_intersection_option_propagates(self, tet_domain):
+        with pytest.raises(NotImplementedError, match="[Ss]elf-intersection"):
+            tet_domain.validate(check_self_intersection=True)
+
+    def test_positional_tolerance_is_preserved(self, tet_domain):
+        """The sixth historical argument remains the geometric tolerance."""
+        report = tet_domain.validate(True, True, False, True, False, 1e-6)
+        assert isinstance(report["valid"], bool)
 
 
 ### Boundary watertightness
@@ -713,3 +737,62 @@ class TestDomainGlobalDataTransform:
         )
         assert dm2.global_data["velocity"][0].item() == pytest.approx(0.0, abs=1e-6)
         assert dm2.global_data["velocity"][1].item() == pytest.approx(1.0, abs=1e-6)
+
+
+def test_domain_mesh_to_float_dtype_preserves_integer_cells():
+    """Regression: DomainMesh.to(<float dtype>) must cast floating tensors only;
+    the integer cells of the interior and boundary meshes must stay integer (the
+    generated tensorclass .to recursed in and cast them to float, failing
+    Mesh.__post_init__)."""
+    interior = Mesh(
+        points=torch.randn(4, 3), cells=torch.tensor([[0, 1, 2], [1, 3, 2]])
+    )
+    dm = DomainMesh(interior=interior, boundaries={"b": interior.get_boundary_mesh()})
+    dm.global_data["scale"] = torch.tensor(2.0)
+
+    dm64 = dm.to(torch.float64)
+    assert dm64.interior.points.dtype == torch.float64
+    assert dm64.interior.cells.dtype == torch.int64
+    assert dm64.boundaries["b"].points.dtype == torch.float64
+    assert dm64.boundaries["b"].cells.dtype == torch.int64
+    assert dm64.global_data["scale"].dtype == torch.float64
+
+
+def test_domain_mesh_to_same_float_dtype_preserves_integer_cells():
+    """Regression (PR #1716 review): DomainMesh.to(<same float dtype>) must keep the
+    cells-safe path instead of falling back to the cells-breaking tensorclass `.to`
+    when the domain is already at the requested float dtype."""
+    interior = Mesh(
+        points=torch.randn(4, 3).double(),  # already float64
+        cells=torch.tensor([[0, 1, 2], [1, 3, 2]]),
+    )
+    dm = DomainMesh(interior=interior)
+
+    dm64 = dm.to(torch.float64)  # same dtype -> must not raise
+    assert dm64.interior.points.dtype == torch.float64
+    assert dm64.interior.cells.dtype == torch.int64
+
+
+def test_domain_mesh_to_device_move_preserves_mixed_precision():
+    """A device-only DomainMesh.to must not homogenize float dtypes: a float16
+    global_data leaf stays float16 (only an explicit float-dtype request casts it)."""
+    interior = Mesh(points=torch.randn(4, 3), cells=torch.tensor([[0, 1, 2]]))
+    dm = DomainMesh(interior=interior)
+    dm.global_data["half"] = torch.randn(3, dtype=torch.float16)
+
+    out = dm.to("cpu")
+    assert out.global_data["half"].dtype == torch.float16
+    assert out.interior.cells.dtype == torch.int64
+
+
+def test_domain_mesh_to_float_dtype_forwards_transfer_kwargs():
+    """Regression (PR #1716 review): a DomainMesh float cast forwards transfer kwargs
+    (e.g. non_blocking) rather than dropping them, while preserving integer cells."""
+    interior = Mesh(points=torch.randn(4, 3), cells=torch.tensor([[0, 1, 2]]))
+    dm = DomainMesh(interior=interior)
+    dm.global_data["scale"] = torch.tensor(2.0)
+
+    out = dm.to(dtype=torch.float64, non_blocking=True)
+    assert out.interior.points.dtype == torch.float64
+    assert out.interior.cells.dtype == torch.int64
+    assert out.global_data["scale"].dtype == torch.float64

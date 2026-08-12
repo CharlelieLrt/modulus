@@ -14,12 +14,53 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import Any, Iterator, Sequence
+from typing import Any, Iterator, Sequence, TypeVar
 
 import numpy as np
 import torch
 from jaxtyping import Float
 from torch import Tensor
+
+_T = TypeVar("_T")
+
+
+def _unwrap_module(model: torch.nn.Module, target_cls: type[_T]) -> _T:
+    """Peel off DDP / torch.compile wrappers to reach the underlying module.
+
+    The unwrapping order handles arbitrary nesting of
+    ``DistributedDataParallel`` (``model.module``) and ``torch.compile``
+    (``OptimizedModule._orig_mod``).
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        Possibly-wrapped module to unwrap.
+    target_cls : type
+        The class to unwrap to.
+
+    Returns
+    -------
+    module : target_cls
+        The unwrapped module.
+
+    Raises
+    ------
+    TypeError
+        If ``target_cls`` is not found before reaching a leaf module.
+    """
+    m: Any = model
+    while not isinstance(m, target_cls):
+        if isinstance(m, torch._dynamo.eval_frame.OptimizedModule):
+            m = m._orig_mod
+        elif hasattr(m, "module"):
+            m = m.module
+        else:
+            raise TypeError(
+                f"Could not unwrap a {target_cls.__name__} from "
+                f"{type(model).__name__}. Found leaf type "
+                f"{type(m).__name__}."
+            )
+    return m
 
 
 def apply_loss_weight(
@@ -52,6 +93,28 @@ def apply_loss_weight(
         that ``w.ndim == data_ndim``.
     """
     return w.reshape(*w.shape, *([1] * (data_ndim - w.ndim)))
+
+
+def _as_broadcastable(
+    x: float | Float[Tensor, " *#shape"],
+    y: Float[Tensor, " *shape"],
+) -> Float[Tensor, " *#shape"]:
+    """Return ``x`` as a tensor broadcastable to ``y``.
+
+    A ``float`` becomes a scalar tensor; a ``Tensor`` must broadcast to the
+    shape of ``y``, otherwise a ``ValueError`` is raised.
+    """
+    x = torch.as_tensor(x)
+    try:
+        ok = torch.broadcast_shapes(x.shape, y.shape) == y.shape
+    except RuntimeError:
+        ok = False
+    if not ok:
+        raise ValueError(
+            f"First tensor of shape {tuple(x.shape)} must broadcast to the "
+            f"second tensor of shape {tuple(y.shape)}."
+        )
+    return x
 
 
 class StackedRandomGenerator:

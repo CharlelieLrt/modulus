@@ -20,12 +20,17 @@ Provides comprehensive validation of mesh integrity including topology,
 geometry, and data consistency checks.
 """
 
+import warnings
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 import torch
+from jaxtyping import Int
 
-from physicsnemo.mesh.boundaries import extract_candidate_facets
+from physicsnemo.mesh.boundaries import (
+    categorize_facets_by_count,
+    extract_candidate_facets,
+)
 from physicsnemo.mesh.utilities._duplicate_detection import find_duplicate_pairs
 from physicsnemo.mesh.utilities._tolerances import safe_eps
 
@@ -33,21 +38,24 @@ if TYPE_CHECKING:
     from physicsnemo.mesh.mesh import Mesh
 
 
-def validate_mesh(
+def validate(
     mesh: "Mesh",
     check_degenerate_cells: bool = True,
     check_duplicate_vertices: bool = True,
     check_inverted_cells: bool = False,  # Expensive, opt-in
     check_out_of_bounds: bool = True,
     check_manifoldness: bool = False,  # Only 2D, opt-in
-    check_self_intersection: bool = False,  # Very expensive, opt-in
     tolerance: float | None = None,
     raise_on_error: bool = False,
+    *,
+    check_self_intersection: bool = False,  # Very expensive, opt-in
 ) -> Mapping[str, bool | int | torch.Tensor]:
     """Validate mesh integrity and detect common errors.
 
     Performs a comprehensive set of checks to ensure mesh is well-formed
-    and suitable for geometric computations.
+    and suitable for geometric computations. Call it as ``validate(mesh, ...)``
+    or as ``mesh.validate(...)``. The bound method supplies ``mesh``
+    automatically.
 
     Parameters
     ----------
@@ -63,19 +71,21 @@ def validate_mesh(
         Check that cell indices are valid
     check_manifoldness : bool
         Check manifold topology (2D only, expensive)
-    check_self_intersection : bool
-        Check for self-intersecting cells (very expensive)
     tolerance : float | None
         Tolerance for geometric checks (areas, distances).
         If ``None`` (default), uses a dtype-aware epsilon via :func:`safe_eps`.
     raise_on_error : bool
         If True, raise ValueError on first error. If False,
         return dict with all validation results.
+    check_self_intersection : bool
+        Request a self-intersection check. This option is keyword-only and not
+        yet implemented; passing ``True`` raises ``NotImplementedError``.
 
     Returns
     -------
     Mapping[str, bool | int | torch.Tensor]
         Dictionary with validation results:
+
             - "valid": bool, True if all enabled checks passed
             - "n_degenerate_cells": int, number of degenerate cells found
             - "degenerate_cell_indices": Tensor of indices (if any found)
@@ -92,14 +102,29 @@ def validate_mesh(
     ------
     ValueError
         If raise_on_error=True and validation fails
+    NotImplementedError
+        If ``check_self_intersection=True`` because that check is not yet
+        implemented.
 
     Examples
     --------
     >>> from physicsnemo.mesh.primitives.basic import two_triangles_2d
     >>> mesh = two_triangles_2d.load()
-    >>> report = validate_mesh(mesh)
+    >>> report = validate(mesh)
     >>> assert report["valid"] == True
     """
+    ### Reject unsupported options before any other validation can return or raise.
+    if check_self_intersection:
+        # Fail loudly rather than returning a None sentinel that masquerades as
+        # "no self-intersections found". Implementing this needs BVH-accelerated
+        # cell-cell intersection tests (the naive version is O(n^2)).
+        # TODO: implement BVH-accelerated self-intersection detection.
+        raise NotImplementedError(
+            "Self-intersection checking is not yet implemented (it requires "
+            "BVH-accelerated cell-cell intersection tests). Do not pass "
+            "check_self_intersection=True until it is available."
+        )
+
     ### Default tolerance based on point dtype
     if tolerance is None:
         tolerance = safe_eps(mesh.points.dtype)
@@ -238,20 +263,14 @@ def validate_mesh(
     if check_manifoldness:
         if mesh.n_manifold_dims == 2 and mesh.n_spatial_dims >= 2:
             # Check that each edge is shared by at most 2 triangles
-            # Extract all edges (with duplicates)
-            edges_with_dupes, parent_cells = extract_candidate_facets(
+            candidate_edges, _parent_cells = extract_candidate_facets(
                 mesh.cells, manifold_codimension=1
             )
-
-            # Sort edges to canonical form
-            edges_sorted = torch.sort(edges_with_dupes, dim=1).values
-
-            # Find unique edges and their counts
-            unique_edges, inverse_indices, counts = torch.unique(
-                edges_sorted, dim=0, return_inverse=True, return_counts=True
+            unique_edges, _inverse, counts = categorize_facets_by_count(
+                candidate_edges,
+                target_counts="all",
+                index_bound=mesh.n_points,
             )
-
-            # Manifold edges should appear exactly 1 (boundary) or 2 (interior) times
             non_manifold_mask = counts > 2
             n_non_manifold = non_manifold_mask.sum().item()
 
@@ -272,24 +291,42 @@ def validate_mesh(
             results["is_manifold"] = None  # Only defined for 2D manifolds
             results["n_non_manifold_edges"] = -1  # Not applicable
 
-    ### Check for self-intersections (very expensive, opt-in only)
-    if check_self_intersection:
-        # This is very expensive: O(n^2) cell-cell intersection tests
-        # For production use, would need BVH acceleration
-        results["has_self_intersection"] = None  # Not implemented yet
-        results["intersecting_cell_pairs"] = None
-
-        # TODO: Implement BVH-accelerated self-intersection detection
-        if raise_on_error:
-            raise NotImplementedError(
-                "Self-intersection checking not yet implemented.\n"
-                "This is a very expensive operation requiring BVH acceleration."
-            )
-
     return results
 
 
-def check_duplicate_cell_vertices(mesh: "Mesh") -> tuple[int, torch.Tensor]:
+def validate_mesh(
+    mesh: "Mesh",
+    check_degenerate_cells: bool = True,
+    check_duplicate_vertices: bool = True,
+    check_inverted_cells: bool = False,
+    check_out_of_bounds: bool = True,
+    check_manifoldness: bool = False,
+    check_self_intersection: bool = False,
+    tolerance: float | None = None,
+    raise_on_error: bool = False,
+) -> Mapping[str, bool | int | torch.Tensor]:
+    """Compatibility wrapper for :func:`validate` pending deprecation."""
+    warnings.warn(
+        "validate_mesh is pending deprecation; use validate instead.",
+        PendingDeprecationWarning,
+        stacklevel=2,
+    )
+    return validate(
+        mesh,
+        check_degenerate_cells=check_degenerate_cells,
+        check_duplicate_vertices=check_duplicate_vertices,
+        check_inverted_cells=check_inverted_cells,
+        check_out_of_bounds=check_out_of_bounds,
+        check_manifoldness=check_manifoldness,
+        tolerance=tolerance,
+        raise_on_error=raise_on_error,
+        check_self_intersection=check_self_intersection,
+    )
+
+
+def check_duplicate_cell_vertices(
+    mesh: "Mesh",
+) -> tuple[int, Int[torch.Tensor, " n_invalid"]]:
     """Check for cells with duplicate vertices (degenerate simplices).
 
     A valid n-simplex must have n+1 distinct vertices. Cells with duplicate
@@ -331,3 +368,6 @@ def check_duplicate_cell_vertices(mesh: "Mesh") -> tuple[int, torch.Tensor]:
         return 0, torch.tensor([], dtype=torch.long, device=mesh.cells.device)
 
     return n_invalid, invalid_indices
+
+
+__all__ = ["check_duplicate_cell_vertices", "validate", "validate_mesh"]

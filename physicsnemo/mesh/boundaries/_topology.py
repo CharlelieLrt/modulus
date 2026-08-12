@@ -25,6 +25,8 @@ from typing import TYPE_CHECKING, Literal
 
 import torch
 
+from physicsnemo.utils._index_tuple_ops import unique_index_tuples
+
 if TYPE_CHECKING:
     from physicsnemo.mesh.mesh import Mesh
 
@@ -34,6 +36,9 @@ def is_watertight(mesh: "Mesh") -> bool:
 
     A mesh is watertight if every codimension-1 facet is shared by exactly 2 cells.
     This means the mesh forms a closed surface/volume with no holes or gaps.
+
+    Call it as ``is_watertight(mesh)`` or as ``mesh.is_watertight()``. The
+    bound method supplies ``mesh`` automatically.
 
     Parameters
     ----------
@@ -72,7 +77,11 @@ def is_watertight(mesh: "Mesh") -> bool:
     )
 
     ### Deduplicate and get counts
-    _, _, counts = categorize_facets_by_count(candidate_facets, target_counts="all")
+    _, _, counts = categorize_facets_by_count(
+        candidate_facets,
+        target_counts="all",
+        index_bound=mesh.n_points,
+    )
 
     ### Watertight iff all facets appear exactly twice
     # Each facet should be shared by exactly 2 cells
@@ -88,12 +97,16 @@ def is_manifold(
     A mesh is a manifold if it locally looks like Euclidean space at every point.
     This function checks various topological constraints depending on the check level.
 
+    Call it as ``is_manifold(mesh, ...)`` or as ``mesh.is_manifold(...)``. The
+    bound method supplies ``mesh`` automatically.
+
     Parameters
     ----------
     mesh : Mesh
         Input simplicial mesh to check
     check_level : {"facets", "edges", "full"}, optional
         Level of checking to perform:
+
         - "facets": Only check codimension-1 facets (each appears 1-2 times)
         - "edges": Check facets + edge neighborhoods (for 2D/3D meshes)
         - "full": Complete manifold validation (default)
@@ -119,6 +132,11 @@ def is_manifold(
     This function checks topological constraints but does not check for
     geometric self-intersections (which would require expensive spatial queries).
     """
+    if check_level not in ("facets", "edges", "full"):
+        raise ValueError(
+            f"Invalid {check_level=!r}. Must be 'facets', 'edges', or 'full'."
+        )
+
     ### Empty mesh is considered a valid manifold
     if mesh.n_cells == 0:
         return True
@@ -175,7 +193,11 @@ def _check_facets_manifold(mesh: "Mesh") -> bool:
     )
 
     ### Deduplicate and get counts
-    _, _, counts = categorize_facets_by_count(candidate_facets, target_counts="all")
+    _, _, counts = categorize_facets_by_count(
+        candidate_facets,
+        target_counts="all",
+        index_bound=mesh.n_points,
+    )
 
     ### For manifold: each facet appears at most twice (1 = boundary, 2 = interior)
     # If any facet appears 3+ times, it's a non-manifold edge
@@ -250,9 +272,9 @@ def _check_3d_edge_link_connectivity(mesh: "Mesh") -> bool:
     # candidate_edges: (n_candidate_edges, 2), parent_cell_indices: (n_candidate_edges,)
 
     ### Step 2: Map each candidate edge to a unique edge index
-    unique_edges, edge_inverse = torch.unique(
+    unique_edges, edge_inverse = unique_index_tuples(
         candidate_edges,
-        dim=0,
+        index_bound=mesh.n_points,
         return_inverse=True,
     )
     n_unique_edges = len(unique_edges)
@@ -340,8 +362,7 @@ def _check_3d_edge_link_connectivity(mesh: "Mesh") -> bool:
 
     # Count candidates per edge to identify edges with 2+ tets (others are
     # trivially connected since they have a single candidate).
-    edge_counts = torch.zeros(n_unique_edges, dtype=torch.long, device=device)
-    edge_counts.scatter_add_(0, edge_inverse, torch.ones_like(edge_inverse))
+    edge_counts = torch.bincount(edge_inverse, minlength=n_unique_edges)
     multi = edge_counts >= 2
 
     return bool(torch.all(min_labels[multi] == max_labels[multi]))
@@ -352,6 +373,7 @@ def _check_vertices_manifold(mesh: "Mesh") -> bool:
 
     For a manifold, the link of each vertex (the set of cells incident to the vertex)
     must form a valid topological structure:
+
     - For 2D: The edges around each vertex form a single cycle or fan
     - For 3D: The faces around each vertex form a single connected surface
 
@@ -403,9 +425,9 @@ def _check_2d_vertex_manifold(mesh: "Mesh") -> bool:
     )
 
     ### Find unique edges
-    unique_edges, inverse_indices, edge_counts = torch.unique(
+    unique_edges, inverse_indices, edge_counts = unique_index_tuples(
         candidate_edges,
-        dim=0,
+        index_bound=mesh.n_points,
         return_inverse=True,
         return_counts=True,
     )
@@ -419,15 +441,8 @@ def _check_2d_vertex_manifold(mesh: "Mesh") -> bool:
 
     if len(boundary_edges) > 0:
         ### Count boundary edges per vertex
-        vertex_boundary_count = torch.zeros(
-            mesh.n_points, dtype=torch.int64, device=mesh.cells.device
-        )
-        vertex_boundary_count.scatter_add_(
-            dim=0,
-            index=boundary_edges.flatten(),
-            src=torch.ones(
-                boundary_edges.numel(), dtype=torch.int64, device=mesh.cells.device
-            ),
+        vertex_boundary_count = torch.bincount(
+            boundary_edges.flatten(), minlength=mesh.n_points
         )
 
         ### Each boundary vertex should have exactly 2 boundary edges (forms a chain)
@@ -468,11 +483,9 @@ def _check_3d_vertex_manifold(mesh: "Mesh") -> bool:
     bool
         True if all vertices have connected links (manifold at all vertices).
     """
-    from physicsnemo.mesh.neighbors import get_point_to_cells_adjacency
-
     device = mesh.cells.device
 
-    p2c = get_point_to_cells_adjacency(mesh)
+    p2c = mesh.get_point_to_cells_adjacency()
 
     ### Step 1: Expand p2c to all (vertex_id, tet_id) pairs
     vertex_ids, tet_ids = p2c.expand_to_pairs()  # both shape (total_pairs,)

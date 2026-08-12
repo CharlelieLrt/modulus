@@ -17,39 +17,18 @@
 
 """Tests for subsampling transforms."""
 
+import importlib
+
 import pytest
 import torch
 from tensordict import TensorDict
 
-from physicsnemo.datapipes.transforms import (
-    SubsamplePoints,
-    poisson_sample_indices_fixed,
+from physicsnemo.datapipes.transforms import SubsamplePoints
+from physicsnemo.datapipes.transforms.subsample import shuffle_array
+
+sampling_module = importlib.import_module(
+    "physicsnemo.nn.functional.weighted_multinomial"
 )
-
-
-def test_poisson_sample_indices():
-    """Test Poisson sampling indices generation."""
-    N = 10000
-    k = 1000
-
-    indices = poisson_sample_indices_fixed(N, k)
-
-    assert indices.shape == (k,)
-    assert indices.min() >= 0
-    assert indices.max() < N
-    assert indices.dtype == torch.long
-
-
-def test_poisson_sample_large_array():
-    """Test Poisson sampling with very large arrays."""
-    N = 100_000_000  # 100M points
-    k = 10000
-
-    indices = poisson_sample_indices_fixed(N, k)
-
-    assert indices.shape == (k,)
-    assert indices.min() >= 0
-    assert indices.max() < N
 
 
 def test_subsample_points_basic():
@@ -137,6 +116,28 @@ def test_subsample_points_weighted():
 
     assert result["surface_coords"].shape == (100, 3)
     assert result["surface_fields"].shape == (100, 2)
+
+
+def test_weighted_shuffle_uses_uncapped_sampler(monkeypatch):
+    def reject_multinomial(*args, **kwargs):
+        raise AssertionError(
+            "torch.multinomial rejects inputs with more than 2**24 categories"
+        )
+
+    monkeypatch.setattr(torch, "multinomial", reject_multinomial)
+    monkeypatch.setattr(sampling_module, "_SAMPLE_CHUNK_SIZE", 4)
+    points = torch.arange(6).unsqueeze(-1)
+    weights = torch.tensor([0.0, 0.0, 0.0, 0.0, 1.0, 1.0])
+
+    sampled, indices = shuffle_array(
+        points,
+        2,
+        weights=weights,
+        generator=torch.Generator().manual_seed(0),
+    )
+
+    assert set(indices.tolist()) == {4, 5}
+    assert torch.equal(sampled, points[indices])
 
 
 def test_subsample_missing_weights_key():

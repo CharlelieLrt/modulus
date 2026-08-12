@@ -23,6 +23,7 @@ from parent cells to child cells, reusing existing aggregation infrastructure.
 from typing import TYPE_CHECKING
 
 import torch
+from jaxtyping import Int
 from tensordict import TensorDict
 
 if TYPE_CHECKING:
@@ -31,7 +32,7 @@ if TYPE_CHECKING:
 
 def interpolate_point_data_to_edges(
     point_data: TensorDict,
-    edges: torch.Tensor,
+    edges: Int[torch.Tensor, "n_edges 2"],
     n_original_points: int,
 ) -> TensorDict:
     """Interpolate point_data to edge midpoints.
@@ -56,14 +57,14 @@ def interpolate_point_data_to_edges(
 
     Examples
     --------
-        >>> import torch
-        >>> from tensordict import TensorDict
-        >>> # Original points: 3, edges: 2
-        >>> # New points: 3 + 2 = 5
-        >>> point_data = TensorDict({"temperature": torch.tensor([100., 200., 300.])}, batch_size=[3])
-        >>> edges = torch.tensor([[0, 1], [1, 2]])
-        >>> new_data = interpolate_point_data_to_edges(point_data, edges, 3)
-        >>> # new_data["temperature"] = [100, 200, 300, 150, 250]
+    >>> import torch
+    >>> from tensordict import TensorDict
+    >>> # Original points: 3, edges: 2
+    >>> # New points: 3 + 2 = 5
+    >>> point_data = TensorDict({"temperature": torch.tensor([100., 200., 300.])}, batch_size=[3])
+    >>> edges = torch.tensor([[0, 1], [1, 2]])
+    >>> new_data = interpolate_point_data_to_edges(point_data, edges, 3)
+    >>> # new_data["temperature"] = [100, 200, 300, 150, 250]
     """
     if len(point_data.keys()) == 0:
         # No data to interpolate
@@ -78,16 +79,13 @@ def interpolate_point_data_to_edges(
     ### Interpolate all fields using TensorDict.apply()
     def interpolate_tensor(tensor: torch.Tensor) -> torch.Tensor:
         """Interpolate a single tensor to edge midpoints."""
-        # Only interpolate floating point or complex tensors
-        # Integer/bool metadata (like IDs) cannot be meaningfully averaged
+        # Only floating/complex tensors can be averaged; integer/bool metadata
+        # (IDs, region tags, markers) cannot be meaningfully averaged.
         if not (tensor.dtype.is_floating_point or tensor.dtype.is_complex):
-            # For non-floating types, pad with zeros (will be filtered later if needed)
-            # or we could assign arbitrary values; zeros are safe default
-            edge_midpoint_values = torch.zeros(
-                (len(edges), *tensor.shape[1:]),
-                dtype=tensor.dtype,
-                device=tensor.device,
-            )
+            # Inherit one endpoint's value (the first) so the new edge vertex carries
+            # a valid label from one of its parents, rather than a spurious zero that
+            # would silently corrupt ID/marker fields.
+            edge_midpoint_values = tensor[edges[:, 0]]
         else:
             # Get endpoint values and average: shape (n_edges, *data_shape)
             edge_midpoint_values = tensor[edges].mean(dim=1)
@@ -103,7 +101,7 @@ def interpolate_point_data_to_edges(
 
 def propagate_cell_data_to_children(
     cell_data: TensorDict,
-    parent_indices: torch.Tensor,
+    parent_indices: Int[torch.Tensor, " n_children"],
     n_total_children: int,
 ) -> TensorDict:
     """Propagate cell_data from parent cells to child cells.
@@ -128,13 +126,13 @@ def propagate_cell_data_to_children(
 
     Examples
     --------
-        >>> import torch
-        >>> from tensordict import TensorDict
-        >>> # 2 parent cells, each splits into 4 children -> 8 total
-        >>> cell_data = TensorDict({"pressure": torch.tensor([100.0, 200.0])}, batch_size=[2])
-        >>> parent_indices = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1])
-        >>> new_data = propagate_cell_data_to_children(cell_data, parent_indices, 8)
-        >>> # new_data["pressure"] = [100, 100, 100, 100, 200, 200, 200, 200]
+    >>> import torch
+    >>> from tensordict import TensorDict
+    >>> # 2 parent cells, each splits into 4 children -> 8 total
+    >>> cell_data = TensorDict({"pressure": torch.tensor([100.0, 200.0])}, batch_size=[2])
+    >>> parent_indices = torch.tensor([0, 0, 0, 0, 1, 1, 1, 1])
+    >>> new_data = propagate_cell_data_to_children(cell_data, parent_indices, 8)
+    >>> # new_data["pressure"] = [100, 100, 100, 100, 200, 200, 200, 200]
     """
     if len(cell_data.keys()) == 0:
         # No data to propagate

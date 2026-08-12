@@ -22,7 +22,7 @@ This module provides:
 * Drag-target extraction from dataloader batches.
 * An MLP drag-prediction head (``DragMLP``) used as a GP-free baseline.
 * Embedding-reduction factory (``create_embedding_reduction``).
-* GP warmup helpers, inducing-point re-initialisation, and gradient syncing.
+* GP warmup helpers, inducing-point re-initialization, and gradient syncing.
 * Spectral-norm utilities for SNGP-style distance preservation.
 * Checkpoint loading helpers.
 
@@ -32,6 +32,7 @@ and evaluation / plotting scripts.
 
 from __future__ import annotations
 
+import logging
 import types
 from typing import Any, Literal
 
@@ -41,8 +42,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.distributed as dist
+from torch.utils.data import DataLoader
 
 import physicsnemo
+from physicsnemo.experimental.uq import VariationalGPHead
 from physicsnemo.nn.module.pooling import AttentionPooling, MeanPooling
 from physicsnemo.utils.checkpoint import (
     _get_checkpoint_filename,
@@ -120,7 +123,7 @@ def compute_drag_target_from_batch(
 ) -> torch.Tensor:
     """Extract a GP-scaled drag target from a dataloader batch.
 
-    Unnormalises predicted surface fields, integrates pressure and shear to
+    Unnormalizes predicted surface fields, integrates pressure and shear to
     obtain the drag coefficient Cd, then returns ``Cd / drag_scale`` as a
     ``(1,)`` tensor suitable for GP training.
     """
@@ -136,8 +139,16 @@ def compute_drag_target_from_batch(
     p = fields_phys[:, 0]
     wss = fields_phys[:, 1:4]
 
-    normals = batch["surface_normals"].squeeze(0).to(device, dtype=fields_phys.dtype)
-    area = batch["surface_areas"].squeeze(0).to(device, dtype=fields_phys.dtype)
+    # With point subsampling (data.resolution < full mesh) the datapipe emits the
+    # subsampled, field-aligned normals/areas under the *_sub keys and omits the
+    # full arrays. Fall back to those so the integral matches the subsampled
+    # `fields` (this is exactly the field-GP drag path).
+    normals_key = (
+        "surface_normals" if "surface_normals" in batch else "surface_normals_sub"
+    )
+    areas_key = "surface_areas" if "surface_areas" in batch else "surface_areas_sub"
+    normals = batch[normals_key].squeeze(0).to(device, dtype=fields_phys.dtype)
+    area = batch[areas_key].squeeze(0).to(device, dtype=fields_phys.dtype)
     p, wss = p.to(device), wss.to(device)
 
     coeff = 2.0 / (FRONTAL_AREA * REFERENCE_DENSITY * REFERENCE_VELOCITY**2)
@@ -283,7 +294,7 @@ def create_embedding_reduction(
             target_scale=target_scale,
             **kwargs,
         )
-    if pooling == "mean":
+    elif pooling == "mean":
         return MeanPooling(
             feat_dim=feat_dim,
             embed_dim=embed_dim,
@@ -291,7 +302,8 @@ def create_embedding_reduction(
             normalize=normalize,
             target_scale=target_scale,
         )
-    raise ValueError(f"Unknown pooling: {pooling!r}. Use 'attention' or 'mean'.")
+    else:
+        raise ValueError(f"Unknown pooling: {pooling!r}. Use 'attention' or 'mean'.")
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +312,33 @@ def create_embedding_reduction(
 
 
 def gp_ramp_weight(epoch: int, warmup_start: int, warmup_end: int) -> float:
-    """Linear ramp: 0 before *warmup_start*, 0→1 over [start, end), 1 after."""
+    """Linear ramp: 0 before *warmup_start*, 0→1 over [start, end), 1 after.
+
+    Used for KL annealing, and for the ramp on the whole negative ELBO: early
+    on the objective is dominated by its data-fit term, which behaves like a
+    regression loss and lets the backbone and GP mean learn a sensible field
+    before the KL pulls the variational posterior toward the prior.
+
+    An empty or inverted window (``warmup_end <= warmup_start``) means the ramp
+    is disabled and returns 1.0 throughout, so a recipe can switch it off by
+    setting both ends equal.
+
+    Parameters
+    ----------
+    epoch : int
+        Current epoch.
+    warmup_start : int
+        First epoch of the ramp.
+    warmup_end : int
+        Epoch at which the weight reaches 1.0.
+
+    Returns
+    -------
+    float
+        Weight in ``[0, 1]``.
+    """
+    if warmup_end <= warmup_start:
+        return 1.0
     if epoch < warmup_start:
         return 0.0
     if epoch >= warmup_end:
@@ -322,19 +360,51 @@ def sync_non_ddp_gradients(modules: list[nn.Module], world_size: int) -> None:
 def reinitialize_inducing_points(
     model: nn.Module,
     embedding_reduction: nn.Module,
-    head,
-    dataloader,
+    head: VariationalGPHead,
+    dataloader: DataLoader,
     n_inducing: int,
     n_train: int,
     train_indices: list[int],
     precision: str,
     device: torch.device,
-    logger,
+    logger: logging.Logger,
 ) -> None:
-    """Re-collect inducing-point embeddings from the current (trained) model.
+    """Re-collect inducing-point embeddings from the current trained model.
 
-    Temporarily uses the full dataset so every rank can collect at least
-    *n_inducing* samples, then restores distributed indices.
+    The inducing points seeded at GP construction time become stale once
+    the backbone has moved through its initial warm-up. This helper re-
+    seeds them from a forward pass over the current data so the GP
+    posterior covers the current embedding distribution. The variational
+    mean is zeroed and the variational covariance is reset to a small
+    identity, restarting GP-side optimization cleanly while leaving the
+    encoder unchanged.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Backbone encoder (DDP-wrapped or unwrapped).
+    embedding_reduction : nn.Module
+        Pooling module mapping per-token embeddings to a global vector.
+    head : VariationalGPHead
+        GP head whose inducing points / variational params are reset.
+    dataloader : torch.utils.data.DataLoader
+        Loader over the training pool. Its dataset is temporarily set
+        to cover the full ``n_train`` range so every rank can collect
+        at least ``n_inducing`` samples, then ``train_indices`` is
+        restored on exit.
+    n_inducing : int
+        Number of inducing points to collect (must match the GP head).
+    n_train : int
+        Total number of training samples in the pool.
+    train_indices : list[int]
+        The training indices to restore after collection.
+    precision : str
+        Forward-pass precision ("float32" / "bfloat16" / "float16").
+    device : torch.device
+        Device on which the new inducing points and variational params
+        are stored.
+    logger : logging.Logger
+        Logger for the post-collection summary line.
     """
     dataloader.dataset.set_indices(list(range(n_train)))
 
@@ -360,7 +430,7 @@ def reinitialize_inducing_points(
             return_embedding_states=True,
         )
         reduced = embedding_reduction(emb_states.flatten(1, 2))
-        init_embeddings.append(reduced.cpu())
+        init_embeddings.append(reduced)
 
     dataloader.dataset.set_indices(train_indices)
 
@@ -373,7 +443,7 @@ def reinitialize_inducing_points(
     vd.variational_mean.data.zero_()
     vd.chol_variational_covar.data.copy_(torch.eye(n_inducing, device=device) * 0.01)
     logger.info(
-        f"Re-initialised {n_inducing} inducing points from current embeddings "
+        f"Re-initialized {n_inducing} inducing points from current embeddings "
         f"(norm range [{init_embeddings_t.norm(dim=1).min():.4f}, "
         f"{init_embeddings_t.norm(dim=1).max():.4f}])"
     )
@@ -389,10 +459,27 @@ def apply_spectral_norm_to_model(
     coeff: float = 1.0,
     skip_output_proj: bool = True,
 ) -> None:
-    """Apply spectral normalization to all ``nn.Linear`` layers in *model*.
+    """Apply spectral normalization to all ``nn.Linear`` layers in a model.
 
-    When *coeff* > 1 the constraint is "soft" (DUE / SNGP convention).
-    *skip_output_proj* excludes the final output projection (``ln_mlp_out``).
+    Spectral normalization bounds each linear layer's largest singular
+    value, which makes the encoder approximately distance-preserving —
+    a prerequisite for SNGP / DUE-style uncertainty estimation. The
+    final output projection is typically excluded so the regression
+    head can still freely scale outputs.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Model whose ``nn.Linear`` children should be wrapped in place.
+    coeff : float, optional
+        Spectral-norm coefficient. ``coeff == 1`` is the hard
+        constraint provided by ``torch.nn.utils.parametrizations
+        .spectral_norm``; ``coeff > 1`` is the "soft" DUE / SNGP
+        convention where the constraint is relaxed by a constant
+        factor. Default ``1.0``.
+    skip_output_proj : bool, optional
+        If ``True`` (default), skip any submodule whose qualified name
+        contains ``"ln_mlp_out"`` — the GeoTransolver output head.
     """
     for name, module in list(model.named_modules()):
         if skip_output_proj and "ln_mlp_out" in name:

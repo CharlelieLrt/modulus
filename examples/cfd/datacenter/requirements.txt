@@ -1,4 +1,5 @@
 vtk
 omegaconf
 hydra-core
-nvidia-physicsnemo.sym
+nvidia-physicsnemo[sym]
+nvidia-dali-cuda130

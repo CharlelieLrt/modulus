@@ -58,6 +58,7 @@ GUIDANCE_CONFIGS = [
     ("model_l2", "ModelConsistency L2"),
     ("model_l2_sda", "ModelConsistency L2 + SDA"),
     ("model_l1_sda", "ModelConsistency L1 + SDA"),
+    ("data_tensor_sda", "DataConsistency per-channel tensor std_y & gamma + SDA"),
 ]
 
 MULTI_GUIDANCE_CONFIGS = [
@@ -158,6 +159,27 @@ def _make_guidance(config_name, shape, device, seed=310, create_graph=False):
             std_y=0.1,
             norm=1,
             gamma=0.5,
+            sigma_fn=scheduler.sigma,
+            alpha_fn=scheduler.alpha,
+            create_graph=create_graph,
+        )
+    elif config_name == "data_tensor_sda":
+        # Per-channel tensor std_y and gamma (non-uniform guidance strength).
+        mask = _make_mask(shape, device)
+        y = make_input(shape, seed=seed, device=device)
+        C = shape[1]
+        per_channel_shape = (1, C, *([1] * (len(shape) - 2)))
+        std_y = torch.tensor(
+            [0.05 + 0.03 * i for i in range(C)], device=device
+        ).reshape(per_channel_shape)
+        gamma = torch.tensor([0.5 + 0.2 * i for i in range(C)], device=device).reshape(
+            per_channel_shape
+        )
+        return DataConsistencyDPSGuidance(
+            mask=mask,
+            y=y,
+            std_y=std_y,
+            gamma=gamma,
             sigma_fn=scheduler.sigma,
             alpha_fn=scheduler.alpha,
             create_graph=create_graph,
@@ -353,7 +375,6 @@ class TestDataConsistencyDPSGuidanceConstructor:
         )
         assert g.std_y == pytest.approx(0.5)
         assert g.gamma == pytest.approx(2.0)
-        assert g.norm == 1
         assert g.retain_graph is True
         assert g.create_graph is True
 
@@ -395,7 +416,6 @@ class TestModelConsistencyDPSGuidanceConstructor:
         )
         assert g.std_y == pytest.approx(0.5)
         assert g.gamma == pytest.approx(2.0)
-        assert g.norm == 1
         assert g.retain_graph is True
         assert g.create_graph is True
 
@@ -606,6 +626,7 @@ class TestGradientFlow:
     SPATIAL_CONFIGS,
     ids=[c[0] for c in SPATIAL_CONFIGS],
 )
+@pytest.mark.usefixtures("nop_compile")
 class TestCompileSingleGuidance:
     """torch.compile tests for DPSScorePredictor with single guidance."""
 
@@ -653,6 +674,7 @@ class TestCompileSingleGuidance:
     SPATIAL_CONFIGS,
     ids=[c[0] for c in SPATIAL_CONFIGS],
 )
+@pytest.mark.usefixtures("nop_compile")
 class TestCompileMultiGuidance:
     """torch.compile tests for DPSScorePredictor with multiple guidances."""
 

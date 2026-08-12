@@ -39,6 +39,25 @@ from physicsnemo.datapipes.transforms.geometric import (
     Scale,
     Translate,
 )
+from physicsnemo.datapipes.transforms.mesh import (
+    CenterMesh,
+    ComputeCellCentroids,
+    ComputeSurfaceNormals,
+    DropMeshFields,
+    MeshToTensorDict,
+    MeshTransform,
+    NormalizeMeshFields,
+    RandomRotateMesh,
+    RandomScaleMesh,
+    RandomTranslateMesh,
+    RenameMeshFields,
+    RestructureTensorDict,
+    RotateMesh,
+    ScaleMesh,
+    SetGlobalField,
+    SubsampleMesh,
+    TranslateMesh,
+)
 from physicsnemo.datapipes.transforms.normalize import Normalize
 from physicsnemo.datapipes.transforms.spatial import (
     BoundingBoxFilter,
@@ -48,7 +67,6 @@ from physicsnemo.datapipes.transforms.spatial import (
 )
 from physicsnemo.datapipes.transforms.subsample import (
     SubsamplePoints,
-    poisson_sample_indices_fixed,
     shuffle_array,
 )
 from physicsnemo.datapipes.transforms.utility import (
@@ -65,7 +83,6 @@ __all__ = [
     "Normalize",
     # Subsampling
     "SubsamplePoints",
-    "poisson_sample_indices_fixed",
     "shuffle_array",
     # Geometric
     "ComputeSDF",
@@ -87,4 +104,22 @@ __all__ = [
     "Rename",
     "Purge",
     "ConstantField",
+    # Mesh
+    "MeshTransform",
+    "ComputeCellCentroids",
+    "ComputeSurfaceNormals",
+    "ScaleMesh",
+    "TranslateMesh",
+    "RotateMesh",
+    "CenterMesh",
+    "SubsampleMesh",
+    "DropMeshFields",
+    "RenameMeshFields",
+    "NormalizeMeshFields",
+    "SetGlobalField",
+    "MeshToTensorDict",
+    "RestructureTensorDict",
+    "RandomScaleMesh",
+    "RandomTranslateMesh",
+    "RandomRotateMesh",
 ]

@@ -94,6 +94,12 @@ The several examples inside PhysicsNeMo can be classified based on their domains
 | --- | --- |
 |[Force Prediciton for Lennard Jones system](./molecular_dynamics/lennard_jones/)|MeshGraphNet|
 
+### Kinetic Monte Carlo
+
+|Use case|Model|
+| --- | --- |
+|[Probabilistic surrogate for Kinetic Monte Carlo solvers](./kinetic_monte_carlo/)|GeoTransolver|
+
 ### Geophysics
 
 |Use case|Model|
@@ -110,11 +116,12 @@ The several examples inside PhysicsNeMo can be classified based on their domains
 ### Active Learning
 
 1. [Classify the famous two-moons data distribution using Active learning](./active_learning/moons/)
+2. [Active Learning for Surface-CFD Aerodynamic Surrogates](./cfd/external_aerodynamics/active_learning_aero/)
 
 ## Additional examples
 
-In addition to the examples in this repo, more Physics-ML usecases and examples
-can be referenced from the [PhysicsNeMo-Sym examples](https://github.com/NVIDIA/physicsnemo-sym/blob/main/examples/README.md).
+Physics-informed training examples (PINNs, PINO, physics-informed fine-tuning)
+use the `physicsnemo.sym` module. Install with `pip install "nvidia-physicsnemo[sym]"`.
 
 ## NVIDIA support
 

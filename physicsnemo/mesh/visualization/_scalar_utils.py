@@ -19,6 +19,7 @@
 from typing import Literal
 
 import torch
+from jaxtyping import Float
 from tensordict import TensorDict
 
 
@@ -27,13 +28,18 @@ def process_scalars(
     data_dict: TensorDict,
     n_expected: int,
     name: str,
-) -> tuple[torch.Tensor | None, Literal["points", "cells", None], str | None]:
+) -> tuple[
+    Float[torch.Tensor, " n_expected"] | None,
+    Literal["points", "cells", None],
+    str | None,
+]:
     """Process scalar specification into concrete tensor values.
 
     Parameters
     ----------
     scalar_spec : torch.Tensor or str or tuple[str, ...] or None
         Scalar specification, can be:
+
         - None: no scalars to display
         - torch.Tensor: direct tensor values
         - str or tuple[str, ...]: key(s) to lookup in data_dict
@@ -48,6 +54,7 @@ def process_scalars(
     -------
     tuple
         Tuple of (scalar_values, source_type, label) where:
+
         - scalar_values is None if scalar_spec is None, otherwise a 1D tensor
         - source_type indicates whether this is "points", "cells", or None
         - label is a human-readable name for the colorbar (or None)
@@ -64,7 +71,9 @@ def process_scalars(
 
     ### Case 1: Direct tensor specification
     if isinstance(scalar_spec, torch.Tensor):
-        scalar_tensor = scalar_spec.cpu()
+        # .detach() so autograd-tracked scalars (e.g. a model output used to colour
+        # the mesh) don't crash the downstream .numpy() calls in either backend.
+        scalar_tensor = scalar_spec.detach().cpu()
 
         # Check first dimension matches expected count
         if scalar_tensor.shape[0] != n_expected:
@@ -88,7 +97,7 @@ def process_scalars(
     ### Case 2: Key lookup in TensorDict (str or tuple[str, ...])
     if isinstance(scalar_spec, (str, tuple)):
         try:
-            scalar_tensor = data_dict[scalar_spec].cpu()
+            scalar_tensor = data_dict[scalar_spec].detach().cpu()
         except KeyError as e:
             raise KeyError(
                 f"{name}_scalars key {scalar_spec!r} not found in {name}_data.\n"
@@ -128,8 +137,8 @@ def validate_and_process_scalars(
     n_points: int,
     n_cells: int,
 ) -> tuple[
-    torch.Tensor | None,
-    torch.Tensor | None,
+    Float[torch.Tensor, " n_points"] | None,
+    Float[torch.Tensor, " n_cells"] | None,
     Literal["points", "cells", None],
     str | None,
 ]:

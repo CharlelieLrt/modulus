@@ -28,14 +28,16 @@ Reference: Charles Loop, "Smooth Subdivision Surfaces Based on Triangles" (1987)
 from typing import TYPE_CHECKING
 
 import torch
+from jaxtyping import Float, Int
 
 from physicsnemo.mesh.neighbors._adjacency import build_adjacency_from_pairs
 from physicsnemo.mesh.subdivision._data import propagate_cell_data_to_children
 from physicsnemo.mesh.subdivision._topology import (
-    extract_unique_edges,
     generate_child_cells,
     get_subdivision_pattern,
 )
+from physicsnemo.mesh.utilities._topology import extract_unique_edges
+from physicsnemo.utils._index_tuple_ops import unique_index_tuples
 
 if TYPE_CHECKING:
     from physicsnemo.mesh.mesh import Mesh
@@ -43,8 +45,8 @@ if TYPE_CHECKING:
 
 def reposition_original_vertices_2d(
     mesh: "Mesh",
-    unique_edges: torch.Tensor | None = None,
-) -> torch.Tensor:
+    unique_edges: Int[torch.Tensor, "n_edges 2"] | None = None,
+) -> Float[torch.Tensor, "n_points n_spatial_dims"]:
     """Reposition original vertices using Loop's valence-based formula.
 
     For each vertex, compute new position as:
@@ -77,16 +79,19 @@ def reposition_original_vertices_2d(
         # edges from cells, which is the expensive part of get_point_to_points_adjacency)
         sources = torch.cat([unique_edges[:, 0], unique_edges[:, 1]])
         targets = torch.cat([unique_edges[:, 1], unique_edges[:, 0]])
-        adjacency = build_adjacency_from_pairs(sources, targets, n_sources=n_points)
+        adjacency = build_adjacency_from_pairs(
+            sources,
+            targets,
+            n_sources=n_points,
+            n_targets=n_points,
+        )
     else:
-        from physicsnemo.mesh.neighbors import get_point_to_points_adjacency
-
-        adjacency = get_point_to_points_adjacency(mesh)
+        adjacency = mesh.get_point_to_points_adjacency()
 
     ### Compute valences for all points at once
     # valences[i] = offsets[i+1] - offsets[i]
     # Shape: (n_points,)
-    valences = adjacency.offsets[1:] - adjacency.offsets[:-1]
+    valences = adjacency.counts
 
     ### Compute beta weights for all valences at once
     # Vectorize the beta formula
@@ -130,23 +135,69 @@ def reposition_original_vertices_2d(
         src=neighbor_positions,
     )
 
-    ### Apply Loop formula for all points at once
+    ### Apply the interior Loop formula for all points at once
     # new_pos = (1 - n*beta) * old_pos + beta * sum(neighbors)
     # Shape: (n_points, n_spatial_dims)
     valences_expanded = valences.unsqueeze(-1).float()  # (n_points, 1)
     beta_expanded = beta.unsqueeze(-1)  # (n_points, 1)
 
-    new_positions = (
+    interior_new_positions = (
         1 - valences_expanded * beta_expanded
     ) * mesh.points + beta_expanded * neighbor_sums
+
+    ### Boundary vertices need the Loop boundary/crease mask, not the interior rule.
+    # Applying the interior one-ring rule to boundary vertices pulls the open
+    # boundary inward (shrinkage). A manifold boundary vertex instead uses
+    #   new_pos = 3/4 * old + 1/8 * (the two neighbours reached along boundary edges),
+    # which keeps straight boundaries straight. Boundary vertices with a non-standard
+    # number of boundary neighbours (corners with !=2, or non-manifold junctions) are
+    # held fixed to avoid distortion. (compute_loop_edge_positions_2d already
+    # special-cases boundary *edges*; this makes the *vertex* rule consistent.)
+    from physicsnemo.mesh.boundaries import get_boundary_edges
+
+    boundary_edges = get_boundary_edges(mesh)  # (n_boundary_edges, 2)
+
+    if len(boundary_edges) == 0:
+        return interior_new_positions
+
+    be0, be1 = boundary_edges[:, 0], boundary_edges[:, 1]
+    boundary_vertex_mask = torch.zeros(n_points, dtype=torch.bool, device=device)
+    boundary_vertex_mask[be0] = True
+    boundary_vertex_mask[be1] = True
+
+    boundary_neighbor_sums = torch.zeros_like(mesh.points)
+    idx0 = be0.unsqueeze(-1).expand(-1, mesh.n_spatial_dims)
+    idx1 = be1.unsqueeze(-1).expand(-1, mesh.n_spatial_dims)
+    boundary_neighbor_sums.scatter_add_(0, idx0, mesh.points[be1])
+    boundary_neighbor_sums.scatter_add_(0, idx1, mesh.points[be0])
+
+    boundary_neighbor_counts = torch.zeros(n_points, dtype=torch.long, device=device)
+    ones = torch.ones_like(be0)
+    boundary_neighbor_counts.scatter_add_(0, be0, ones)
+    boundary_neighbor_counts.scatter_add_(0, be1, ones)
+
+    boundary_new_positions = 0.75 * mesh.points + 0.125 * boundary_neighbor_sums
+
+    # Regular boundary vertex (exactly two boundary neighbours) -> boundary mask;
+    # other boundary vertices are held fixed (new_pos = old_pos).
+    is_regular_boundary = boundary_vertex_mask & (boundary_neighbor_counts == 2)
+    new_positions = torch.where(
+        is_regular_boundary.unsqueeze(-1),
+        boundary_new_positions,
+        torch.where(
+            boundary_vertex_mask.unsqueeze(-1),
+            mesh.points,
+            interior_new_positions,
+        ),
+    )
 
     return new_positions
 
 
 def compute_loop_edge_positions_2d(
     mesh: "Mesh",
-    unique_edges: torch.Tensor,
-) -> torch.Tensor:
+    unique_edges: Int[torch.Tensor, "n_edges 2"],
+) -> Float[torch.Tensor, "n_edges n_spatial_dims"]:
     """Compute new edge vertex positions using Loop's edge rule.
 
     For an interior edge with endpoints v0, v1 and opposite vertices opp0, opp1:
@@ -177,9 +228,9 @@ def compute_loop_edge_positions_2d(
         manifold_codimension=mesh.n_manifold_dims - 1,
     )
 
-    _, inverse_indices = torch.unique(
+    _, inverse_indices = unique_index_tuples(
         candidate_edges,
-        dim=0,
+        index_bound=mesh.n_points,
         return_inverse=True,
     )
 
@@ -285,6 +336,7 @@ def subdivide_loop(mesh: "Mesh") -> "Mesh":
     3. Connects vertices to form 4 triangles per original triangle
 
     Properties:
+
     - Approximating: original vertices move to new positions
     - Produces C² smooth limit surfaces for regular meshes
     - Designed for 2D manifolds (triangular meshes)
@@ -310,11 +362,11 @@ def subdivide_loop(mesh: "Mesh") -> "Mesh":
 
     Examples
     --------
-        >>> from physicsnemo.mesh.primitives.surfaces import sphere_icosahedral
-        >>> # Smooth a rough triangulated surface
-        >>> mesh = sphere_icosahedral.load(subdivisions=2)
-        >>> smooth = subdivide_loop(mesh)
-        >>> # Original vertices have moved; result is smoother
+    >>> from physicsnemo.mesh.primitives.surfaces import sphere_icosahedral
+    >>> # Smooth a rough triangulated surface
+    >>> mesh = sphere_icosahedral.load(subdivisions=2)
+    >>> smooth = subdivide_loop(mesh)
+    >>> # Original vertices have moved; result is smoother
     """
     from physicsnemo.mesh.mesh import Mesh
 

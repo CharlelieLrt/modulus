@@ -193,7 +193,15 @@ _PACKAGE_HINTS: Dict[str, str] = {
         "scikit-learn",
         direct_install="scikit-learn",
     ),
+    "sympy": _format_install_hint(
+        "SymPy",
+        group="sym",
+    ),
     # Data format packages
+    "yaml": _format_install_hint(
+        "PyYAML",
+        group="gnns",
+    ),
     "xarray": _format_install_hint(
         "xarray",
         group="datapipes-extras",
@@ -303,10 +311,6 @@ _PACKAGE_HINTS: Dict[str, str] = {
         direct_install="shapely",
     ),
     # Miscellaneous
-    "sparse_dot_mkl": _format_install_hint(
-        "sparse_dot_mkl",
-        direct_install="sparse_dot_mkl",
-    ),
     "wrapt": _format_install_hint(
         "wrapt",
         direct_install="wrapt",
