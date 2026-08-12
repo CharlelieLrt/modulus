@@ -259,9 +259,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Solver` protocols in a `base.py` of their respective sub-package.
   Implementations are unchanged and every class is still re-exported from
   `physicsnemo.diffusion.noise_schedulers` and `physicsnemo.diffusion.samplers`,
-  so public import paths are unaffected. Code importing a solver from the
-  private `samplers.solvers` path should import it from
-  `physicsnemo.diffusion.samplers` instead.
+  so the public import paths stay the same. The two old module paths remain as
+  deprecated shims that re-export the same classes and raise a
+  `DeprecationWarning` on import, so existing code keeps working. Import from
+  `physicsnemo.diffusion.noise_schedulers` and `physicsnemo.diffusion.samplers`
+  instead.
 - Optimizes the production container build by consolidating related filesystem
   operations, using BuildKit bind and cache mounts, and separating custom,
   declared, and project dependency installation. Reduces total physicsnemo layers
