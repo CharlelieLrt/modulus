@@ -112,7 +112,15 @@ SAMPLER_CONFIGS = [
         "stoch_heun",
         True,
     ),
+    ("exponential_ab2", {}, "exponential_ab2", False),
+    (
+        "edm_stochastic_euler",
+        {"S_churn": 0, "renoise": 1.0},
+        "stoch_euler_renoise",
+        True,
+    ),
 ]
+
 
 TIME_EVAL_INDICES = [0, 1]
 
@@ -133,8 +141,8 @@ def _make_sampling_components(
 ):
     """Create scheduler, model, denoiser, and initial latents.
 
-    With ``guidance_config`` set, the model is wrapped in a DPSScorePredictor
-    with a DPS guidance and the denoiser uses the score path; otherwise the
+    With ``guidance_config`` set, a DPSScorePredictor with a DPS guidance
+    wraps the model and the denoiser uses the score path; otherwise the
     denoiser uses ``predictor_type`` (x0 / score / epsilon).
     """
     scheduler = sched_cls(**sched_kwargs)
@@ -192,11 +200,26 @@ def _make_sampling_components(
     return scheduler, model, denoiser, xN
 
 
-def _make_solver_arg(solver_key, solver_options, denoiser):
+_PREDICTOR_KWARGS = {
+    "x0": "x0_predictor",
+    "score": "score_predictor",
+    "epsilon": "epsilon_predictor",
+}
+
+
+def _make_solver_arg(
+    solver_key, solver_options, denoiser, scheduler, model=None, predictor_type="x0"
+):
     """Build the solver argument for sample() from config fields."""
     if solver_key == "_custom_euler":
         return _CustomEulerSolver(denoiser), None
-    return solver_key, solver_options or None
+    opts = dict(solver_options) if solver_options else {}
+    if solver_key == "exponential_ab2":
+        # The linear coefficient follows the parameterization of the denoiser
+        opts["linear_fn"] = scheduler.get_linear_denoiser(
+            **{_PREDICTOR_KWARGS[predictor_type]: model}
+        )
+    return solver_key, opts or None
 
 
 # =============================================================================
@@ -241,7 +264,7 @@ class TestSampleNonRegression:
         sampler_name,
         uses_rng,
     ):
-        scheduler, _, denoiser, xN = _make_sampling_components(
+        scheduler, model, denoiser, xN = _make_sampling_components(
             sched_cls,
             sched_kwargs,
             shape,
@@ -250,7 +273,9 @@ class TestSampleNonRegression:
             device,
             predictor_type=predictor_type,
         )
-        solver_arg, opts = _make_solver_arg(solver_key, solver_options, denoiser)
+        solver_arg, opts = _make_solver_arg(
+            solver_key, solver_options, denoiser, scheduler, model, predictor_type
+        )
 
         if "cuda" in str(device) and uses_rng:
 
@@ -316,7 +341,7 @@ class TestSampleNonRegression:
         sampler_name,
         uses_rng,
     ):
-        scheduler, _, denoiser, xN = _make_sampling_components(
+        scheduler, model, denoiser, xN = _make_sampling_components(
             sched_cls,
             sched_kwargs,
             shape,
@@ -325,7 +350,9 @@ class TestSampleNonRegression:
             device,
             predictor_type=predictor_type,
         )
-        solver_arg, opts = _make_solver_arg(solver_key, solver_options, denoiser)
+        solver_arg, opts = _make_solver_arg(
+            solver_key, solver_options, denoiser, scheduler, model, predictor_type
+        )
 
         if "cuda" in str(device) and uses_rng:
 
@@ -428,7 +455,7 @@ class TestSampleNonRegression:
     ids=[c[0] for c in SPATIAL_CONFIGS],
 )
 class TestSampleConsistency:
-    """Tests that equivalent argument combinations produce identical results."""
+    """Tests that interchangeable argument combinations produce identical results."""
 
     def test_time_steps_vs_num_steps(
         self,
@@ -653,10 +680,10 @@ class TestSampleCompile:
         sampler_name,
         uses_rng,
     ):
-        """Sampling with a compiled denoiser matches eager; graph reused on 2nd call."""
+        """Sampling with a compiled denoiser matches eager and reuses the graph."""
         torch._dynamo.config.error_on_recompile = True
 
-        scheduler, _, denoiser, xN = _make_sampling_components(
+        scheduler, model, denoiser, xN = _make_sampling_components(
             sched_cls,
             sched_kwargs,
             shape,
@@ -669,10 +696,15 @@ class TestSampleCompile:
         compiled_denoiser = torch.compile(denoiser, fullgraph=True)
 
         solver_eager, opts_eager = _make_solver_arg(
-            solver_key, solver_options, denoiser
+            solver_key, solver_options, denoiser, scheduler, model, predictor_type
         )
         solver_compiled, opts_compiled = _make_solver_arg(
-            solver_key, solver_options, compiled_denoiser
+            solver_key,
+            solver_options,
+            compiled_denoiser,
+            scheduler,
+            model,
+            predictor_type,
         )
 
         with torch.no_grad():
@@ -803,10 +835,10 @@ class TestFullSamplerCompile:
         sampler_name,
         uses_rng,
     ):
-        """torch.compile(sample(...)) traces and graph is reused on second call."""
+        """torch.compile(sample(...)) traces and the second call reuses the graph."""
         torch._dynamo.config.error_on_recompile = True
 
-        scheduler, _, denoiser, xN = _make_sampling_components(
+        scheduler, model, denoiser, xN = _make_sampling_components(
             sched_cls,
             sched_kwargs,
             shape,
@@ -817,10 +849,14 @@ class TestFullSamplerCompile:
             predictor_type=predictor_type,
         )
 
-        # Custom solver instances are exercised in TestSampleCompile; here we
+        # TestSampleCompile exercises custom solver instances; here we
         # test string-based solver dispatch through compile.
         if solver_key == "_custom_euler":
             pytest.skip("Custom solver instances are tested in TestSampleCompile")
+
+        solver_arg, opts = _make_solver_arg(
+            solver_key, solver_options, denoiser, scheduler, model, predictor_type
+        )
 
         def do_sample(x):
             return sample(
@@ -828,8 +864,8 @@ class TestFullSamplerCompile:
                 x,
                 scheduler,
                 NUM_STEPS_SHORT,
-                solver=solver_key,
-                solver_options=solver_options or None,
+                solver=solver_arg,
+                solver_options=opts,
             )
 
         compiled_sample = torch.compile(do_sample, fullgraph=True)
@@ -948,7 +984,9 @@ class TestGradientFlow:
             num_steps=NUM_STEPS_SHORT,
             predictor_type=predictor_type,
         )
-        solver_arg, opts = _make_solver_arg(solver_key, solver_options, denoiser)
+        solver_arg, opts = _make_solver_arg(
+            solver_key, solver_options, denoiser, scheduler, model, predictor_type
+        )
 
         x0 = sample(
             denoiser,

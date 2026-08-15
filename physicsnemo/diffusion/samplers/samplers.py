@@ -32,6 +32,7 @@ from .base import Solver
 from .edm_stochastic_euler import EDMStochasticEulerSolver
 from .edm_stochastic_heun import EDMStochasticHeunSolver
 from .euler import EulerSolver
+from .exponential_ab2 import ExponentialAB2Solver
 from .heun import HeunSolver
 
 SOLVERS: Dict[str, type[Solver]] = {
@@ -39,6 +40,7 @@ SOLVERS: Dict[str, type[Solver]] = {
     "heun": HeunSolver,
     "edm_stochastic_euler": EDMStochasticEulerSolver,
     "edm_stochastic_heun": EDMStochasticHeunSolver,
+    "exponential_ab2": ExponentialAB2Solver,
 }
 
 
@@ -76,7 +78,13 @@ def sample(
     xN: Float[Tensor, " B *dims"],
     noise_scheduler: NoiseScheduler,
     num_steps: int,
-    solver: Literal["euler", "heun", "edm_stochastic_euler", "edm_stochastic_heun"]
+    solver: Literal[
+        "euler",
+        "heun",
+        "edm_stochastic_euler",
+        "edm_stochastic_heun",
+        "exponential_ab2",
+    ]
     | Solver = "heun",
     time_steps: Float[Tensor, " N_plus_1"] | None = None,
     solver_options: Dict[str, Any] | None = None,
@@ -213,6 +221,18 @@ def sample(
         * ``"edm_stochastic_heun"``: Second-order stochastic sampler from
           the EDM paper with configurable noise injection. See
           :class:`~physicsnemo.diffusion.samplers.EDMStochasticHeunSolver`.
+
+        * ``"exponential_ab2"``: Second-order exponential Adams-Bashforth
+          multistep integrator for semi-linear ODEs. It can reproduce
+          DPM-Solver++(2M). See
+          :class:`~physicsnemo.diffusion.samplers.ExponentialAB2Solver`.
+
+        Every solver also accepts a change of variables on the state and on
+        the integration variable through ``solver_options`` (``x_scale_fn``
+        and ``time_fn``, see
+        :class:`~physicsnemo.diffusion.samplers.EulerSolver`); widely used
+        samplers such as DDIM are classical solvers under such a change of
+        variables.
 
     time_steps : Tensor | None, default=None
         Optional 1D tensor of shape :math:`(N + 1,)` containing explicit
