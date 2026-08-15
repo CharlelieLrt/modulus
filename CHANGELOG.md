@@ -250,6 +250,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   next event (the new particle's features and inter-event delay) from the
   current particle population, an optional background mesh, and the simulation
   time. Independent rollouts form an ensemble for uncertainty quantification.
+- Adds an exponential integrator for semi-linear ODEs to
+  `physicsnemo.diffusion.samplers`: `ExponentialAB2Solver`. Every solver now
+  accepts a change of variables on the state and on the integration variable
+  (`x_scale_fn`, `time_fn`, and their derivative callbacks). The stochastic
+  solvers gain a `renoise` dial that spans the ancestral family up to full
+  re-noising. Widely used samplers follow as
+  configurations: `EulerSolver` reproduces DDIM, `EDMStochasticEulerSolver`
+  reproduces the re-noising sampler of distilled or consistency models, and
+  `ExponentialAB2Solver` reproduces DPM-Solver++(2M).
 
 ### Changed
 
@@ -262,6 +271,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so public import paths are unaffected. Code importing a solver from the
   private `samplers.solvers` path should import it from
   `physicsnemo.diffusion.samplers` instead.
+- `physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler` gains
+  a `get_linear_denoiser` method, the counterpart of `get_denoiser` that
+  returns the linear coefficient of the semi-linear ODE/SDE right-hand side,
+  used to instantiate the new exponential solver.
 - Optimizes the production container build by consolidating related filesystem
   operations, using BuildKit bind and cache mounts, and separating custom,
   declared, and project dependency installation. Reduces total physicsnemo layers

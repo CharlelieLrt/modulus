@@ -17,7 +17,7 @@
 """Abstract base class for linear-Gaussian noise schedules."""
 
 from abc import ABC, abstractmethod
-from typing import Any, Literal, Tuple
+from typing import Any, Callable, Literal, Tuple
 
 import torch
 from jaxtyping import Float
@@ -89,6 +89,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
     - :meth:`add_noise`: Add noise to clean data (training)
     - :meth:`init_latents`: Initialize latent state (sampling)
     - :meth:`get_denoiser`: Get ODE/SDE RHS (sampling)
+    - :meth:`get_linear_denoiser`: Get the linear coefficient of the
+      semi-linear ODE/SDE RHS (sampling with exponential integrators)
 
     Examples
     --------
@@ -761,6 +763,12 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         stochastic term :math:`g(t) d\mathbf{W}` is handled by the solver,
         not returned by the denoiser itself.
 
+        To access the semi-linear structure of the right-hand side, e.g. to
+        instantiate exponential integrators such as
+        :class:`~physicsnemo.diffusion.samplers.ExponentialAB2Solver`, use
+        the companion factory :meth:`get_linear_denoiser`, which returns the
+        coefficient of the linear part of the right-hand side.
+
         Parameters
         ----------
         score_predictor : Predictor, optional
@@ -904,6 +912,141 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
             raise ValueError(
                 f"denoising_type must be 'ode' or 'sde', got '{denoising_type}'"
             )
+
+    def get_linear_denoiser(
+        self,
+        *,
+        score_predictor: Predictor | None = None,
+        x0_predictor: Predictor | None = None,
+        epsilon_predictor: Predictor | None = None,
+        denoising_type: Literal["ode", "sde"] = "ode",
+        **kwargs: Any,
+    ) -> Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]:
+        r"""
+        Counterpart of :meth:`get_denoiser` that returns the linear
+        coefficient of the semi-linear right-hand side.
+
+        The ODE/SDE right-hand sides produced by :meth:`get_denoiser` are
+        *semi-linear*: expressed with the provided predictor, they
+        rearrange into a term that is linear in :math:`\mathbf{x}` plus a
+        term proportional to the prediction:
+
+        .. math::
+            \frac{d\mathbf{x}}{dt} = A(t) \, \mathbf{x}
+            + N(\mathbf{x}, t)
+
+        This factory returns the coefficient :math:`A(t)`, which depends on
+        the predictor parameterization. For score and noise
+        (:math:`\boldsymbol{\epsilon}`) predictors,
+        :math:`A(t) = \dot{\alpha}/\alpha` (the drift coefficient) for both
+        the ODE and the SDE. For an x0-predictor, the linear term absorbs part
+        of the score term: :math:`A(t) = \dot{\sigma}/\sigma` for
+        the ODE and :math:`A(t) = 2\dot{\sigma}/\sigma - \dot{\alpha}/\alpha`
+        for the SDE.
+
+        .. note::
+
+            The returned callable computes only the coefficient
+            :math:`A(t)`, not the full linear term
+            :math:`A(t) \, \mathbf{x}`.
+
+        Exponential integrators such as
+        :class:`~physicsnemo.diffusion.samplers.ExponentialAB2Solver` take
+        this coefficient as their ``linear_fn`` argument, together with the
+        denoiser from :meth:`get_denoiser` built from the same predictor and
+        ``denoising_type``.
+
+        Parameters
+        ----------
+        score_predictor : Predictor, optional
+            A score-predictor. Only selects the parameterization of the
+            decomposition; the factory never calls it. Mutually exclusive with
+            ``x0_predictor`` and ``epsilon_predictor``.
+        x0_predictor : Predictor, optional
+            An x0-predictor. Only selects the parameterization of the
+            decomposition; the factory never calls it. Mutually exclusive with
+            ``score_predictor`` and ``epsilon_predictor``.
+        epsilon_predictor : Predictor, optional
+            A noise (:math:`\boldsymbol{\epsilon}`) predictor. Only selects the
+            parameterization of the decomposition; the factory never calls
+            it. Mutually exclusive with ``score_predictor`` and
+            ``x0_predictor``.
+        denoising_type : {"ode", "sde"}, default="ode"
+            The reverse process, as in :meth:`get_denoiser`.
+        **kwargs : Any
+            Ignored.
+
+        Returns
+        -------
+        Callable
+            A callable ``(t: Tensor) -> Tensor`` mapping diffusion time to
+            the linear coefficient :math:`A(t)`, with the same shape
+            conventions as :meth:`sigma`.
+
+        Raises
+        ------
+        ValueError
+            If the call does not provide exactly one of ``score_predictor``,
+            ``x0_predictor``, or ``epsilon_predictor``.
+
+        Examples
+        --------
+        Get the linear coefficient :math:`A(t)` associated with an
+        x0-predictor. Subtracting the linear term :math:`A(t) \, \mathbf{x}`
+        from the full right-hand side leaves its nonlinear part:
+
+        >>> import torch
+        >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
+        >>> scheduler = EDMNoiseScheduler()
+        >>> x0_pred = lambda x, t: x / (1 + t.view(-1, 1, 1, 1)**2)  # Toy x0-predictor
+        >>> linear = scheduler.get_linear_denoiser(x0_predictor=x0_pred)
+        >>> full = scheduler.get_denoiser(x0_predictor=x0_pred)
+        >>> x = torch.randn(2, 3, 8, 8)
+        >>> t = torch.tensor([5.0, 5.0])
+        >>> linear(t).shape
+        torch.Size([2])
+        >>> nonlinear = full(x, t) - linear(t).view(-1, 1, 1, 1) * x
+        >>> nonlinear.shape
+        torch.Size([2, 3, 8, 8])
+        """
+        # Require exactly one predictor
+        provided = sum(
+            p is not None for p in (score_predictor, x0_predictor, epsilon_predictor)
+        )
+        if provided != 1:
+            raise ValueError(
+                "Exactly one of 'score_predictor', 'x0_predictor', or "
+                "'epsilon_predictor' must be provided."
+            )
+
+        # Capture methods as local variables to avoid referencing self
+        alpha = self.alpha
+        alpha_dot = self.alpha_dot
+        sigma = self.sigma
+        sigma_dot = self.sigma_dot
+
+        if x0_predictor is None:
+            # score- and noise-parameterizations share the drift coefficient
+            def linear_denoiser(
+                t: Float[Tensor, " *shape"],
+            ) -> Float[Tensor, " *shape"]:
+                return alpha_dot(t) / alpha(t)
+
+        elif denoising_type == "ode":
+
+            def linear_denoiser(
+                t: Float[Tensor, " *shape"],
+            ) -> Float[Tensor, " *shape"]:
+                return sigma_dot(t) / sigma(t)
+
+        else:
+
+            def linear_denoiser(
+                t: Float[Tensor, " *shape"],
+            ) -> Float[Tensor, " *shape"]:
+                return 2 * sigma_dot(t) / sigma(t) - alpha_dot(t) / alpha(t)
+
+        return linear_denoiser
 
     def add_noise(
         self,
