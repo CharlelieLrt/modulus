@@ -49,44 +49,6 @@ class EDMStochasticEulerSolver(Solver):
     time-step space. Optionally provide ``diffusion_fn`` to control the
     time-dependent magnitude of the injected noise.
 
-    Two further options turn this class into the other members of the
-    stochastic sampler family. The optional ``x_scale_fn`` and ``time_fn``
-    arguments apply the Euler stage under a change of variables on the state
-    and on the integration variable, so that the integrated ODE is:
-
-    .. math::
-        \frac{d\tilde{\mathbf{x}}}{d\tau} = G(\mathbf{x}, t),
-        \qquad
-        \tilde{\mathbf{x}} = \frac{\mathbf{x}}{s(t)},
-        \qquad
-        \tau = \tau(t)
-
-    where :math:`G` is the ``denoiser`` :math:`D` converted internally to
-    the transformed coordinates; :math:`D` always returns the right-hand
-    side :math:`d\mathbf{x}/dt` of the ODE in the original variables.
-    Without a change of variables (the default),
-    :math:`G(\mathbf{x}, t) = D(\mathbf{x}, t)`. The
-    change-of-variables callables are generic and allow arbitrary
-    transformations: configurations that reproduce well-known samplers
-    typically derive them from a noise schedule, but any ad-hoc choice
-    works.
-
-    The ``renoise`` dial :math:`r \in [0, 1]` adds a second noise injection:
-    the Euler stage undershoots to a reduced noise level, and fresh noise
-    restores the exact arrival level. Unlike the churn, which perturbs the
-    state before the step, this injection trades a fraction of the carried
-    noise for fresh noise at the arrival point:
-
-    - ``renoise=0`` keeps all the carried noise and recovers the churn-style
-      samplers of the EDM paper.
-    - Intermediate values mix carried and fresh noise and give the ancestral
-      samplers.
-    - ``renoise=1`` renews the noise entirely and gives the re-noising
-      sampler of distilled and consistency models (a stochastic DDIM), as in
-      the last example below.
-
-    The optional callables have the signatures:
-
     .. code-block:: python
 
         def sigma_fn(
@@ -102,30 +64,14 @@ class EDMStochasticEulerSolver(Solver):
             t: Tensor,  # shape: (B,)
         ) -> Tensor: ...  # g^2(x, t), broadcastable to shape of x
 
-        def x_scale_fn(
-            t: Tensor,  # shape: (B,)
-        ) -> Tensor: ...  # scaling s(t), shape: (B,)
-
-        def x_scale_dot_fn(
-            t: Tensor,  # shape: (B,)
-        ) -> Tensor: ...  # derivative ds/dt, shape: (B,)
-
-        def time_fn(
-            t: Tensor,  # shape: (B,)
-        ) -> Tensor: ...  # integration variable tau(t), shape: (B,)
-
-        def time_dot_fn(
-            t: Tensor,  # shape: (B,)
-        ) -> Tensor: ...  # derivative dtau/dt, shape: (B,)
-
     Parameters
     ----------
     denoiser : Denoiser
         A callable implementing the
         :class:`~physicsnemo.diffusion.Denoiser` interface. Should
-        return the right-hand side of the **ODE** in the original variables
-        (not the SDE, since this solver handles the stochastic noise
-        injection internally). Typically obtained via
+        return the right-hand side of the **ODE** (not the SDE, since the
+        stochastic noise injection is handled internally by this solver).
+        Typically obtained via
         :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`
         with ``denoising_type="ode"``.
     S_churn : float, optional
@@ -163,28 +109,6 @@ class EDMStochasticEulerSolver(Solver):
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.diffusion`.
         By default ``None`` (:math:`g^2 = 2t`), which corresponds to an
         EDM-like noise schedule.
-    renoise : float, optional
-        Fraction :math:`r \in [0, 1]` of the arrival noise level renewed with
-        fresh noise at each step, as described above. ``0`` keeps all the
-        carried noise, ``1`` renews it entirely, and intermediate values mix
-        the two. By default 0.
-    x_scale_fn : Callable[[Tensor], Tensor] | None, optional
-        Time-dependent scaling :math:`s(t)` applied to the latent state,
-        :math:`\tilde{\mathbf{x}} = \mathbf{x} / s(t)`, with the signature
-        shown above; requires ``x_scale_dot_fn``. By default ``None``, which
-        applies no rescaling.
-    x_scale_dot_fn : Callable[[Tensor], Tensor] | None, optional
-        Time derivative :math:`\dot{s}(t)` of ``x_scale_fn``, with the
-        signature shown above. Required with ``x_scale_fn``. By default
-        ``None``.
-    time_fn : Callable[[Tensor], Tensor] | None, optional
-        Reparameterization :math:`\tau(t)` of the integration variable, with
-        the signature shown above; requires ``time_dot_fn``. By default
-        ``None``, which integrates in the diffusion time itself.
-    time_dot_fn : Callable[[Tensor], Tensor] | None, optional
-        Time derivative :math:`\dot{\tau}(t)` of ``time_fn``, with the
-        signature shown above. Required with ``time_fn``. By default
-        ``None``.
 
     Note
     ----
@@ -227,31 +151,6 @@ class EDMStochasticEulerSolver(Solver):
     >>> x_tm1 = solver.step(x_t, t_cur, t_next)
     >>> x_tm1.shape
     torch.Size([1, 3, 8, 8])
-
-    Reproduce the stochastic re-noising sampler of distilled and consistency
-    models (a stochastic DDIM) on a VP schedule. The DDIM change of variables
-    rescales the state by :math:`\alpha(t)` and integrates in the
-    noise-to-signal ratio (``ntsr``) clock
-    :math:`\tau = \sigma(t) / \alpha(t)`; full noise renewal and no churn
-    complete the recipe:
-
-    >>> x0_pred = lambda x, t: x * 0.1  # Toy x0-predictor
-    >>> ntsr = lambda t: scheduler.sigma(t) / scheduler.alpha(t)
-    >>> ntsr_dot = lambda t: ntsr(t) * (
-    ...     scheduler.sigma_dot(t) / scheduler.sigma(t)
-    ...     - scheduler.alpha_dot(t) / scheduler.alpha(t)
-    ... )
-    >>> solver = EDMStochasticEulerSolver(
-    ...     scheduler.get_denoiser(x0_predictor=x0_pred),
-    ...     renoise=1.0,
-    ...     x_scale_fn=scheduler.alpha,
-    ...     x_scale_dot_fn=scheduler.alpha_dot,
-    ...     time_fn=ntsr,
-    ...     time_dot_fn=ntsr_dot,
-    ... )
-    >>> x_tm1 = solver.step(x_t, torch.tensor([0.6]), torch.tensor([0.3]))
-    >>> x_tm1.shape
-    torch.Size([1, 3, 8, 8])
     """
 
     def __init__(
@@ -270,12 +169,6 @@ class EDMStochasticEulerSolver(Solver):
             [Float[Tensor, " B *dims"], Float[Tensor, " B"]], Float[Tensor, " B *_"]
         ]
         | None = None,
-        renoise: float = 0,
-        x_scale_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
-        x_scale_dot_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]]
-        | None = None,
-        time_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
-        time_dot_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
     ) -> None:
         self.denoiser = denoiser
         self.S_churn = S_churn
@@ -283,44 +176,19 @@ class EDMStochasticEulerSolver(Solver):
         self.S_max = S_max
         self.S_noise = S_noise
         self.num_steps = num_steps
-        if not 0 <= renoise <= 1:
-            raise ValueError(f"renoise must be in [0, 1], got {renoise}")
-        self.renoise = renoise
-        # Noise level kept by the Euler stage, so that the renewed noise
-        # restores the exact arrival level
-        self._kept_fraction = math.sqrt(1 - renoise**2)
-        if x_scale_fn is None and x_scale_dot_fn is None:
-            self.x_scale_fn = lambda t: torch.ones_like(t)
-            self.x_scale_dot_fn = lambda t: torch.zeros_like(t)
-        elif x_scale_fn is not None and x_scale_dot_fn is not None:
-            self.x_scale_fn = x_scale_fn
-            self.x_scale_dot_fn = x_scale_dot_fn
-        else:
+        # Validate sigma_fn and sigma_inv_fn
+        if (sigma_fn is None) != (sigma_inv_fn is None):
             raise ValueError(
-                "x_scale_fn and x_scale_dot_fn must both be provided or both None."
-            )
-        if time_fn is None and time_dot_fn is None:
-            self.time_fn = lambda t: t
-            self.time_dot_fn = lambda t: torch.ones_like(t)
-        elif time_fn is not None and time_dot_fn is not None:
-            self.time_fn = time_fn
-            self.time_dot_fn = time_dot_fn
-        else:
-            raise ValueError(
-                "time_fn and time_dot_fn must both be provided or both None."
+                "sigma_fn and sigma_inv_fn must both be provided or both None."
             )
         if sigma_fn is None and sigma_inv_fn is None:
             self.sigma_fn = lambda t: t
             self.sigma_inv_fn = lambda sigma: sigma
             self._use_noise_level_space = False
-        elif sigma_fn is not None and sigma_inv_fn is not None:
+        else:
             self.sigma_fn = sigma_fn
             self.sigma_inv_fn = sigma_inv_fn
             self._use_noise_level_space = True
-        else:
-            raise ValueError(
-                "sigma_fn and sigma_inv_fn must both be provided or both None."
-            )
         if diffusion_fn is None:
             self.diffusion_fn = lambda x, t: 2 * t.reshape(-1, *([1] * (x.ndim - 1)))
         else:
@@ -360,6 +228,7 @@ class EDMStochasticEulerSolver(Solver):
         # Reshape t for broadcasting: (B,) -> (B, 1, ..., 1)
         expected_shape = (-1,) + (1,) * (x.ndim - 1)
         t_cur_bc = t_cur.reshape(expected_shape)
+        t_next_bc = t_next.reshape(expected_shape)
 
         gamma_base = min(self.S_churn / self.num_steps, math.sqrt(2) - 1)
 
@@ -388,28 +257,9 @@ class EDMStochasticEulerSolver(Solver):
         # Perturb latent with noise
         x_hat = x + noise_scale_bc * torch.randn_like(x)
 
-        # RHS evaluation at t_hat, converted to the transformed variables:
-        # dy/dtau = (D - (s_dot / s) x) / (tau_dot s), with y = x / s
+        # Euler step from t_hat to t_next
         t_hat = t_hat_bc.reshape(x.shape[0])
         d_cur = self.denoiser(x_hat, t_hat)
-        s_hat_bc = self.x_scale_fn(t_hat).reshape(expected_shape)
-        s_dot_hat_bc = self.x_scale_dot_fn(t_hat).reshape(expected_shape)
-        tau_dot_hat_bc = self.time_dot_fn(t_hat).reshape(expected_shape)
-        g_cur = (d_cur - (s_dot_hat_bc / s_hat_bc) * x_hat) / (
-            tau_dot_hat_bc * s_hat_bc
-        )
-
-        # Euler step from t_hat in the transformed variables, aimed at the
-        # reduced arrival level kept by the renoise dial
-        tau_hat_bc = self.time_fn(t_hat).reshape(expected_shape)
-        tau_next_bc = self.time_fn(t_next).reshape(expected_shape)
-        tau_dn_bc = self._kept_fraction * tau_next_bc
-        y_next = x_hat / s_hat_bc + (tau_dn_bc - tau_hat_bc) * g_cur
-        # The zero-renoise branch skips the fresh draw so that renoise=0
-        # consumes the same random sequence as the churn-only sampler, which
-        # keeps seeded trajectories reproducible across the two
-        if self.renoise != 0:
-            y_next = y_next + self.renoise * tau_next_bc * torch.randn_like(x)
-        x_next = self.x_scale_fn(t_next).reshape(expected_shape) * y_next
+        x_next = x_hat + (t_next_bc - t_hat_bc) * d_cur
 
         return x_next

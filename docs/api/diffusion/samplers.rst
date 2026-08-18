@@ -402,28 +402,26 @@ There are two ways to use solvers:
   Second-order.  Higher quality but twice as expensive per step.
 - ``"edm_stochastic_euler"`` ---
   :class:`~physicsnemo.diffusion.samplers.EDMStochasticEulerSolver`.
-  First-order with configurable stochastic noise injection. Its ``renoise``
-  dial spans the ancestral family up to the full re-noising sampler of
-  distilled or consistency models.
+  First-order with configurable stochastic noise injection.
 - ``"edm_stochastic_heun"`` ---
   :class:`~physicsnemo.diffusion.samplers.EDMStochasticHeunSolver`.
   Second-order with configurable stochastic noise injection.
-- ``"exponential_ab2"`` ---
-  :class:`~physicsnemo.diffusion.samplers.ExponentialAB2Solver`.
-  Second-order exponential Adams-Bashforth multi-step integrator, specialized
-  for semi-linear ODEs. It needs one denoiser evaluation per step and takes
-  the standard denoiser plus the linear coefficient of the semi-linear
+- ``"exponential_euler"`` ---
+  :class:`~physicsnemo.diffusion.samplers.ExponentialEulerSolver`.
+  First-order exponential integrator, specialized for semi-linear ODEs. It
+  takes the standard denoiser plus the linear coefficient of the semi-linear
   decomposition. See
   :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.get_linear_denoiser`.
-
-Every solver also accepts a change of variables on the state and on the
-integration variable (``x_scale_fn`` and ``time_fn``, see
-:class:`~physicsnemo.diffusion.samplers.EulerSolver`). Most widely used
-diffusion samplers are classical solvers under such a change of variables.
-In the rescaled state :math:`\mathbf{x} / \alpha_t` and the noise-to-signal
-clock :math:`\sigma_t / \alpha_t`, DDIM is plain Euler. In the half log-SNR
-clock, DPM-Solver++(2M) is the exponential AB2 method. The solver class
-docstrings carry the corresponding recipes.
+- ``"edm_stochastic_exponential_euler"`` ---
+  :class:`~physicsnemo.diffusion.samplers.EDMStochasticExponentialEulerSolver`.
+  Stochastic counterpart of the exponential Euler integrator, with
+  EDM-style churn and a ``renoise`` dial. The dial spans the ancestral
+  family up to the full re-noising sampler of distilled or consistency
+  models.
+- ``"dpmpp_2m"`` ---
+  :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2M`.
+  DPM-Solver++(2M), a second-order multi-step sampler with a single
+  denoiser evaluation per step.
 
 **Custom solvers** can be defined by implementing the
 :class:`~physicsnemo.diffusion.samplers.Solver` protocol: any object
@@ -520,10 +518,26 @@ Solvers
     :members:
     :exclude-members: __init__
 
-:code:`ExponentialAB2Solver`
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+:code:`ExponentialEulerSolver`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. autoclass:: physicsnemo.diffusion.samplers.ExponentialAB2Solver
+.. autoclass:: physicsnemo.diffusion.samplers.ExponentialEulerSolver
+    :show-inheritance:
+    :members:
+    :exclude-members: __init__
+
+:code:`EDMStochasticExponentialEulerSolver`
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: physicsnemo.diffusion.samplers.EDMStochasticExponentialEulerSolver
+    :show-inheritance:
+    :members:
+    :exclude-members: __init__
+
+:code:`DPMPlusPlus2M`
+^^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: physicsnemo.diffusion.samplers.DPMPlusPlus2M
     :show-inheritance:
     :members:
     :exclude-members: __init__

@@ -765,7 +765,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
         To access the semi-linear structure of the right-hand side, e.g. to
         instantiate exponential integrators such as
-        :class:`~physicsnemo.diffusion.samplers.ExponentialAB2Solver`, use
+        :class:`~physicsnemo.diffusion.samplers.ExponentialEulerSolver`, use
         the companion factory :meth:`get_linear_denoiser`, which returns the
         coefficient of the linear part of the right-hand side.
 
@@ -951,7 +951,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
             :math:`A(t) \, \mathbf{x}`.
 
         Exponential integrators such as
-        :class:`~physicsnemo.diffusion.samplers.ExponentialAB2Solver` take
+        :class:`~physicsnemo.diffusion.samplers.ExponentialEulerSolver` take
         this coefficient as their ``linear_fn`` argument, together with the
         denoiser from :meth:`get_denoiser` built from the same predictor and
         ``denoising_type``.

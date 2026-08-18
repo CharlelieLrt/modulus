@@ -29,10 +29,12 @@ from physicsnemo.diffusion.noise_schedulers import NoiseScheduler
 from physicsnemo.domain_parallel.shard_tensor import scatter_tensor
 
 from .base import Solver
+from .dpmpp_2m import DPMPlusPlus2M
 from .edm_stochastic_euler import EDMStochasticEulerSolver
+from .edm_stochastic_exponential_euler import EDMStochasticExponentialEulerSolver
 from .edm_stochastic_heun import EDMStochasticHeunSolver
 from .euler import EulerSolver
-from .exponential_ab2 import ExponentialAB2Solver
+from .exponential_euler import ExponentialEulerSolver
 from .heun import HeunSolver
 
 SOLVERS: Dict[str, type[Solver]] = {
@@ -40,7 +42,9 @@ SOLVERS: Dict[str, type[Solver]] = {
     "heun": HeunSolver,
     "edm_stochastic_euler": EDMStochasticEulerSolver,
     "edm_stochastic_heun": EDMStochasticHeunSolver,
-    "exponential_ab2": ExponentialAB2Solver,
+    "exponential_euler": ExponentialEulerSolver,
+    "edm_stochastic_exponential_euler": EDMStochasticExponentialEulerSolver,
+    "dpmpp_2m": DPMPlusPlus2M,
 }
 
 
@@ -83,7 +87,9 @@ def sample(
         "heun",
         "edm_stochastic_euler",
         "edm_stochastic_heun",
-        "exponential_ab2",
+        "exponential_euler",
+        "edm_stochastic_exponential_euler",
+        "dpmpp_2m",
     ]
     | Solver = "heun",
     time_steps: Float[Tensor, " N_plus_1"] | None = None,
@@ -222,17 +228,20 @@ def sample(
           the EDM paper with configurable noise injection. See
           :class:`~physicsnemo.diffusion.samplers.EDMStochasticHeunSolver`.
 
-        * ``"exponential_ab2"``: Second-order exponential Adams-Bashforth
-          multistep integrator for semi-linear ODEs. It can reproduce
-          DPM-Solver++(2M). See
-          :class:`~physicsnemo.diffusion.samplers.ExponentialAB2Solver`.
+        * ``"exponential_euler"``: First-order exponential integrator for
+          semi-linear ODEs. It can reproduce DDIM and sample from distilled
+          student models. See
+          :class:`~physicsnemo.diffusion.samplers.ExponentialEulerSolver`.
 
-        Every solver also accepts a change of variables on the state and on
-        the integration variable through ``solver_options`` (``x_scale_fn``
-        and ``time_fn``, see
-        :class:`~physicsnemo.diffusion.samplers.EulerSolver`); widely used
-        samplers such as DDIM are classical solvers under such a change of
-        variables.
+        * ``"edm_stochastic_exponential_euler"``: Stochastic counterpart of
+          the exponential Euler integrator, with EDM-style churn and a
+          ``renoise`` dial that spans the ancestral family up to full
+          re-noising. See
+          :class:`~physicsnemo.diffusion.samplers.EDMStochasticExponentialEulerSolver`.
+
+        * ``"dpmpp_2m"``: DPM-Solver++(2M), a second-order multistep sampler
+          with a single denoiser evaluation per step. See
+          :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2M`.
 
     time_steps : Tensor | None, default=None
         Optional 1D tensor of shape :math:`(N + 1,)` containing explicit
