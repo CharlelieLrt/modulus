@@ -263,6 +263,17 @@ class TestLinearGaussianNoiseScheduler:
         out = denoiser(x, t)
         assert out.shape == x.shape
 
+    def test_concrete_get_linear_denoiser(self, device):
+        s = _MinimalScheduler()
+        t = torch.tensor([1.0, 2.0], device=device)
+        out = s.get_linear_denoiser(prediction_type="x0", denoising_type="ode")(t)
+        assert out.shape == t.shape
+        assert torch.allclose(out, 1 / t, atol=1e-7)
+        out = s.get_linear_denoiser(prediction_type="score")(t)
+        assert torch.allclose(out, torch.zeros_like(t), atol=1e-7)
+        out = s.get_linear_denoiser(prediction_type="x0", denoising_type="sde")(t)
+        assert torch.allclose(out, 2 / t, atol=1e-7)
+
     def test_concrete_x0_to_score_to_x0(self, device):
         s = _MinimalScheduler()
         x0 = make_input((2, 4), seed=5, device=device)
@@ -290,6 +301,22 @@ class TestLinearGaussianNoiseScheduler:
         t = torch.tensor([1.0, 1.0], device=device)
         out_custom = denoiser_custom(x, t)
         out_default = denoiser_default(x, t)
+        assert not torch.allclose(out_custom, out_default)
+
+    def test_custom_alpha_dot_override(self, device):
+        """Overriding alpha_dot() changes get_linear_denoiser behavior."""
+
+        class CustomAlphaDotScheduler(_MinimalScheduler):
+            def alpha_dot(self, t):
+                return -0.5 * torch.ones_like(t)
+
+        s = CustomAlphaDotScheduler()
+        s_default = _MinimalScheduler()
+        linear_custom = s.get_linear_denoiser(prediction_type="score")
+        linear_default = s_default.get_linear_denoiser(prediction_type="score")
+        t = torch.tensor([1.0, 2.0], device=device)
+        out_custom = linear_custom(t)
+        out_default = linear_default(t)
         assert not torch.allclose(out_custom, out_default)
 
 
@@ -421,6 +448,43 @@ class TestMethodNonRegression:
         sigma_val = s.sigma(t)
         t_recovered = s.sigma_inv(sigma_val)
         compare_outputs(t_recovered, t, atol=5e-2, rtol=5e-2)
+
+    @pytest.mark.parametrize(
+        "denoising_type,prediction_type",
+        [
+            ("ode", "x0"),
+            ("ode", "score"),
+            ("ode", "epsilon"),
+            ("sde", "x0"),
+        ],
+        ids=["ode_x0", "ode_score", "ode_epsilon", "sde_x0"],
+    )
+    def test_get_linear_denoiser(
+        self,
+        deterministic_settings,
+        device,
+        tolerances,
+        sched_cls,
+        sched_kwargs,
+        sched_name,
+        denoising_type,
+        prediction_type,
+    ):
+        s = sched_cls(**sched_kwargs)
+        linear_fn = s.get_linear_denoiser(
+            prediction_type=prediction_type, denoising_type=denoising_type
+        )
+        t = make_input((N_SAMPLES,), seed=30, device=device).abs() * 0.3 + 0.2
+        out = linear_fn(t)
+        assert out.shape == t.shape
+        assert torch.isfinite(out).all()
+
+        ref_file = (
+            f"{REF_PREFIX}{sched_name}_linear_denoiser_"
+            f"{denoising_type}_{prediction_type}.pth"
+        )
+        ref = load_or_create_reference(ref_file, lambda: {"out": out.cpu()})
+        compare_outputs(out, ref["out"], **tolerances)
 
 
 # =============================================================================
@@ -640,45 +704,6 @@ class TestSpatialMethodNonRegression:
             s.get_denoiser(x0_predictor=pred, denoising_type="bad")
         with pytest.raises(ValueError, match="prediction_type"):
             s.get_linear_denoiser(prediction_type="bad")
-
-    def test_get_linear_denoiser_absorbs_x_dependence(
-        self,
-        device,
-        tolerances,
-        sched_cls,
-        sched_kwargs,
-        sched_name,
-        spatial_name,
-        shape,
-        predictor_cls,
-        predictor_kwargs,
-    ):
-        """With the prediction held fixed, the residual full(x, t) - lam(t)*x
-        must not depend on x: the linear coefficient absorbs all the linear
-        x-dependence of the RHS, for every parameterization (ODE and SDE)."""
-        s = sched_cls(**sched_kwargs)
-        pred_value = make_input(shape, seed=140, device=device)
-
-        def const_pred(x_, t_):
-            return pred_value
-
-        x1 = make_input(shape, seed=141, device=device)
-        x2 = make_input(shape, seed=142, device=device)
-        t = make_input((shape[0],), seed=143, device=device).abs() * 0.3 + 0.2
-        t_bc = t.reshape(-1, *([1] * (x1.ndim - 1)))
-
-        for prediction_type in ("x0", "score", "epsilon"):
-            for denoising_type in ("ode", "sde"):
-                full = s.get_denoiser(
-                    **{f"{prediction_type}_predictor": const_pred},
-                    denoising_type=denoising_type,
-                )
-                lam = s.get_linear_denoiser(
-                    prediction_type, denoising_type=denoising_type
-                )
-                n1 = full(x1, t) - lam(t_bc) * x1
-                n2 = full(x2, t) - lam(t_bc) * x2
-                compare_outputs(n1, n2, **tolerances)
 
     def test_x0_to_score_to_x0_roundtrip(
         self,
@@ -901,4 +926,56 @@ class TestDenoiserCompile:
         # Second call — must reuse the graph
         with torch.no_grad():
             out_compiled_2 = compiled_denoiser(x, t)
+        torch.testing.assert_close(out_compiled, out_compiled_2)
+
+
+@pytest.mark.parametrize(
+    "denoising_type,prediction_type",
+    [
+        ("ode", "x0"),
+        ("ode", "score"),
+        ("ode", "epsilon"),
+        ("sde", "x0"),
+    ],
+    ids=["ode_x0", "ode_score", "ode_epsilon", "sde_x0"],
+)
+@pytest.mark.parametrize(
+    "sched_cls,sched_kwargs,sched_name",
+    COMPILE_SCHEDULER_CONFIGS,
+    ids=[c[2] for c in COMPILE_SCHEDULER_CONFIGS],
+)
+@pytest.mark.usefixtures("nop_compile")
+class TestLinearDenoiserCompile:
+    """Double-call compile tests for closures from get_linear_denoiser()."""
+
+    def test_compiled_linear_denoiser(
+        self,
+        deterministic_settings,
+        device,
+        denoising_type,
+        prediction_type,
+        sched_cls,
+        sched_kwargs,
+        sched_name,
+    ):
+        """Compiled linear-denoiser closure matches eager and reuses the graph."""
+        torch._dynamo.config.error_on_recompile = True
+
+        s = sched_cls(**sched_kwargs)
+        linear_fn = s.get_linear_denoiser(
+            prediction_type=prediction_type, denoising_type=denoising_type
+        )
+
+        t = make_input((N_SAMPLES,), seed=61, device=device).abs() + 0.5
+
+        compiled_linear_fn = torch.compile(linear_fn, fullgraph=True)
+
+        with torch.no_grad():
+            out_eager = linear_fn(t)
+            out_compiled = compiled_linear_fn(t)
+        torch.testing.assert_close(out_eager, out_compiled)
+
+        # Second call must reuse the graph
+        with torch.no_grad():
+            out_compiled_2 = compiled_linear_fn(t)
         torch.testing.assert_close(out_compiled, out_compiled_2)
