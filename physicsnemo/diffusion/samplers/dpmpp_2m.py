@@ -46,13 +46,38 @@ class DPMPlusPlus2M(Solver):
     ``linear_fn`` provides :math:`A(t)`. The solver then derives the nonlinear
     term :math:`N` automatically. A noise scheduler can provide both callables.
 
-    The ``linear_fn`` callable has the signature:
+    Each step advances the state from the current time :math:`t_n` to the
+    target time :math:`t_{n-1}`, with :math:`t_{n+1}` denoting the time of
+    the previous step (sampling proceeds from large to small times):
+
+    .. math::
+        \mathbf{x}_{n-1} = e^{h A(t_n)} \, \mathbf{x}_n
+        + W_0 \left[ N_n + \frac{1}{2}
+        \frac{\lambda(t_{n-1}) - \lambda(t_n)}{\lambda(t_n) - \lambda(t_{n+1})}
+        \left( N_n - N_{n+1} \right) \right]
+
+    where :math:`h = t_{n-1} - t_n` is the step size,
+    :math:`W_0 = (e^{h A(t_n)} - 1) / A(t_n)` is the zeroth moment of the
+    exponential kernel over the step.
+
+    The function :math:`\lambda(t)`, provided by ``lambda_fn``, is the
+    extrapolation coordinate of the multistep method: the solver extrapolates
+    :math:`N` linearly in :math:`\lambda(t)` rather than in :math:`t`.
+    The original DPM-Solver++(2M) measures the extrapolation in the log-SNR
+    :math:`\lambda(t) = \log(\alpha(t) / \sigma(t))` of the noise schedule.
+    The default :math:`\lambda(t) = t` extrapolates in diffusion time.
+
+    The ``linear_fn`` and ``lambda_fn`` callables have the signatures:
 
     .. code-block:: python
 
         def linear_fn(
             t: Tensor,  # shape: (B,)
         ) -> Tensor: ...  # linear coefficient A(t), shape: (B,)
+
+        def lambda_fn(
+            t: Tensor,  # shape: (B,)
+        ) -> Tensor: ...  # extrapolation coordinate lambda(t), shape: (B,)
 
     .. note::
 
@@ -78,6 +103,11 @@ class DPMPlusPlus2M(Solver):
         using the same predictor parameterization as ``denoiser``. The default
         is ``None``, which corresponds to a zero linear coefficient (classical
         two-step Adams-Bashforth method).
+    lambda_fn : Callable[[Tensor], Tensor] | None, optional
+        Extrapolation coordinate :math:`\lambda(t)`. Use the signature above.
+        For DPM-Solver++(2M), pass the schedule's log-SNR:
+        ``lambda t: torch.log(scheduler.alpha(t) / scheduler.sigma(t))``.
+        The default is ``None``, which extrapolates in diffusion time.
 
     Note
     ----
@@ -86,7 +116,10 @@ class DPMPlusPlus2M(Solver):
 
     Examples
     --------
-    Sample the probability-flow ODE of an EDM schedule:
+
+    This class can express different multistep samplers through its callback
+    configuration. The examples below show a classical Adams-Bashforth baseline
+    and the original DPM-Solver++(2M) method.
 
     >>> import torch
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
@@ -94,30 +127,52 @@ class DPMPlusPlus2M(Solver):
     >>>
     >>> scheduler = EDMNoiseScheduler()
     >>> x0_pred = lambda x, t: x * 0.1  # Toy x0-predictor
-    >>> solver = DPMPlusPlus2M(
-    ...     scheduler.get_denoiser(x0_predictor=x0_pred),
-    ...     linear_fn=scheduler.get_linear_denoiser(prediction_type="x0"),
-    ... )
+    >>> # Both configurations use the same EDM probability-flow ODE.
+    >>> denoiser = scheduler.get_denoiser(x0_predictor=x0_pred)
+    >>> # The default callbacks recover classical two-step Adams-Bashforth.
+    >>> ab2_solver = DPMPlusPlus2M(denoiser)
     >>> x_t = torch.randn(1, 3, 8, 8)
-    >>> x_1 = solver.step(x_t, torch.tensor([5.0]), torch.tensor([2.5]))
-    >>> x_0 = solver.step(x_1, torch.tensor([2.5]), torch.tensor([0.0]))
-    >>> x_0.shape
+    >>> x_mid = ab2_solver.step(x_t, torch.tensor([5.0]), torch.tensor([2.5]))
+    >>> x_next = ab2_solver.step(x_mid, torch.tensor([2.5]), torch.tensor([1.0]))
+    >>> x_next.shape
     torch.Size([1, 3, 8, 8])
-    >>> solver.reset()  # Before reusing the instance on a new trajectory
+
+    To use DPM-Solver++(2M) instead, provide the scheduler's linear
+    coefficient and use its log-SNR as the extrapolation coordinate:
+
+    >>> # Separate the known linear dynamics from the denoiser output.
+    >>> linear_fn = scheduler.get_linear_denoiser(prediction_type="x0")
+    >>> # Extrapolation variable is the schedule's log-SNR.
+    >>> log_snr = lambda t: torch.log(scheduler.alpha(t) / scheduler.sigma(t))
+    >>> dpmpp_solver = DPMPlusPlus2M(
+    ...     denoiser,
+    ...     linear_fn=linear_fn,
+    ...     lambda_fn=log_snr,
+    ... )
+    >>> x_mid = dpmpp_solver.step(x_t, torch.tensor([5.0]), torch.tensor([2.5]))
+    >>> x_next = dpmpp_solver.step(x_mid, torch.tensor([2.5]), torch.tensor([1.0]))
+    >>> x_next.shape
+    torch.Size([1, 3, 8, 8])
+    >>> dpmpp_solver.reset()  # Before reusing it on a new trajectory
     """
 
     def __init__(
         self,
         denoiser: Denoiser,
         linear_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
+        lambda_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
     ) -> None:
         self.denoiser = denoiser
         if linear_fn is None:
             self.linear_fn = lambda t: torch.zeros_like(t)
         else:
             self.linear_fn = linear_fn
+        if lambda_fn is None:
+            self.lambda_fn = lambda t: t
+        else:
+            self.lambda_fn = lambda_fn
         self._n_prev: Tensor | None = None
-        self._t_prev: Tensor | None = None
+        self._lam_prev: Tensor | None = None
 
     def reset(self) -> None:
         r"""
@@ -133,7 +188,7 @@ class DPMPlusPlus2M(Solver):
             This method updates the solver state in place.
         """
         self._n_prev = None
-        self._t_prev = None
+        self._lam_prev = None
 
     def step(
         self,
@@ -172,7 +227,7 @@ class DPMPlusPlus2M(Solver):
 
         # Shape for broadcasting time-only quantities: (B,) -> (B, 1, ..., 1)
         expected_shape = (-1,) + (1,) * (x.ndim - 1)
-        t_cur_bc = t_cur.reshape(expected_shape)
+        lam_cur_bc = self.lambda_fn(t_cur).reshape(expected_shape)
 
         h_bc = (t_next - t_cur).reshape(expected_shape)
 
@@ -186,20 +241,23 @@ class DPMPlusPlus2M(Solver):
         a_safe = torch.where(a_bc == 0, torch.ones_like(a_bc), a_bc)
         h_phi1 = torch.where(a_bc == 0, h_bc, torch.expm1(z) / a_safe)
 
-        if self._n_prev is None or self._t_prev is None:
+        if self._n_prev is None or self._lam_prev is None:
             # No history yet: first-order exponential Euler step
             x_next = torch.exp(z) * x + h_phi1 * n_cur
             # Build the history caches on the first step; later steps update
             # them in place for torch.compile compatibility
             self._n_prev = n_cur.clone()
-            self._t_prev = t_cur_bc.clone()
+            self._lam_prev = lam_cur_bc.clone()
         else:
-            # Extrapolation ratio of successive steps, masked to fall back to
-            # first order on repeated nodes. Use finite dummy denominators
-            # because torch.where evaluates both branches.
-            den_bc = t_cur_bc - self._t_prev
-            ok = torch.isfinite(h_bc) & torch.isfinite(den_bc) & (den_bc != 0)
-            r_safe = torch.where(ok, h_bc, torch.zeros_like(h_bc)) / torch.where(
+            # Extrapolation ratio of successive steps, measured in the lambda
+            # coordinate and masked to fall back to first order on repeated
+            # nodes or non-finite lambda values (for example the log-SNR at
+            # t = 0). Use finite dummy denominators because torch.where
+            # evaluates both branches.
+            num_bc = self.lambda_fn(t_next).reshape(expected_shape) - lam_cur_bc
+            den_bc = lam_cur_bc - self._lam_prev
+            ok = torch.isfinite(num_bc) & torch.isfinite(den_bc) & (den_bc != 0)
+            r_safe = torch.where(ok, num_bc, torch.zeros_like(num_bc)) / torch.where(
                 ok, den_bc, torch.ones_like(den_bc)
             )
             # DPM-Solver++ approximates the first exponential moment of the
@@ -209,6 +267,6 @@ class DPMPlusPlus2M(Solver):
                 torch.exp(z) * x + h_phi1 * n_cur + slope_bc * (n_cur - self._n_prev)
             )
             self._n_prev.copy_(n_cur)
-            self._t_prev.copy_(t_cur_bc)
+            self._lam_prev.copy_(lam_cur_bc)
 
         return x_next
