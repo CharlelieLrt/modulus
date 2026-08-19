@@ -30,22 +30,26 @@ from .base import Solver
 
 class EDMStochasticExponentialEulerSolver(Solver):
     r"""
-    First-order stochastic exponential Euler sampler with EDM-style churn.
+    Add controlled noise to exponential Euler sampling.
 
-    The stochastic counterpart of :class:`ExponentialEulerSolver`:
-    stochastic sampling with configurable noise injection controlled by the
-    "churn" parameters of the EDM paper and by the ``renoise`` dial, around
-    an exponential Euler update of the semi-linear ODE:
+    This solver combines the first-order
+    :class:`ExponentialEulerSolver` update with two optional forms of noise
+    injection:
+
+    - EDM-style churn perturbs the state before the integration step.
+    - ``renoise`` replaces part of the noise at the end of the step with a
+      fresh sample.
+
+    Use these controls to increase sample diversity while retaining the
+    semi-linear update:
 
     .. math::
         \frac{d\mathbf{x}}{dt} = D(\mathbf{x}, t)
         = A(t) \, \mathbf{x} + N(\mathbf{x}, t)
 
-    ``denoiser`` returns the full right-hand side :math:`D` and ``linear_fn``
-    the coefficient :math:`A(t)` of its linear part; the solver isolates the
-    nonlinear part :math:`N` by difference. Both callbacks are generic: they
-    typically come from a noise scheduler, as in the examples below, but any
-    callables with the expected signatures work.
+    The ``denoiser`` provides the full right-hand side :math:`D`, while
+    ``linear_fn`` provides :math:`A(t)`. The solver derives the nonlinear term
+    :math:`N` automatically. A noise scheduler can provide both callables.
 
     .. important::
 
@@ -54,26 +58,22 @@ class EDMStochasticExponentialEulerSolver(Solver):
         integration is still an ODE step, so the denoiser should return the
         right-hand side of the **ODE**, not the SDE.
 
-    By default, the solver injects noise directly in time-step space.
-    For linear-Gaussian noise schedules where diffusion time and noise level
-    are not equal (e.g., VP schedule), provide ``sigma_fn`` and
-    ``sigma_inv_fn`` to apply the noise injection in noise-level space rather
-    than time-step space. Optionally provide ``diffusion_fn`` to control the
-    time-dependent scale of the churn noise.
+    By default, the solver applies churn directly in diffusion-time space. If
+    diffusion time differs from noise level, as it does for a VP schedule,
+    provide ``sigma_fn`` and ``sigma_inv_fn`` to apply churn at the intended
+    noise levels. Use ``diffusion_fn`` when the churn strength must follow the
+    schedule's diffusion coefficient.
 
-    The ``renoise`` dial :math:`r \in [0, 1]` adds a second noise injection:
-    the exponential Euler stage undershoots to a reduced noise level, and
-    fresh noise restores the exact arrival level. Unlike the churn, which
-    perturbs the state before the step, this injection trades a fraction of
-    the carried noise for fresh noise at the arrival point:
+    The ``renoise`` value :math:`r \in [0, 1]` controls how much noise the
+    solver refreshes at the arrival point:
 
     - ``renoise=0`` keeps all the carried noise and recovers the churn-style
       samplers of the EDM paper.
-    - Intermediate values mix carried and fresh noise and give the ancestral
-      samplers.
-    - ``renoise=1`` renews the noise entirely and gives the re-noising
-      sampler of distilled and consistency models (a stochastic DDIM), as in
-      the last example below.
+    - Intermediate values mix carried and fresh noise, producing ancestral
+      sampling variants.
+    - ``renoise=1`` replaces all carried noise and gives the re-noising
+      sampler used by distilled and consistency models, also known as
+      stochastic DDIM.
 
     The optional callables have the signatures:
 
@@ -99,20 +99,18 @@ class EDMStochasticExponentialEulerSolver(Solver):
     Parameters
     ----------
     denoiser : Denoiser
-        A callable implementing the
-        :class:`~physicsnemo.diffusion.Denoiser` interface. Should
-        return the right-hand side of the **ODE** (not the SDE, since this
-        solver handles the stochastic noise injection internally).
-        Typically obtained via
+        Right-hand side of the **ODE**, following the
+        :class:`~physicsnemo.diffusion.Denoiser` interface. Do not provide an
+        SDE right-hand side because this solver adds noise internally. In most
+        workflows, get the callable from
         :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`
         with ``denoising_type="ode"``.
     linear_fn : Callable[[Tensor], Tensor] | None, optional
-        The coefficient :math:`A(t)` of the linear part of the ``denoiser``,
-        with the signature shown above. Typically obtained via
+        Linear coefficient :math:`A(t)` used by the exponential Euler update.
+        Use the signature above. In most workflows, get it from
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.get_linear_denoiser`,
-        with the same predictor parameterization as the ``denoiser``. By
-        default ``None``, which corresponds to a zero linear coefficient
-        (explicit Euler method).
+        using the same predictor parameterization as ``denoiser``. The default
+        is ``None``, which uses an explicit Euler update.
     S_churn : float, optional
         Controls the amount of noise added at each step. Higher values add
         more stochasticity. By default 0 (no churn), in which case this
@@ -125,7 +123,8 @@ class EDMStochasticExponentialEulerSolver(Solver):
         Largest diffusion time (or noise level when using ``sigma_fn`` and
         ``sigma_inv_fn``) subject to churn. By default ``float("inf")``.
     S_noise : float, optional
-        Noise scaling factor. Large values add more noise to the latent state.
+        Scales the churn noise. Larger values add more noise to the latent
+        state.
         By default 1.
     num_steps : int, optional
         Total number of sampling steps, used to scale churn. By default 18.
@@ -139,18 +138,17 @@ class EDMStochasticExponentialEulerSolver(Solver):
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.sigma_inv`.
         Requires ``sigma_fn``. By default ``None`` (identity mapping).
     diffusion_fn : Callable[[Tensor, Tensor], Tensor] | None, optional
-        Controls the time-dependent scale of the churn noise, on top of the
-        ``S_noise`` scaling factor. Typically the
-        squared diffusion coefficient :math:`g^2(\mathbf{x}, t)` from the
-        reverse SDE, obtained from
+        Time-dependent scaling for churn, applied on top of ``S_noise``. Use
+        the squared diffusion coefficient :math:`g^2(\mathbf{x}, t)` from the
+        reverse SDE, available from
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.diffusion`.
         By default ``None`` (:math:`g^2 = 2t`), which corresponds to an
         EDM-like noise schedule.
     renoise : float, optional
-        Fraction :math:`r \in [0, 1]` of the arrival noise level renewed with
-        fresh noise at each step, as described above. ``0`` keeps all the
-        carried noise, ``1`` renews it entirely, and intermediate values mix
-        the two. By default 0.
+        Fraction :math:`r \in [0, 1]` of arrival noise replaced with fresh
+        noise at each step. Use ``0`` to keep the carried noise, ``1`` to
+        replace the carried noise, or an intermediate value to mix the two. By
+        default 0.
 
     Note
     ----
@@ -158,11 +156,12 @@ class EDMStochasticExponentialEulerSolver(Solver):
 
     - EDM: `Elucidating the Design Space of Diffusion-Based Generative
       Models <https://arxiv.org/abs/2206.00364>`_
+    - `Denoising Diffusion Implicit Models <https://arxiv.org/abs/2010.02502>`_
     - `Consistency Models <https://arxiv.org/abs/2303.01469>`_
 
     Examples
     --------
-    Basic usage with churn on the probability-flow ODE of an EDM schedule:
+    Add churn while sampling the probability-flow ODE of an EDM schedule:
 
     >>> import torch
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
@@ -174,7 +173,7 @@ class EDMStochasticExponentialEulerSolver(Solver):
     >>> x0_pred = lambda x, t: x * 0.1  # Toy x0-predictor
     >>> solver = EDMStochasticExponentialEulerSolver(
     ...     scheduler.get_denoiser(x0_predictor=x0_pred),
-    ...     linear_fn=scheduler.get_linear_denoiser(x0_predictor=x0_pred),
+    ...     linear_fn=scheduler.get_linear_denoiser(prediction_type="x0"),
     ...     S_churn=40,
     ...     num_steps=18,
     ... )
@@ -183,17 +182,20 @@ class EDMStochasticExponentialEulerSolver(Solver):
     >>> x_tm1.shape
     torch.Size([1, 3, 8, 8])
 
-    Reproduce the re-noising sampler of distilled and consistency models (a
-    stochastic DDIM) on an EDM schedule: full noise renewal, no churn, and a
-    score parameterization so that each step re-noises the data prediction:
+    With a VP schedule and an x0-predictor, full noise renewal gives a
+    re-noising sampler suitable for distilled few-step and consistency models:
 
-    >>> score_pred = lambda x, t: -x * 0.1  # Toy score-predictor
+    >>> from physicsnemo.diffusion.noise_schedulers import VPNoiseScheduler
+    >>> scheduler = VPNoiseScheduler()
+    >>> x0_pred = lambda x, t: x * 0.1  # Toy x0-predictor
     >>> solver = EDMStochasticExponentialEulerSolver(
-    ...     scheduler.get_denoiser(score_predictor=score_pred),
-    ...     linear_fn=scheduler.get_linear_denoiser(score_predictor=score_pred),
+    ...     scheduler.get_denoiser(x0_predictor=x0_pred),
+    ...     linear_fn=scheduler.get_linear_denoiser(prediction_type="x0"),
+    ...     sigma_fn=scheduler.sigma,
+    ...     sigma_inv_fn=scheduler.sigma_inv,
     ...     renoise=1.0,
     ... )
-    >>> x_tm1 = solver.step(x_t, torch.tensor([5.0]), torch.tensor([2.5]))
+    >>> x_tm1 = solver.step(x_t, torch.tensor([0.6]), torch.tensor([0.3]))
     >>> x_tm1.shape
     torch.Size([1, 3, 8, 8])
     """
@@ -247,6 +249,18 @@ class EDMStochasticExponentialEulerSolver(Solver):
             self.diffusion_fn = lambda x, t: 2 * t.reshape(-1, *([1] * (x.ndim - 1)))
         else:
             self.diffusion_fn = diffusion_fn
+        # Bind the deterministic-stage target at construction: renoise=0
+        # skips the noise-level round-trip so that it matches the churn-only
+        # path exactly
+        if renoise == 0:
+            self._t_dn_fn = lambda t_next: t_next
+        else:
+            sigma_fn = self.sigma_fn
+            sigma_inv_fn = self.sigma_inv_fn
+            kept_fraction = self._kept_fraction
+            self._t_dn_fn = lambda t_next: sigma_inv_fn(
+                kept_fraction * sigma_fn(t_next)
+            )
 
     def step(
         self,
@@ -311,13 +325,8 @@ class EDMStochasticExponentialEulerSolver(Solver):
         x_hat = x + noise_scale_bc * torch.randn_like(x)
 
         # The deterministic stage aims at the reduced arrival level kept by
-        # the renoise dial; renoise=0 skips the level round-trip so that it
-        # matches the churn-only path exactly
-        if self.renoise == 0:
-            t_dn = t_next
-        else:
-            sigma_next = self.sigma_fn(t_next)
-            t_dn = self.sigma_inv_fn(self._kept_fraction * sigma_next)
+        # the renoise dial
+        t_dn = self._t_dn_fn(t_next)
 
         # Exponential Euler stage from t_hat, isolating the nonlinear part
         # of the RHS: N = D - A x

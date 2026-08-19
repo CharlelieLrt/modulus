@@ -408,20 +408,13 @@ There are two ways to use solvers:
   Second-order with configurable stochastic noise injection.
 - ``"exponential_euler"`` ---
   :class:`~physicsnemo.diffusion.samplers.ExponentialEulerSolver`.
-  First-order exponential integrator, specialized for semi-linear ODEs. It
-  takes the standard denoiser plus the linear coefficient of the semi-linear
-  decomposition. See
-  :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.get_linear_denoiser`.
+  First-order solver for DDIM-like sampling and distilled few-step models.
 - ``"edm_stochastic_exponential_euler"`` ---
   :class:`~physicsnemo.diffusion.samplers.EDMStochasticExponentialEulerSolver`.
-  Stochastic counterpart of the exponential Euler integrator, with
-  EDM-style churn and a ``renoise`` dial. The dial spans the ancestral
-  family up to the full re-noising sampler of distilled or consistency
-  models.
+  Stochastic solver for distilled few-step and consistency models.
 - ``"dpmpp_2m"`` ---
   :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2M`.
-  DPM-Solver++(2M), a second-order multi-step sampler with a single
-  denoiser evaluation per step.
+  Efficient second-order solver for high-quality sampling.
 
 **Custom solvers** can be defined by implementing the
 :class:`~physicsnemo.diffusion.samplers.Solver` protocol: any object

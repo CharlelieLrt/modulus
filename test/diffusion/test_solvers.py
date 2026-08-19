@@ -114,7 +114,7 @@ SOLVER_CONFIGS = [
         "stoch_exp_euler_renoise",
         True,
     ),
-    (DPMPlusPlus2M, {}, "dpmpp_2m", False),
+    (DPMPlusPlus2M, {"_use_linear_fn": True}, "dpmpp_2m", False),
 ]
 
 
@@ -137,7 +137,7 @@ def _minus_one_coeff(t):
     return -torch.ones_like(t)
 
 
-def _make_solver(solver_cls, solver_kwargs, denoiser, model=None):
+def _make_solver(solver_cls, solver_kwargs, denoiser):
     """Create a solver, resolving the "_use_*" sentinels."""
     kwargs = dict(solver_kwargs)
     if kwargs.pop("_use_edm_sigma_fns", False):
@@ -147,7 +147,7 @@ def _make_solver(solver_cls, solver_kwargs, denoiser, model=None):
         kwargs["diffusion_fn"] = edm.diffusion
     if kwargs.pop("_use_linear_fn", False):
         kwargs["linear_fn"] = EDMNoiseScheduler().get_linear_denoiser(
-            x0_predictor=model
+            prediction_type="x0"
         )
     return solver_cls(denoiser, **kwargs)
 
@@ -261,14 +261,13 @@ class TestDPMPlusPlus2MConstructor:
         solver = DPMPlusPlus2M(_identity_denoiser)
         assert solver.denoiser is _identity_denoiser
         assert isinstance(solver, Solver)
-        # Default schedule callbacks are the EDM schedule
+        # Default linear coefficient is zero (classical two-step method)
         t = torch.tensor([2.0, 3.0])
-        assert torch.all(solver.alpha_fn(t) == 1.0)
-        assert torch.all(solver.sigma_fn(t) == t)
+        assert torch.all(solver.linear_fn(t) == 0)
 
-    def test_partial_schedule_fns(self):
-        with pytest.raises(ValueError, match="alpha_fn, sigma_fn"):
-            DPMPlusPlus2M(_identity_denoiser, alpha_fn=lambda t: torch.ones_like(t))
+    def test_custom_linear_fn(self):
+        solver = DPMPlusPlus2M(_identity_denoiser, linear_fn=_minus_one_coeff)
+        assert solver.linear_fn is _minus_one_coeff
 
 
 # =============================================================================
@@ -296,7 +295,7 @@ class TestConsistency:
             return scheduler.x0_to_score(model(x, t), x, t)
 
         denoiser = scheduler.get_denoiser(score_predictor=score_pred)
-        linear_fn = scheduler.get_linear_denoiser(score_predictor=score_pred)
+        linear_fn = scheduler.get_linear_denoiser(prediction_type="score")
         return scheduler, model, denoiser, linear_fn
 
     def test_exponential_euler_matches_euler_on_edm(
@@ -381,7 +380,7 @@ class TestConsistency:
         t_next = torch.tensor([0.0] * shape[0], device=device)
         compare_outputs(solver.step(x, t_cur, t_next), model(x, t_cur), **tolerances)
 
-    def test_dpmpp_first_step_matches_renoised_prediction(
+    def test_dpmpp_first_step_matches_exponential_euler(
         self,
         deterministic_settings,
         device,
@@ -391,23 +390,21 @@ class TestConsistency:
         predictor_cls,
         predictor_kwargs,
     ):
-        """The first DPM-Solver++(2M) step has no history, so it equals
-        re-noising the data prediction at the arrival level (the DDIM
-        update)."""
-        denoiser, model = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
-        scheduler = EDMNoiseScheduler()
-        solver = DPMPlusPlus2M(denoiser)
+        """The first DPM-Solver++(2M) step has no history, so it equals a
+        first-order exponential Euler step on the same semi-linear split."""
+        denoiser, _ = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
+        linear_fn = EDMNoiseScheduler().get_linear_denoiser(prediction_type="x0")
+        dpmpp = DPMPlusPlus2M(denoiser, linear_fn=linear_fn)
+        exp_euler = ExponentialEulerSolver(denoiser, linear_fn=linear_fn)
 
         x = make_input(shape, seed=136, device=device)
         t_cur = torch.tensor([5.0] * shape[0], device=device)
         t_next = torch.tensor([2.5] * shape[0], device=device)
-
-        x0 = model(x, t_cur)
-        eps = scheduler.x0_to_epsilon(x0, x, t_cur)
-        expected_shape = (-1,) + (1,) * (x.ndim - 1)
-        t_next_bc = t_next.reshape(expected_shape)
-        x_renoised = scheduler.alpha(t_next_bc) * x0 + scheduler.sigma(t_next_bc) * eps
-        compare_outputs(solver.step(x, t_cur, t_next), x_renoised, **tolerances)
+        compare_outputs(
+            dpmpp.step(x, t_cur, t_next),
+            exp_euler.step(x, t_cur, t_next),
+            **tolerances,
+        )
 
     def test_dpmpp_reset_restores_first_step(
         self,
@@ -422,7 +419,10 @@ class TestConsistency:
         """reset() clears the history: the next step reproduces a fresh
         instance's first step."""
         denoiser, _ = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
-        solver = DPMPlusPlus2M(denoiser)
+        solver = DPMPlusPlus2M(
+            denoiser,
+            linear_fn=EDMNoiseScheduler().get_linear_denoiser(prediction_type="x0"),
+        )
 
         x = make_input(shape, seed=137, device=device)
         t_cur = torch.tensor([5.0] * shape[0], device=device)
@@ -467,8 +467,8 @@ class TestStepNonRegression:
         predictor_cls,
         predictor_kwargs,
     ):
-        denoiser, model = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
-        solver = _make_solver(solver_cls, solver_kwargs, denoiser, model)
+        denoiser, _ = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
+        solver = _make_solver(solver_cls, solver_kwargs, denoiser)
 
         x = make_input(shape, seed=100, device=device)
         t_cur = torch.tensor([5.0] * shape[0], device=device)
@@ -505,8 +505,8 @@ class TestStepNonRegression:
         predictor_kwargs,
     ):
         """Step to t=0 should produce finite output."""
-        denoiser, model = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
-        solver = _make_solver(solver_cls, solver_kwargs, denoiser, model)
+        denoiser, _ = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
+        solver = _make_solver(solver_cls, solver_kwargs, denoiser)
 
         x = make_input(shape, seed=101, device=device)
         t_cur = torch.tensor([1.0] * shape[0], device=device)
@@ -540,9 +540,9 @@ class TestStepNonRegression:
         else:
             pytest.skip("Only applies to zero-churn stochastic configs")
 
-        denoiser, model = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
-        stoch_solver = _make_solver(solver_cls, solver_kwargs, denoiser, model)
-        det_solver = _make_solver(det_cls, det_kwargs, denoiser, model)
+        denoiser, _ = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
+        stoch_solver = _make_solver(solver_cls, solver_kwargs, denoiser)
+        det_solver = _make_solver(det_cls, det_kwargs, denoiser)
 
         x = make_input(shape, seed=120, device=device)
         t_cur = torch.tensor([5.0] * shape[0], device=device)
@@ -588,8 +588,8 @@ class TestStepCompile:
         """Compiled step traces without error and graph is reused on second call."""
         torch._dynamo.config.error_on_recompile = True
 
-        denoiser, model = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
-        solver = _make_solver(solver_cls, solver_kwargs, denoiser, model)
+        denoiser, _ = _make_denoiser(shape, predictor_cls, predictor_kwargs, device)
+        solver = _make_solver(solver_cls, solver_kwargs, denoiser)
 
         x = make_input(shape, seed=100, device=device)
         t_prev = torch.tensor([7.5] * shape[0], device=device)
@@ -620,7 +620,7 @@ class TestStepCompile:
         # For deterministic solvers, also verify eager-vs-compiled match
         # against a fresh instance primed the same way
         if not uses_rng:
-            solver_eager = _make_solver(solver_cls, solver_kwargs, denoiser, model)
+            solver_eager = _make_solver(solver_cls, solver_kwargs, denoiser)
             prime(solver_eager)
             with torch.no_grad():
                 out_eager = solver_eager.step(x, t_cur, t_next)

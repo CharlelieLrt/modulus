@@ -638,10 +638,8 @@ class TestSpatialMethodNonRegression:
             s.get_denoiser()
         with pytest.raises(ValueError, match="denoising_type"):
             s.get_denoiser(x0_predictor=pred, denoising_type="bad")
-        with pytest.raises(ValueError, match="Exactly one"):
-            s.get_linear_denoiser()
-        with pytest.raises(ValueError, match="Exactly one"):
-            s.get_linear_denoiser(score_predictor=pred, x0_predictor=pred)
+        with pytest.raises(ValueError, match="prediction_type"):
+            s.get_linear_denoiser(prediction_type="bad")
 
     def test_get_linear_denoiser_absorbs_x_dependence(
         self,
@@ -669,13 +667,14 @@ class TestSpatialMethodNonRegression:
         t = make_input((shape[0],), seed=143, device=device).abs() * 0.3 + 0.2
         t_bc = t.reshape(-1, *([1] * (x1.ndim - 1)))
 
-        for kwarg in ("x0_predictor", "score_predictor", "epsilon_predictor"):
+        for prediction_type in ("x0", "score", "epsilon"):
             for denoising_type in ("ode", "sde"):
                 full = s.get_denoiser(
-                    **{kwarg: const_pred}, denoising_type=denoising_type
+                    **{f"{prediction_type}_predictor": const_pred},
+                    denoising_type=denoising_type,
                 )
                 lam = s.get_linear_denoiser(
-                    **{kwarg: const_pred}, denoising_type=denoising_type
+                    prediction_type, denoising_type=denoising_type
                 )
                 n1 = full(x1, t) - lam(t_bc) * x1
                 n2 = full(x2, t) - lam(t_bc) * x2

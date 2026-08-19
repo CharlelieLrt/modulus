@@ -206,36 +206,25 @@ def _make_sampling_components(
     return scheduler, model, denoiser, xN
 
 
-_PREDICTOR_KWARGS = {
-    "x0": "x0_predictor",
-    "score": "score_predictor",
-    "epsilon": "epsilon_predictor",
-}
-
-
 def _make_solver_arg(
     solver_key,
     solver_options,
     denoiser,
     scheduler=None,
-    model=None,
     predictor_type="x0",
 ):
     """Build the solver argument for sample() from config fields."""
     if solver_key == "_custom_euler":
         return _CustomEulerSolver(denoiser), None
     opts = dict(solver_options) if solver_options else {}
-    if solver_key in ("exponential_euler", "edm_stochastic_exponential_euler"):
+    if solver_key in (
+        "exponential_euler",
+        "edm_stochastic_exponential_euler",
+        "dpmpp_2m",
+    ):
         # The linear coefficient follows the parameterization of the denoiser
         opts["linear_fn"] = scheduler.get_linear_denoiser(
-            **{_PREDICTOR_KWARGS[predictor_type]: model}
-        )
-    if solver_key == "dpmpp_2m":
-        opts.update(
-            alpha_fn=scheduler.alpha,
-            sigma_fn=scheduler.sigma,
-            alpha_dot_fn=scheduler.alpha_dot,
-            sigma_dot_fn=scheduler.sigma_dot,
+            prediction_type=predictor_type
         )
     return solver_key, opts or None
 
@@ -296,7 +285,6 @@ class TestSampleNonRegression:
             solver_options,
             denoiser,
             scheduler=scheduler,
-            model=model,
             predictor_type=predictor_type,
         )
 
@@ -378,7 +366,6 @@ class TestSampleNonRegression:
             solver_options,
             denoiser,
             scheduler=scheduler,
-            model=model,
             predictor_type=predictor_type,
         )
 
@@ -728,7 +715,6 @@ class TestSampleCompile:
             solver_options,
             denoiser,
             scheduler=scheduler,
-            model=model,
             predictor_type=predictor_type,
         )
         solver_compiled, opts_compiled = _make_solver_arg(
@@ -736,7 +722,6 @@ class TestSampleCompile:
             solver_options,
             compiled_denoiser,
             scheduler=scheduler,
-            model=model,
             predictor_type=predictor_type,
         )
 
@@ -1018,7 +1003,6 @@ class TestGradientFlow:
             solver_options,
             denoiser,
             scheduler=scheduler,
-            model=model,
             predictor_type=predictor_type,
         )
 

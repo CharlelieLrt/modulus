@@ -29,30 +29,27 @@ from .base import Solver
 
 class ExponentialEulerSolver(Solver):
     r"""
-    First-order exponential Euler solver for semi-linear ODEs.
+    Integrate semi-linear diffusion ODEs with exponential Euler.
 
-    A general-purpose exponential time differencing (ETD) integrator,
-    specialized for ODEs whose right-hand side is the sum of a term that is
-    linear in the state and a nonlinear term:
+    This first-order solver integrates ODEs that separate the right-hand side
+    into a term that is linear in the state and a remaining nonlinear term:
 
     .. math::
         \frac{d\mathbf{x}}{dt} = D(\mathbf{x}, t)
         = A(t) \, \mathbf{x} + N(\mathbf{x}, t)
 
-    ``denoiser`` returns the full right-hand side :math:`D` and ``linear_fn``
-    the coefficient :math:`A(t)` of its linear part; the solver isolates the
-    nonlinear part :math:`N` by difference. Both callbacks are generic: they
-    typically come from a noise scheduler, as in the examples below, but any
-    callables with the expected signatures work.
+    The ``denoiser`` provides the full right-hand side :math:`D`, while
+    ``linear_fn`` provides :math:`A(t)`. The solver then derives the nonlinear
+    term :math:`N` automatically. A noise scheduler can provide both callables.
 
-    The method integrates the linear term exactly over the step, with the
-    coefficient held at its current value, at the same cost as the explicit
-    Euler method: a single evaluation of ``denoiser`` per step. Without a
-    linear coefficient, it reduces to the explicit Euler method. Applied to
-    the probability-flow ODE of a linear-Gaussian noise schedule, this is
-    the first-order DPM-Solver; on an EDM-like schedule with a score or
-    noise parameterization it reproduces DDIM, the standard sampler of
-    distilled few-step models, as in the second example below.
+    Exponential Euler requires one denoiser evaluation per step and can take
+    advantage of known linear dynamics in the diffusion process. If you omit
+    ``linear_fn``, the solver uses explicit Euler.
+
+    For linear-Gaussian probability-flow ODEs, this method corresponds to the
+    first-order DPM-Solver. With an EDM-like schedule and a score or noise
+    predictor, it reproduces DDIM, which is commonly used to sample distilled
+    few-step models.
 
     The ``linear_fn`` callable has the signature:
 
@@ -65,31 +62,31 @@ class ExponentialEulerSolver(Solver):
     Parameters
     ----------
     denoiser : Denoiser
-        A callable implementing the
-        :class:`~physicsnemo.diffusion.Denoiser` interface. Here it returns
-        the right-hand side of the ODE. Typically obtained via
+        Right-hand side of the ODE to integrate, following the
+        :class:`~physicsnemo.diffusion.Denoiser` interface. In most workflows,
+        get it from
         :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`,
         but any callable with the correct signature works.
     linear_fn : Callable[[Tensor], Tensor] | None, optional
-        The coefficient :math:`A(t)` of the linear part of the ``denoiser``,
-        with the signature shown above. Typically obtained via
+        Linear coefficient :math:`A(t)` used to treat the known linear
+        dynamics exactly over each step. Use the signature above. In most
+        workflows, get it from
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.get_linear_denoiser`,
-        with the same predictor parameterization as the ``denoiser``. By
-        default ``None``, which corresponds to a zero linear coefficient
-        (explicit Euler method).
+        using the same predictor parameterization as ``denoiser``. The default
+        is ``None``, which uses explicit Euler.
 
     Note
     ----
     References:
 
-    - `Exponential integrators <https://doi.org/10.1017/S0962492910000048>`_
-      (Hochbruck & Ostermann, 2010)
+    - `Denoising Diffusion Implicit Models
+      <https://arxiv.org/abs/2010.02502>`_
     - `DPM-Solver: A Fast ODE Solver for Diffusion Probabilistic Model
       Sampling <https://arxiv.org/abs/2206.00927>`_
 
     Examples
     --------
-    Basic usage on the probability-flow ODE of an EDM schedule:
+    Sample the probability-flow ODE of an EDM schedule:
 
     >>> import torch
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
@@ -99,24 +96,26 @@ class ExponentialEulerSolver(Solver):
     >>> x0_pred = lambda x, t: x * 0.1  # Toy x0-predictor
     >>> solver = ExponentialEulerSolver(
     ...     scheduler.get_denoiser(x0_predictor=x0_pred),
-    ...     linear_fn=scheduler.get_linear_denoiser(x0_predictor=x0_pred),
+    ...     linear_fn=scheduler.get_linear_denoiser(prediction_type="x0"),
     ... )
     >>> x_t = torch.randn(1, 3, 8, 8)
     >>> x_tm1 = solver.step(x_t, torch.tensor([5.0]), torch.tensor([2.5]))
     >>> x_tm1.shape
     torch.Size([1, 3, 8, 8])
 
-    Reproduce DDIM on an EDM schedule, the standard sampler of distilled
-    few-step models. With a score parameterization the linear coefficient
-    vanishes and each step re-noises the data prediction to the arrival
-    noise level:
+    A VP schedule and an x0-predictor give a DDIM-like solver that can also
+    sample from distilled few-step models:
 
-    >>> score_pred = lambda x, t: -x * 0.1  # Toy score-predictor
-    >>> ddim_solver = ExponentialEulerSolver(
-    ...     scheduler.get_denoiser(score_predictor=score_pred),
-    ...     linear_fn=scheduler.get_linear_denoiser(score_predictor=score_pred),
+    >>> from physicsnemo.diffusion.noise_schedulers import VPNoiseScheduler
+    >>> scheduler = VPNoiseScheduler()
+    >>> x0_pred = lambda x, t: x * 0.1  # Toy x0-predictor
+    >>> ddim_like_solver = ExponentialEulerSolver(
+    ...     scheduler.get_denoiser(x0_predictor=x0_pred),
+    ...     linear_fn=scheduler.get_linear_denoiser(prediction_type="x0"),
     ... )
-    >>> x_tm1 = ddim_solver.step(x_t, torch.tensor([5.0]), torch.tensor([2.5]))
+    >>> x_tm1 = ddim_like_solver.step(
+    ...     x_t, torch.tensor([0.6]), torch.tensor([0.3])
+    ... )
     >>> x_tm1.shape
     torch.Size([1, 3, 8, 8])
     """

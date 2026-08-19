@@ -16,7 +16,8 @@
 
 """Diffusion model sampling interface."""
 
-from typing import Any, Dict, List, Literal
+import inspect
+from typing import Any, Dict, List, Literal, Tuple
 
 import torch
 import torch.distributed as dist
@@ -45,6 +46,21 @@ SOLVERS: Dict[str, type[Solver]] = {
     "exponential_euler": ExponentialEulerSolver,
     "edm_stochastic_exponential_euler": EDMStochasticExponentialEulerSolver,
     "dpmpp_2m": DPMPlusPlus2M,
+}
+
+# Required constructor arguments (those without defaults, besides the
+# denoiser) per solver, resolved once at import time: inspect cannot run
+# inside torch.compile-d code
+_REQUIRED_SOLVER_ARGS: Dict[str, Tuple[str, ...]] = {
+    key: tuple(
+        name
+        for name, param in inspect.signature(cls).parameters.items()
+        if name != "denoiser"
+        and param.default is inspect.Parameter.empty
+        and param.kind
+        not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+    )
+    for key, cls in SOLVERS.items()
 }
 
 
@@ -229,18 +245,18 @@ def sample(
           :class:`~physicsnemo.diffusion.samplers.EDMStochasticHeunSolver`.
 
         * ``"exponential_euler"``: First-order exponential integrator for
-          semi-linear ODEs. It can reproduce DDIM and sample from distilled
-          student models. See
+          semi-linear ODEs. It supports DDIM-like sampling and distilled
+          few-step models. See
           :class:`~physicsnemo.diffusion.samplers.ExponentialEulerSolver`.
 
-        * ``"edm_stochastic_exponential_euler"``: Stochastic counterpart of
-          the exponential Euler integrator, with EDM-style churn and a
-          ``renoise`` dial that spans the ancestral family up to full
-          re-noising. See
+        * ``"edm_stochastic_exponential_euler"``: Exponential Euler with
+          stochastic noise injection for distilled few-step and consistency
+          models. See
           :class:`~physicsnemo.diffusion.samplers.EDMStochasticExponentialEulerSolver`.
 
-        * ``"dpmpp_2m"``: DPM-Solver++(2M), a second-order multistep sampler
-          with a single denoiser evaluation per step. See
+        * ``"dpmpp_2m"``: DPM-Solver++(2M), a second-order multistep solver
+          that reuses the previous data prediction and requires one denoiser
+          evaluation per step. See
           :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2M`.
 
     time_steps : Tensor | None, default=None
@@ -389,7 +405,18 @@ def sample(
                 f"Unknown solver '{solver}'. Available solvers: {available}."
             )
         solver_cls = SOLVERS[solver]
-        solver_ = solver_cls(denoiser, **solver_options)
+        # Pop the required constructor arguments from a copy of
+        # solver_options and report missing ones by name
+        options = dict(solver_options)
+        required_args = {}
+        for name in _REQUIRED_SOLVER_ARGS[solver]:
+            if name not in options:
+                raise ValueError(
+                    f"Missing required solver option '{name}' for solver "
+                    f"'{solver_cls.__name__}'."
+                )
+            required_args[name] = options.pop(name)
+        solver_ = solver_cls(denoiser, **required_args, **options)
     else:
         # Assume solver is a Solver-like object with a step method
         if solver_options:
