@@ -93,8 +93,12 @@ class _CustomEulerSolver:
         return x + (t_next_bc - t_cur_bc) * d
 
 
-# (solver_key, solver_options, sampler_name, uses_rng). "_custom_euler" maps to
-# a _CustomEulerSolver instance via _make_solver_arg.
+# (solver_key, solver_options, sampler_name, uses_rng). "_custom_euler" maps
+# to a _CustomEulerSolver instance via _make_solver_arg. The "_use_*" keys are
+# sentinels resolved by _make_solver_arg: they build schedule callbacks from
+# the scheduler of the test. The configs of the exponential and
+# DPM-Solver++(2M) solvers mirror the docstring examples of their classes;
+# the scheduler axis of the tests covers the noise schedules of the examples.
 SAMPLER_CONFIGS = [
     ("euler", {}, "euler", False),
     ("heun", {}, "heun", False),
@@ -112,20 +116,37 @@ SAMPLER_CONFIGS = [
         "stoch_heun",
         True,
     ),
-    ("exponential_euler", {}, "exponential_euler", False),
+    # DDIM-like sampling: the linear coefficient of the x0-parameterization
+    (
+        "exponential_euler",
+        {"_use_linear_fn": True},
+        "exponential_euler",
+        False,
+    ),
+    # EDM-style churn on top of the exponential Euler update
     (
         "edm_stochastic_exponential_euler",
-        {"S_churn": 20, "num_steps": NUM_STEPS},
+        {"S_churn": 40, "num_steps": 18, "_use_linear_fn": True},
         "stoch_exp_euler",
         True,
     ),
+    # Stochastic DDIM (full noise renewal) for distilled few-step and
+    # consistency models
     (
         "edm_stochastic_exponential_euler",
-        {"S_churn": 0, "renoise": 1.0},
+        {"renoise": 1.0, "_use_linear_fn": True, "_use_sigma_fns": True},
         "stoch_exp_euler_renoise",
         True,
     ),
-    ("dpmpp_2m", {}, "dpmpp_2m", False),
+    # Classical two-step Adams-Bashforth: default callbacks
+    ("dpmpp_2m", {}, "dpmpp_2m_ab2", False),
+    # Original DPM-Solver++(2M): log-SNR extrapolation coordinate
+    (
+        "dpmpp_2m",
+        {"_use_linear_fn": True, "_use_log_snr_lambda": True},
+        "dpmpp_2m",
+        False,
+    ),
 ]
 
 TIME_EVAL_INDICES = [0, 1]
@@ -213,19 +234,21 @@ def _make_solver_arg(
     scheduler=None,
     predictor_type="x0",
 ):
-    """Build the solver argument for sample() from config fields."""
+    """Build the solver argument for sample() from config fields, resolving
+    the "_use_*" sentinels with the scheduler of the test."""
     if solver_key == "_custom_euler":
         return _CustomEulerSolver(denoiser), None
     opts = dict(solver_options) if solver_options else {}
-    if solver_key in (
-        "exponential_euler",
-        "edm_stochastic_exponential_euler",
-        "dpmpp_2m",
-    ):
+    if opts.pop("_use_sigma_fns", False):
+        opts["sigma_fn"] = scheduler.sigma
+        opts["sigma_inv_fn"] = scheduler.sigma_inv
+    if opts.pop("_use_linear_fn", False):
         # The linear coefficient follows the parameterization of the denoiser
         opts["linear_fn"] = scheduler.get_linear_denoiser(
             prediction_type=predictor_type
         )
+    if opts.pop("_use_log_snr_lambda", False):
+        opts["lambda_fn"] = lambda t: torch.log(scheduler.alpha(t) / scheduler.sigma(t))
     return solver_key, opts or None
 
 
@@ -872,14 +895,22 @@ class TestFullSamplerCompile:
         if solver_key == "_custom_euler":
             pytest.skip("Custom solver instances are tested in TestSampleCompile")
 
+        solver_arg, opts = _make_solver_arg(
+            solver_key,
+            solver_options,
+            denoiser,
+            scheduler=scheduler,
+            predictor_type=predictor_type,
+        )
+
         def do_sample(x):
             return sample(
                 denoiser,
                 x,
                 scheduler,
                 NUM_STEPS_SHORT,
-                solver=solver_key,
-                solver_options=solver_options or None,
+                solver=solver_arg,
+                solver_options=opts,
             )
 
         compiled_sample = torch.compile(do_sample, fullgraph=True)

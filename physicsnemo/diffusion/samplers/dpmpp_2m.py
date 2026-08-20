@@ -242,31 +242,29 @@ class DPMPlusPlus2M(Solver):
         h_phi1 = torch.where(a_bc == 0, h_bc, torch.expm1(z) / a_safe)
 
         if self._n_prev is None or self._lam_prev is None:
-            # No history yet: first-order exponential Euler step
-            x_next = torch.exp(z) * x + h_phi1 * n_cur
-            # Build the history caches on the first step; later steps update
-            # them in place for torch.compile compatibility
+            # Seed placeholder history on the first step: the equal previous
+            # lambda zeroes the masked slope below, so the update degenerates
+            # to a first-order exponential Euler step. Later steps update the
+            # caches in place, keeping their storage stable for torch.compile.
             self._n_prev = n_cur.clone()
             self._lam_prev = lam_cur_bc.clone()
-        else:
-            # Extrapolation ratio of successive steps, measured in the lambda
-            # coordinate and masked to fall back to first order on repeated
-            # nodes or non-finite lambda values (for example the log-SNR at
-            # t = 0). Use finite dummy denominators because torch.where
-            # evaluates both branches.
-            num_bc = self.lambda_fn(t_next).reshape(expected_shape) - lam_cur_bc
-            den_bc = lam_cur_bc - self._lam_prev
-            ok = torch.isfinite(num_bc) & torch.isfinite(den_bc) & (den_bc != 0)
-            r_safe = torch.where(ok, num_bc, torch.zeros_like(num_bc)) / torch.where(
-                ok, den_bc, torch.ones_like(den_bc)
-            )
-            # DPM-Solver++ approximates the first exponential moment of the
-            # slope term by h * phi1(h A) / 2
-            slope_bc = torch.where(ok, h_phi1 / 2 * r_safe, torch.zeros_like(h_bc))
-            x_next = (
-                torch.exp(z) * x + h_phi1 * n_cur + slope_bc * (n_cur - self._n_prev)
-            )
-            self._n_prev.copy_(n_cur)
-            self._lam_prev.copy_(lam_cur_bc)
+
+        # Extrapolation ratio of successive steps, measured in the lambda
+        # coordinate and masked to fall back to first order on repeated
+        # nodes or non-finite lambda values (for example the log-SNR at
+        # t = 0). Use finite dummy denominators because torch.where
+        # evaluates both branches.
+        num_bc = self.lambda_fn(t_next).reshape(expected_shape) - lam_cur_bc
+        den_bc = lam_cur_bc - self._lam_prev
+        ok = torch.isfinite(num_bc) & torch.isfinite(den_bc) & (den_bc != 0)
+        r_safe = torch.where(ok, num_bc, torch.zeros_like(num_bc)) / torch.where(
+            ok, den_bc, torch.ones_like(den_bc)
+        )
+        # DPM-Solver++ approximates the first exponential moment of the
+        # slope term by h * phi1(h A) / 2
+        slope_bc = torch.where(ok, h_phi1 / 2 * r_safe, torch.zeros_like(h_bc))
+        x_next = torch.exp(z) * x + h_phi1 * n_cur + slope_bc * (n_cur - self._n_prev)
+        self._n_prev.copy_(n_cur)
+        self._lam_prev.copy_(lam_cur_bc)
 
         return x_next
