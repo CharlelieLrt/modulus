@@ -14,8 +14,44 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Legacy checkpoint shim for the GeoTransolver model."""
+"""Legacy import shims for the GeoTransolver model and its components."""
 
-from .geotransolver import GeoTransolver
+from physicsnemo.nn import (
+    ConcreteDropout,
+    collect_concrete_dropout_losses,
+    get_concrete_dropout_rates,
+)
 
-__all__ = ["GeoTransolver"]
+from .context_projector import (
+    ContextProjector,
+    GeometricFeatureProcessor,
+    GlobalContextBuilder,
+    MultiScaleFeatureExtractor,
+    StructuredContextProjector,
+)
+from .gale import (
+    GALE,
+    GALE_FA,
+    GALE_block,
+    GALEStructuredMesh2D,
+    GALEStructuredMesh3D,
+)
+from .geotransolver import GeoTransolver, GeoTransolverMetaData
+
+__all__ = [
+    "GeoTransolver",
+    "GeoTransolverMetaData",
+    "GALE",
+    "GALE_FA",
+    "GALE_block",
+    "GALEStructuredMesh2D",
+    "GALEStructuredMesh3D",
+    "ContextProjector",
+    "GeometricFeatureProcessor",
+    "GlobalContextBuilder",
+    "MultiScaleFeatureExtractor",
+    "StructuredContextProjector",
+    "ConcreteDropout",
+    "collect_concrete_dropout_losses",
+    "get_concrete_dropout_rates",
+]

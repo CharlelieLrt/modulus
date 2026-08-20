@@ -14,11 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Legacy checkpoint shim for the GeoTransolver model."""
+"""Legacy import shim for the FLARE attention layer."""
 
-from physicsnemo.models.geotransolver.geotransolver import (
-    GeoTransolver,
-    GeoTransolverMetaData,
-)
+from physicsnemo.nn.module.flare_attention import FLARE
 
-__all__ = ["GeoTransolver", "GeoTransolverMetaData"]
+__all__ = ["FLARE"]

@@ -87,3 +87,14 @@ def test_flare_gradient_flow(device):
     loss.backward()
     assert x.grad is not None
     assert not torch.isnan(x.grad).any()
+
+
+def test_flare_attention_legacy_import_paths():
+    """Test the import paths used before the move out of experimental."""
+    from physicsnemo.experimental.nn import FLARE as LegacyPackageFLARE
+    from physicsnemo.experimental.nn.flare_attention import (
+        FLARE as LegacyModuleFLARE,
+    )
+
+    assert LegacyPackageFLARE is FLARE
+    assert LegacyModuleFLARE is FLARE

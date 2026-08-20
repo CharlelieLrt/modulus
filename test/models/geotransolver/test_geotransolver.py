@@ -684,6 +684,19 @@ def test_geotransolver_legacy_checkpoint_class_path():
     assert LegacyModuleGeoTransolver is GeoTransolver
 
 
+def test_geotransolver_legacy_import_paths():
+    """Test the component import paths used before the move out of experimental."""
+    import physicsnemo.models.geotransolver as production_pkg
+    from physicsnemo.experimental.models import geotransolver as legacy_pkg
+
+    for legacy_name in legacy_pkg.__all__:
+        # The move out of experimental renamed GALE_block to GALEBlock.
+        production_name = "GALEBlock" if legacy_name == "GALE_block" else legacy_name
+        assert getattr(legacy_pkg, legacy_name) is getattr(
+            production_pkg, production_name
+        ), f"'{legacy_name}' does not resolve to production '{production_name}'"
+
+
 def test_geotransolver_checkpoint(device):
     """Test GeoTransolver checkpoint save/load."""
     torch.manual_seed(42)
