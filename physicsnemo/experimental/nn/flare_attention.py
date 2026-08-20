@@ -16,6 +16,17 @@
 
 """Legacy import shim for the FLARE attention layer."""
 
+import warnings
+
+from physicsnemo.core.warnings import LegacyFeatureWarning
 from physicsnemo.nn.module.flare_attention import FLARE
+
+warnings.warn(
+    "Importing from 'physicsnemo.experimental.nn.flare_attention' is deprecated. "
+    "Use 'from physicsnemo.nn import FLARE' instead. "
+    "This backward-compatibility shim will be removed in a future release.",
+    LegacyFeatureWarning,
+    stacklevel=2,
+)
 
 __all__ = ["FLARE"]
