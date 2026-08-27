@@ -208,9 +208,7 @@ class EDMStochasticExponentialEulerSolver(Solver):
         By default ``None`` (:math:`g^2 = 2t`), which corresponds to an
         EDM-like noise schedule.
     alpha_fn : Callable[[Tensor], Tensor] | None, optional
-        Signal coefficient :math:`\alpha(t)` of the schedule, used by the
-        re-noising stage to restore the signal from the reduced arrival
-        level to ``t_next``. Typically
+        Signal coefficient :math:`\alpha(t)` of the schedule. Typically
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.alpha`.
         By default ``None`` (:math:`\alpha = 1`).
     renoise : float, optional

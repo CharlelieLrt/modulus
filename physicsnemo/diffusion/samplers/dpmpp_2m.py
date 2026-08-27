@@ -139,10 +139,8 @@ class DPMPlusPlus2M(Solver):
 
         This solver is **stateful**: it caches the previous predictor-like
         evaluation across calls to :meth:`step`, so a single instance tracks
-        a single trajectory. The cache holds one tensor with the same shape
-        as the latent, so the memory footprint is roughly twice the latent
-        state. Call :meth:`reset` before reusing an instance on a new
-        trajectory. String-key selection in
+        a single trajectory. Call :meth:`reset` before reusing an instance on
+        a new trajectory. String-key selection in
         :func:`~physicsnemo.diffusion.samplers.sample` constructs a fresh
         instance for each call, which is always safe.
 
