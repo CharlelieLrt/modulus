@@ -526,6 +526,87 @@ class TestStepNonRegression:
 
 
 # =============================================================================
+# Consistency Tests
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "solver_cls,solver_kwargs,solver_name,uses_rng,time_scale",
+    SOLVER_CONFIGS,
+    ids=[c[2] for c in SOLVER_CONFIGS],
+)
+@pytest.mark.parametrize(
+    "spatial_name,shape,predictor_cls,predictor_kwargs",
+    SPATIAL_CONFIGS,
+    ids=[c[0] for c in SPATIAL_CONFIGS],
+)
+class TestStepConsistency:
+    """Consistency of a single step against the known solution of a trivial
+    linear ODE, exercising the solvers alone (no noise schedule, no golden
+    files)."""
+
+    @pytest.mark.parametrize("t_end_frac", [1e-3, 0.5], ids=["large_step", "half_step"])
+    def test_single_step_matches_exact_solution(
+        self,
+        deterministic_settings,
+        device,
+        tolerances,
+        solver_cls,
+        solver_kwargs,
+        solver_name,
+        uses_rng,
+        time_scale,
+        spatial_name,
+        shape,
+        predictor_cls,
+        predictor_kwargs,
+        t_end_frac,
+    ):
+        """One step of the trivial ODE dx/dt = (1 / t) x lands on the exact
+        solution x(t1) = (t1 / t0) x(t0), which is linear in time, for both
+        a large step to near zero and a half step."""
+        if uses_rng:
+            pytest.skip("Noise injection has no deterministic reference solution")
+
+        def trivial_denoiser(x, t):
+            """RHS of the trivial linear ODE dx/dt = (1 / t) x, whose
+            solution is linear in time: x(t1) = (t1 / t0) x(t0)."""
+            return x / t.reshape((-1,) + (1,) * (x.ndim - 1))
+
+        # Resolve the "_use_*" sentinels of the config with the exact
+        # decomposition of this ODE (bias a(t) = 1 / t, slope b(t) = 0)
+        # instead of noise-scheduler callbacks, so the test exercises the
+        # solver alone
+        kwargs = dict(solver_kwargs)
+        kwargs.pop("_use_vp_scheduler", False)
+        if kwargs.pop("_use_edm_sigma_fns", False):
+            kwargs["sigma_fn"] = lambda t: t
+            kwargs["sigma_inv_fn"] = lambda sigma: sigma
+            kwargs["diffusion_fn"] = lambda x, t: 2 * t.reshape(
+                (-1,) + (1,) * (x.ndim - 1)
+            )
+        if kwargs.pop("_use_sigma_fns", False):
+            kwargs["sigma_fn"] = lambda t: t
+            kwargs["sigma_inv_fn"] = lambda sigma: sigma
+            kwargs["alpha_fn"] = lambda t: torch.ones_like(t)
+        if kwargs.pop("_use_linear_fn", False):
+            kwargs["bias_fn"] = lambda t: 1 / t
+            kwargs["bias_int_fn"] = torch.log
+            if kwargs.pop("_use_slope_fn", False):
+                kwargs["slope_fn"] = lambda t: torch.zeros_like(t)
+        if kwargs.pop("_use_log_snr_lambda", False):
+            kwargs["lambda_fn"] = lambda t: -torch.log(t)
+        solver = solver_cls(trivial_denoiser, **kwargs)
+
+        x = make_input(shape, seed=102, device=device)
+        t_cur = torch.tensor([1.0 * time_scale] * shape[0], device=device)
+        t_next = torch.tensor([t_end_frac * time_scale] * shape[0], device=device)
+
+        x_next = solver.step(x, t_cur, t_next)
+        compare_outputs(x_next, t_end_frac * x, **tolerances)
+
+
+# =============================================================================
 # Compile Tests
 # =============================================================================
 
