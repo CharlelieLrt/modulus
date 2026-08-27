@@ -84,13 +84,15 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
     - :meth:`drift`: Drift term :math:`f(\mathbf{x}, t)` for ODE/SDE
     - :meth:`diffusion`: Squared diffusion term :math:`g^2(\mathbf{x}, t)`
+    - :meth:`snr`: Signal-to-noise ratio :math:`\alpha(t) / \sigma(t)`
     - :meth:`x0_to_score`: Convert x0-prediction to score
     - :meth:`score_to_x0`: Convert score to x0-prediction
     - :meth:`add_noise`: Add noise to clean data (training)
     - :meth:`init_latents`: Initialize latent state (sampling)
     - :meth:`get_denoiser`: Get ODE/SDE RHS (sampling)
-    - :meth:`get_linear_denoiser`: Build the linear-coefficient callback used
-      by exponential ODE/SDE solvers
+    - :meth:`get_linear_denoiser`: Get the coefficients to decompose the
+         ODE/SDE RHS into a semi-linear form, used by exponential ODE/SDE
+         solvers
 
     Examples
     --------
@@ -426,6 +428,25 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
             - 2 * (alpha_dot_t_bc / alpha_t_bc) * sigma_t_bc**2
         )
         return g_sq_bc
+
+    def snr(
+        self,
+        t: Float[Tensor, " *shape"],
+    ) -> Float[Tensor, " *shape"]:
+        r"""
+        Compute the signal-to-noise ratio :math:`\alpha(t) / \sigma(t)`.
+
+        Parameters
+        ----------
+        t : Tensor
+            Diffusion time tensor of any shape.
+
+        Returns
+        -------
+        Tensor
+            Signal-to-noise ratio with same shape as ``t``.
+        """
+        return self.alpha(t) / self.sigma(t)
 
     def x0_to_score(
         self,
@@ -915,29 +936,31 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         self,
         prediction_type: PredictorType = "x0",
         denoising_type: Literal["ode", "sde"] = "ode",
-    ) -> Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]:
+    ) -> tuple[
+        Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]],
+        Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]],
+        Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]],
+    ]:
         r"""
-        Return the linear coefficient required by exponential solvers.
-
         Use this method with :meth:`get_denoiser` when a solver needs the
-        linear part of the diffusion dynamics separately. For a semi-linear
+        affine structure of the diffusion dynamics. For an extended semi-linear
         right-hand side,
 
         .. math::
-            \frac{d\mathbf{x}}{dt} = A(t) \, \mathbf{x}
-            + N(\mathbf{x}, t)
+            \frac{d\mathbf{x}}{dt} = a(t) \, \mathbf{x}
+            + b(t) \, G(\mathbf{x}, t)
 
-        this method returns :math:`A(t)`, while :meth:`get_denoiser` returns
-        the full right-hand side. Pass the resulting callback as ``linear_fn``
-        to solvers such as
-        :class:`~physicsnemo.diffusion.samplers.ExponentialEulerSolver`.
+        This method returns the tuple
+        :math:`(a(t), \mathcal{A}(t), b(t))`, where
+        :math:`a(t)` is the bias coefficient with antiderivative
+        :math:`\mathcal{A}(t)` (:math:`\mathcal{A}'(t) = a(t)`), and
+        :math:`b(t)` is the slope coefficient. The :meth:`get_denoiser` returns
+        the full right-hand side.
 
         .. note::
 
             Configure ``prediction_type`` and ``denoising_type`` to match the
-            predictor and denoiser used by the solver. The returned callable
-            computes the coefficient :math:`A(t)`, not
-            :math:`A(t) \, \mathbf{x}`.
+            predictor and denoiser used by the solver.
 
         Parameters
         ----------
@@ -946,14 +969,15 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
             ``"score"``, or ``"epsilon"`` to match the predictor supplied to
             :meth:`get_denoiser`.
         denoising_type : {"ode", "sde"}, default="ode"
-            Chooses the linear coefficient for the probability-flow ODE or
+            Chooses the coefficients for the probability-flow ODE or
             reverse SDE. Use the same value when calling :meth:`get_denoiser`.
 
         Returns
         -------
-        Callable
-            Function mapping diffusion time :math:`t` to the linear
-            coefficient :math:`A(t)`.
+        tuple[Callable, Callable, Callable]
+            Functions mapping diffusion time :math:`t` to the bias
+            :math:`a(t)`, its antiderivative :math:`\mathcal{A}(t)`, and the
+            slope :math:`b(t)`.
 
         Raises
         ------
@@ -963,21 +987,23 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
         Examples
         --------
-        Build matching full and linear callbacks for an x0-predictor.
-        Subtracting :math:`A(t) \, \mathbf{x}` from the full right-hand side
-        gives the nonlinear term:
+        This example shows how to build matching full and affine callbacks for
+        an x0-predictor. Subtracting :math:`a(t) \, \mathbf{x}` from the full
+        right-hand side gives the nonlinear term:
 
         >>> import torch
         >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
         >>> scheduler = EDMNoiseScheduler()
         >>> x0_pred = lambda x, t: x / (1 + t.view(-1, 1, 1, 1)**2)  # Toy x0-predictor
-        >>> linear = scheduler.get_linear_denoiser(prediction_type="x0")
+        >>> bias, bias_int, slope = scheduler.get_linear_denoiser(
+        ...     prediction_type="x0"
+        ... )
         >>> full = scheduler.get_denoiser(x0_predictor=x0_pred)
         >>> x = torch.randn(2, 3, 8, 8)
         >>> t = torch.tensor([5.0, 5.0])
-        >>> linear(t).shape
+        >>> bias(t).shape
         torch.Size([2])
-        >>> nonlinear = full(x, t) - linear(t).view(-1, 1, 1, 1) * x
+        >>> nonlinear = full(x, t) - bias(t).view(-1, 1, 1, 1) * x
         >>> nonlinear.shape
         torch.Size([2, 3, 8, 8])
         """
@@ -988,25 +1014,58 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         sigma_dot = self.sigma_dot
 
         if prediction_type in ("score", "epsilon"):
-            # score- and noise-parameterizations share the drift coefficient
-            def linear_denoiser(
+            # score- and noise-parameterizations share the bias coefficient;
+            # the reverse SDE doubles the slope of the noise-prediction term
+            factor = 1.0 if denoising_type == "ode" else 2.0
+
+            def bias(
                 t: Float[Tensor, " *shape"],
             ) -> Float[Tensor, " *shape"]:
                 return alpha_dot(t) / alpha(t)
 
+            def bias_int(
+                t: Float[Tensor, " *shape"],
+            ) -> Float[Tensor, " *shape"]:
+                return torch.log(alpha(t))
+
+            def slope(
+                t: Float[Tensor, " *shape"],
+            ) -> Float[Tensor, " *shape"]:
+                return factor * (sigma_dot(t) - sigma(t) * alpha_dot(t) / alpha(t))
+
         elif prediction_type == "x0" and denoising_type == "ode":
 
-            def linear_denoiser(
+            def bias(
                 t: Float[Tensor, " *shape"],
             ) -> Float[Tensor, " *shape"]:
                 return sigma_dot(t) / sigma(t)
 
+            def bias_int(
+                t: Float[Tensor, " *shape"],
+            ) -> Float[Tensor, " *shape"]:
+                return torch.log(sigma(t))
+
+            def slope(
+                t: Float[Tensor, " *shape"],
+            ) -> Float[Tensor, " *shape"]:
+                return alpha_dot(t) - alpha(t) * sigma_dot(t) / sigma(t)
+
         elif prediction_type == "x0":
 
-            def linear_denoiser(
+            def bias(
                 t: Float[Tensor, " *shape"],
             ) -> Float[Tensor, " *shape"]:
                 return 2 * sigma_dot(t) / sigma(t) - alpha_dot(t) / alpha(t)
+
+            def bias_int(
+                t: Float[Tensor, " *shape"],
+            ) -> Float[Tensor, " *shape"]:
+                return 2 * torch.log(sigma(t)) - torch.log(alpha(t))
+
+            def slope(
+                t: Float[Tensor, " *shape"],
+            ) -> Float[Tensor, " *shape"]:
+                return 2 * (alpha_dot(t) - alpha(t) * sigma_dot(t) / sigma(t))
 
         else:
             raise ValueError(
@@ -1014,7 +1073,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
                 f"'{prediction_type}'"
             )
 
-        return linear_denoiser
+        return bias, bias_int, slope
 
     def add_noise(
         self,

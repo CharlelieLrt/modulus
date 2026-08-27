@@ -25,14 +25,54 @@ from torch import Tensor
 
 from physicsnemo.diffusion.base import Denoiser
 
+from ._utils import gauss_legendre
 from .base import Solver
+
+# Number of Gauss-Legendre points used by the internal quadrature of this
+# solver
+_NUM_QUADRATURE_POINTS = 4
+
+# Fractional offset from t_next toward t_cur of the fallback probe for the
+# slope-to-bias ratio; matches the innermost node of the 4-point rule
+_RATIO_PROBE_OFFSET = 0.0694318442029737
+
+
+def _nonlinear_weight(
+    t_cur: Float[Tensor, " B"],
+    t_next: Float[Tensor, " B"],
+    bias_fn: Callable[[Tensor], Tensor],
+    bias_int_fn: Callable[[Tensor], Tensor],
+    slope_fn: Callable[[Tensor], Tensor],
+) -> Float[Tensor, " B"]:
+    r"""
+    Compute the exponential-kernel weight of the nonlinear term over one step.
+    """
+    bias_int_next = bias_int_fn(t_next)
+
+    # Finite estimate of the slope-to-bias ratio b / a near t_next: prefer
+    # the endpoint value; when not finite (an indeterminate ratio at a
+    # vanishing noise level, or a zero bias), fall back to a probe point
+    # near t_next, then to zero (pure quadrature)
+    t_star = t_next + _RATIO_PROBE_OFFSET * (t_cur - t_next)
+    ratio_next = slope_fn(t_next) / bias_fn(t_next)
+    ratio_star = slope_fn(t_star) / bias_fn(t_star)
+    ratio = torch.where(torch.isfinite(ratio_next), ratio_next, ratio_star)
+    ratio = torch.where(torch.isfinite(ratio), ratio, torch.zeros_like(ratio))
+
+    def integrand(s: Tensor) -> Tensor:
+        return torch.exp(bias_int_next - bias_int_fn(s)) * (
+            slope_fn(s) - ratio * bias_fn(s)
+        )
+
+    exact_part = ratio * torch.expm1(bias_int_next - bias_int_fn(t_cur))
+    return exact_part + gauss_legendre(integrand, t_cur, t_next, _NUM_QUADRATURE_POINTS)
 
 
 class EDMStochasticExponentialEulerSolver(Solver):
     r"""
     Add controlled noise to exponential Euler sampling.
 
-    This solver combines the first-order
+    This first-order solver combines the
     :class:`ExponentialEulerSolver` update with two optional forms of noise
     injection:
 
@@ -40,16 +80,18 @@ class EDMStochasticExponentialEulerSolver(Solver):
     - ``renoise`` replaces part of the noise at the end of the step with a
       fresh sample.
 
-    Use these controls to increase sample diversity while retaining the
-    semi-linear update:
+    It uses one denoiser evaluation per step. Use the two controls above to
+    increase sample diversity while retaining the semi-linear update:
 
     .. math::
         \frac{d\mathbf{x}}{dt} = D(\mathbf{x}, t)
-        = A(t) \, \mathbf{x} + N(\mathbf{x}, t)
+        = a(t) \, \mathbf{x} + b(t) \, N(\mathbf{x}, t)
 
     The ``denoiser`` provides the full right-hand side :math:`D`, while
-    ``linear_fn`` provides :math:`A(t)`. The solver derives the nonlinear term
-    :math:`N` automatically. A noise scheduler can provide both callables.
+    ``bias_fn`` and ``bias_int_fn`` provide the bias coefficient :math:`a(t)`
+    and its antiderivative :math:`\mathcal{A}(t)`
+    (:math:`\mathcal{A}'(t) = a(t)`), and ``slope_fn`` provides the slope
+    coefficient :math:`b(t)`. A noise scheduler can provide these callables.
 
     .. important::
 
@@ -79,9 +121,17 @@ class EDMStochasticExponentialEulerSolver(Solver):
 
     .. code-block:: python
 
-        def linear_fn(
-            t: Tensor,  # shape: (B,)
-        ) -> Tensor: ...  # linear coefficient A(t), shape: (B,)
+        def bias_fn(
+            t: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # bias coefficient a(t), same shape as t
+
+        def bias_int_fn(
+            t: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # antiderivative of a(t), same shape as t
+
+        def slope_fn(
+            t: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # slope coefficient b(t), same shape as t
 
         def sigma_fn(
             t: Tensor,  # shape: (B,) or broadcastable
@@ -96,6 +146,10 @@ class EDMStochasticExponentialEulerSolver(Solver):
             t: Tensor,  # shape: (B,)
         ) -> Tensor: ...  # g^2(x, t), broadcastable to shape of x
 
+        def alpha_fn(
+            t: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # signal coefficient alpha(t), same shape as t
+
     Parameters
     ----------
     denoiser : Denoiser
@@ -105,12 +159,21 @@ class EDMStochasticExponentialEulerSolver(Solver):
         workflows, get the callable from
         :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`
         with ``denoising_type="ode"``.
-    linear_fn : Callable[[Tensor], Tensor] | None, optional
-        Linear coefficient :math:`A(t)` used by the exponential Euler update.
-        Use the signature above. In most workflows, get it from
+    bias_fn : Callable[[Tensor], Tensor] | None, optional
+        Bias coefficient :math:`a(t)` with the signature shown above.
+        Requires ``bias_int_fn``. In most workflows, get all three callbacks
+        from
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.get_linear_denoiser`,
-        using the same predictor parameterization as ``denoiser``. The default
-        is ``None``, which uses an explicit Euler update.
+        using the same predictor parameterization as ``denoiser``. The
+        default is ``None``, which uses a zero bias.
+    bias_int_fn : Callable[[Tensor], Tensor] | None, optional
+        Antiderivative :math:`\mathcal{A}(t)` of the bias, with the signature shown
+        above. Requires ``bias_fn``. The default is ``None``, which uses a
+        zero bias.
+    slope_fn : Callable[[Tensor], Tensor] | None, optional
+        Slope coefficient :math:`b(t)` of the nonlinear term with the signature
+        shown above. The default is ``None``, which uses a constant slope
+        (:math:`b = 1`).
     S_churn : float, optional
         Controls the amount of noise added at each step. Higher values add
         more stochasticity. By default 0 (no churn), in which case this
@@ -144,6 +207,12 @@ class EDMStochasticExponentialEulerSolver(Solver):
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.diffusion`.
         By default ``None`` (:math:`g^2 = 2t`), which corresponds to an
         EDM-like noise schedule.
+    alpha_fn : Callable[[Tensor], Tensor] | None, optional
+        Signal coefficient :math:`\alpha(t)` of the schedule, used by the
+        re-noising stage to restore the signal from the reduced arrival
+        level to ``t_next``. Typically
+        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.alpha`.
+        By default ``None`` (:math:`\alpha = 1`).
     renoise : float, optional
         Fraction :math:`r \in [0, 1]` of arrival noise replaced with fresh
         noise at each step. Use ``0`` to keep the carried noise, ``1`` to
@@ -161,7 +230,17 @@ class EDMStochasticExponentialEulerSolver(Solver):
 
     Examples
     --------
-    Add churn while sampling the probability-flow ODE of an EDM schedule:
+
+    This solver reproduces two families of stochastic diffusion samplers.
+    The first adds EDM-style churn on top of a deterministic exponential
+    Euler step; the second renews the noise fully at each step to give a
+    stochastic DDIM, the standard sampler of distilled few-step and
+    consistency models.
+
+    Add EDM-style churn while sampling the probability-flow ODE of an EDM
+    schedule. The churn perturbs the latent before each step to increase
+    sample diversity, while the exponential Euler update still treats the
+    linear dynamics exactly:
 
     >>> import torch
     >>> from physicsnemo.diffusion.noise_schedulers import EDMNoiseScheduler
@@ -171,9 +250,14 @@ class EDMStochasticExponentialEulerSolver(Solver):
     >>>
     >>> scheduler = EDMNoiseScheduler()
     >>> x0_pred = lambda x, t: x * 0.1  # Toy x0-predictor
+    >>> bias, bias_int, slope = scheduler.get_linear_denoiser(
+    ...     prediction_type="x0"
+    ... )
     >>> solver = EDMStochasticExponentialEulerSolver(
     ...     scheduler.get_denoiser(x0_predictor=x0_pred),
-    ...     linear_fn=scheduler.get_linear_denoiser(prediction_type="x0"),
+    ...     bias_fn=bias,
+    ...     bias_int_fn=bias_int,
+    ...     slope_fn=slope,
     ...     S_churn=40,
     ...     num_steps=18,
     ... )
@@ -182,20 +266,21 @@ class EDMStochasticExponentialEulerSolver(Solver):
     >>> x_tm1.shape
     torch.Size([1, 3, 8, 8])
 
-    With a VP schedule and an x0-predictor, full noise renewal gives a
-    re-noising sampler suitable for distilled few-step and consistency models:
+    Renew the noise fully at each step to get a stochastic DDIM. Setting
+    ``renoise=1`` replaces the carried noise with a fresh sample at the
+    arrival level, which is the sampler used by distilled few-step and
+    consistency models. Any linear-Gaussian schedule works; this example
+    uses an EDM schedule, and the original DDIM paper relied on a VP
+    schedule:
 
-    >>> from physicsnemo.diffusion.noise_schedulers import VPNoiseScheduler
-    >>> scheduler = VPNoiseScheduler()
-    >>> x0_pred = lambda x, t: x * 0.1  # Toy x0-predictor
     >>> solver = EDMStochasticExponentialEulerSolver(
     ...     scheduler.get_denoiser(x0_predictor=x0_pred),
-    ...     linear_fn=scheduler.get_linear_denoiser(prediction_type="x0"),
-    ...     sigma_fn=scheduler.sigma,
-    ...     sigma_inv_fn=scheduler.sigma_inv,
+    ...     bias_fn=bias,
+    ...     bias_int_fn=bias_int,
+    ...     slope_fn=slope,
     ...     renoise=1.0,
     ... )
-    >>> x_tm1 = solver.step(x_t, torch.tensor([0.6]), torch.tensor([0.3]))
+    >>> x_tm1 = solver.step(x_t, torch.tensor([5.0]), torch.tensor([2.5]))
     >>> x_tm1.shape
     torch.Size([1, 3, 8, 8])
     """
@@ -203,7 +288,9 @@ class EDMStochasticExponentialEulerSolver(Solver):
     def __init__(
         self,
         denoiser: Denoiser,
-        linear_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
+        bias_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
+        bias_int_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
+        slope_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
         S_churn: float = 0,
         S_min: float = 0,
         S_max: float = float("inf"),
@@ -217,13 +304,25 @@ class EDMStochasticExponentialEulerSolver(Solver):
             [Float[Tensor, " B *dims"], Float[Tensor, " B"]], Float[Tensor, " B *_"]
         ]
         | None = None,
+        alpha_fn: Callable[[Float[Tensor, " *shape"]], Float[Tensor, " *shape"]]
+        | None = None,
         renoise: float = 0,
     ) -> None:
         self.denoiser = denoiser
-        if linear_fn is None:
-            self.linear_fn = lambda t: torch.zeros_like(t)
+        if bias_fn is None and bias_int_fn is None:
+            self.bias_fn = lambda t: torch.zeros_like(t)
+            self.bias_int_fn = lambda t: torch.zeros_like(t)
+        elif bias_fn is not None and bias_int_fn is not None:
+            self.bias_fn = bias_fn
+            self.bias_int_fn = bias_int_fn
         else:
-            self.linear_fn = linear_fn
+            raise ValueError(
+                "bias_fn and bias_int_fn must both be provided or both None."
+            )
+        if slope_fn is None:
+            self.slope_fn = lambda t: torch.ones_like(t)
+        else:
+            self.slope_fn = slope_fn
         self.S_churn = S_churn
         self.S_min = S_min
         self.S_max = S_max
@@ -249,6 +348,10 @@ class EDMStochasticExponentialEulerSolver(Solver):
             self.diffusion_fn = lambda x, t: 2 * t.reshape(-1, *([1] * (x.ndim - 1)))
         else:
             self.diffusion_fn = diffusion_fn
+        if alpha_fn is None:
+            self.alpha_fn = lambda t: torch.ones_like(t)
+        else:
+            self.alpha_fn = alpha_fn
         # Bind the deterministic-stage target at construction: renoise=0
         # skips the noise-level round-trip so that it matches the churn-only
         # path exactly
@@ -328,26 +431,42 @@ class EDMStochasticExponentialEulerSolver(Solver):
         # the renoise dial
         t_dn = self._t_dn_fn(t_next)
 
-        # Exponential Euler stage from t_hat, isolating the nonlinear part
-        # of the RHS: N = D - A x
+        # Exponential Euler stage from t_hat, recovering the predictor-like
+        # part of the RHS: N = (D - a x) / b; the zero-slope guard drops the
+        # nonlinear term instead of dividing by zero
         t_hat = t_hat_bc.reshape(x.shape[0])
-        h_bc = (t_dn - t_hat).reshape(expected_shape)
         d_cur = self.denoiser(x_hat, t_hat)
-        a_bc = self.linear_fn(t_hat).reshape(expected_shape)
-        n_cur = d_cur - a_bc * x_hat
+        a_bc = self.bias_fn(t_hat).reshape(expected_shape)
+        b_bc = self.slope_fn(t_hat).reshape(expected_shape)
+        b_safe = torch.where(b_bc == 0, torch.ones_like(b_bc), b_bc)
+        inv_b_bc = torch.where(b_bc == 0, torch.zeros_like(b_bc), 1 / b_safe)
+        n_cur = (d_cur - a_bc * x_hat) * inv_b_bc
 
-        # h * phi1(h A) = expm1(h A) / A; the A -> 0 limit equals h
-        z = h_bc * a_bc
-        a_safe = torch.where(a_bc == 0, torch.ones_like(a_bc), a_bc)
-        h_phi1 = torch.where(a_bc == 0, h_bc, torch.expm1(z) / a_safe)
+        # Exact linear propagator from the antiderivative of the bias, and
+        # exponential-kernel weight of the nonlinear term
+        e_bc = torch.exp(
+            (self.bias_int_fn(t_dn) - self.bias_int_fn(t_hat)).reshape(expected_shape)
+        )
+        j_bc = _nonlinear_weight(
+            t_hat, t_dn, self.bias_fn, self.bias_int_fn, self.slope_fn
+        ).reshape(expected_shape)
 
-        x_next = torch.exp(z) * x_hat + h_phi1 * n_cur
+        x_next = e_bc * x_hat + j_bc * n_cur
 
         # The zero-renoise branch skips the fresh draw so that renoise=0
         # consumes the same random sequence as the churn-only sampler, which
         # keeps seeded trajectories reproducible across the two
         if self.renoise != 0:
             sigma_next_bc = self.sigma_fn(t_next).reshape(expected_shape)
-            x_next = x_next + self.renoise * sigma_next_bc * torch.randn_like(x)
+            # Restore the signal coefficient from the reduced arrival level
+            # to t_next before renewing the noise; the ratio is one for
+            # alpha = 1 schedules
+            alpha_ratio_bc = (self.alpha_fn(t_next) / self.alpha_fn(t_dn)).reshape(
+                expected_shape
+            )
+            x_next = (
+                alpha_ratio_bc * x_next
+                + self.renoise * sigma_next_bc * torch.randn_like(x)
+            )
 
         return x_next

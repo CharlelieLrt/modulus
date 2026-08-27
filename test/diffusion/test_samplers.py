@@ -116,17 +116,22 @@ SAMPLER_CONFIGS = [
         "stoch_heun",
         True,
     ),
-    # DDIM-like sampling: the linear coefficient of the x0-parameterization
+    # DDIM sampling: the affine coefficients of the x0-parameterization
     (
         "exponential_euler",
-        {"_use_linear_fn": True},
+        {"_use_linear_fn": True, "_use_slope_fn": True},
         "exponential_euler",
         False,
     ),
     # EDM-style churn on top of the exponential Euler update
     (
         "edm_stochastic_exponential_euler",
-        {"S_churn": 40, "num_steps": 18, "_use_linear_fn": True},
+        {
+            "S_churn": 40,
+            "num_steps": 18,
+            "_use_linear_fn": True,
+            "_use_slope_fn": True,
+        },
         "stoch_exp_euler",
         True,
     ),
@@ -134,7 +139,12 @@ SAMPLER_CONFIGS = [
     # consistency models
     (
         "edm_stochastic_exponential_euler",
-        {"renoise": 1.0, "_use_linear_fn": True, "_use_sigma_fns": True},
+        {
+            "renoise": 1.0,
+            "_use_linear_fn": True,
+            "_use_slope_fn": True,
+            "_use_sigma_fns": True,
+        },
         "stoch_exp_euler_renoise",
         True,
     ),
@@ -143,7 +153,7 @@ SAMPLER_CONFIGS = [
     # Original DPM-Solver++(2M): log-SNR extrapolation coordinate
     (
         "dpmpp_2m",
-        {"_use_linear_fn": True, "_use_log_snr_lambda": True},
+        {"_use_linear_fn": True, "_use_slope_fn": True, "_use_log_snr_lambda": True},
         "dpmpp_2m",
         False,
     ),
@@ -242,13 +252,18 @@ def _make_solver_arg(
     if opts.pop("_use_sigma_fns", False):
         opts["sigma_fn"] = scheduler.sigma
         opts["sigma_inv_fn"] = scheduler.sigma_inv
+        opts["alpha_fn"] = scheduler.alpha
     if opts.pop("_use_linear_fn", False):
-        # The linear coefficient follows the parameterization of the denoiser
-        opts["linear_fn"] = scheduler.get_linear_denoiser(
-            prediction_type=predictor_type
-        )
+        # The affine callbacks follow the parameterization of the denoiser
+        (
+            opts["bias_fn"],
+            opts["bias_int_fn"],
+            slope_fn,
+        ) = scheduler.get_linear_denoiser(prediction_type=predictor_type)
+        if opts.pop("_use_slope_fn", False):
+            opts["slope_fn"] = slope_fn
     if opts.pop("_use_log_snr_lambda", False):
-        opts["lambda_fn"] = lambda t: torch.log(scheduler.alpha(t) / scheduler.sigma(t))
+        opts["lambda_fn"] = lambda t: torch.log(scheduler.snr(t))
     return solver_key, opts or None
 
 

@@ -237,6 +237,13 @@ class TestLinearGaussianNoiseScheduler:
         expected = 2 * t_bc * torch.ones_like(x)
         assert torch.allclose(g_sq.expand_as(x), expected, atol=1e-6)
 
+    def test_concrete_snr(self, device):
+        """Signal-to-noise ratio: alpha / sigma = 1 / t for the minimal
+        schedule."""
+        s = _MinimalScheduler()
+        t = torch.tensor([0.5, 2.0], device=device)
+        assert torch.allclose(s.snr(t), 1 / t, atol=1e-7)
+
     def test_concrete_add_noise(self, device):
         s = _MinimalScheduler()
         x0 = make_input((2, 3, 8, 8), seed=3, device=device)
@@ -266,13 +273,23 @@ class TestLinearGaussianNoiseScheduler:
     def test_concrete_get_linear_denoiser(self, device):
         s = _MinimalScheduler()
         t = torch.tensor([1.0, 2.0], device=device)
-        out = s.get_linear_denoiser(prediction_type="x0", denoising_type="ode")(t)
-        assert out.shape == t.shape
-        assert torch.allclose(out, 1 / t, atol=1e-7)
-        out = s.get_linear_denoiser(prediction_type="score")(t)
-        assert torch.allclose(out, torch.zeros_like(t), atol=1e-7)
-        out = s.get_linear_denoiser(prediction_type="x0", denoising_type="sde")(t)
-        assert torch.allclose(out, 2 / t, atol=1e-7)
+        bias, bias_int, slope = s.get_linear_denoiser(
+            prediction_type="x0", denoising_type="ode"
+        )
+        assert bias(t).shape == t.shape
+        assert torch.allclose(bias(t), 1 / t, atol=1e-7)
+        assert torch.allclose(bias_int(t), torch.log(t), atol=1e-7)
+        assert torch.allclose(slope(t), -1 / t, atol=1e-7)
+        bias, bias_int, slope = s.get_linear_denoiser(prediction_type="score")
+        assert torch.allclose(bias(t), torch.zeros_like(t), atol=1e-7)
+        assert torch.allclose(bias_int(t), torch.zeros_like(t), atol=1e-7)
+        assert torch.allclose(slope(t), torch.ones_like(t), atol=1e-7)
+        bias, bias_int, slope = s.get_linear_denoiser(
+            prediction_type="x0", denoising_type="sde"
+        )
+        assert torch.allclose(bias(t), 2 / t, atol=1e-7)
+        assert torch.allclose(bias_int(t), 2 * torch.log(t), atol=1e-7)
+        assert torch.allclose(slope(t), -2 / t, atol=1e-7)
 
     def test_concrete_x0_to_score_to_x0(self, device):
         s = _MinimalScheduler()
@@ -312,11 +329,11 @@ class TestLinearGaussianNoiseScheduler:
 
         s = CustomAlphaDotScheduler()
         s_default = _MinimalScheduler()
-        linear_custom = s.get_linear_denoiser(prediction_type="score")
-        linear_default = s_default.get_linear_denoiser(prediction_type="score")
+        bias_custom, *_ = s.get_linear_denoiser(prediction_type="score")
+        bias_default, *_ = s_default.get_linear_denoiser(prediction_type="score")
         t = torch.tensor([1.0, 2.0], device=device)
-        out_custom = linear_custom(t)
-        out_default = linear_default(t)
+        out_custom = bias_custom(t)
+        out_default = bias_default(t)
         assert not torch.allclose(out_custom, out_default)
 
 
@@ -471,20 +488,25 @@ class TestMethodNonRegression:
         prediction_type,
     ):
         s = sched_cls(**sched_kwargs)
-        linear_fn = s.get_linear_denoiser(
+        callables = s.get_linear_denoiser(
             prediction_type=prediction_type, denoising_type=denoising_type
         )
         t = make_input((N_SAMPLES,), seed=30, device=device).abs() * 0.3 + 0.2
-        out = linear_fn(t)
-        assert out.shape == t.shape
-        assert torch.isfinite(out).all()
+        outs = {key: fn(t) for key, fn in zip(("bias", "bias_int", "slope"), callables)}
+        for out in outs.values():
+            assert out.shape == t.shape
+            assert torch.isfinite(out).all()
 
         ref_file = (
             f"{REF_PREFIX}{sched_name}_linear_denoiser_"
             f"{denoising_type}_{prediction_type}.pth"
         )
-        ref = load_or_create_reference(ref_file, lambda: {"out": out.cpu()})
-        compare_outputs(out, ref["out"], **tolerances)
+        ref = load_or_create_reference(
+            ref_file,
+            lambda: {key: out.cpu() for key, out in outs.items()},
+        )
+        for key, out in outs.items():
+            compare_outputs(out, ref[key], **tolerances)
 
 
 # =============================================================================
@@ -958,24 +980,25 @@ class TestLinearDenoiserCompile:
         sched_kwargs,
         sched_name,
     ):
-        """Compiled linear-denoiser closure matches eager and reuses the graph."""
+        """Compiled linear-denoiser closures match eager and reuse the graph."""
         torch._dynamo.config.error_on_recompile = True
 
         s = sched_cls(**sched_kwargs)
-        linear_fn = s.get_linear_denoiser(
+        callables = s.get_linear_denoiser(
             prediction_type=prediction_type, denoising_type=denoising_type
         )
 
         t = make_input((N_SAMPLES,), seed=61, device=device).abs() + 0.5
 
-        compiled_linear_fn = torch.compile(linear_fn, fullgraph=True)
+        for fn in callables:
+            compiled_fn = torch.compile(fn, fullgraph=True)
 
-        with torch.no_grad():
-            out_eager = linear_fn(t)
-            out_compiled = compiled_linear_fn(t)
-        torch.testing.assert_close(out_eager, out_compiled)
+            with torch.no_grad():
+                out_eager = fn(t)
+                out_compiled = compiled_fn(t)
+            torch.testing.assert_close(out_eager, out_compiled)
 
-        # Second call must reuse the graph
-        with torch.no_grad():
-            out_compiled_2 = compiled_linear_fn(t)
-        torch.testing.assert_close(out_compiled, out_compiled_2)
+            # Second call must reuse the graph
+            with torch.no_grad():
+                out_compiled_2 = compiled_fn(t)
+            torch.testing.assert_close(out_compiled, out_compiled_2)

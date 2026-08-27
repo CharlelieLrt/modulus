@@ -24,7 +24,47 @@ from torch import Tensor
 
 from physicsnemo.diffusion.base import Denoiser
 
+from ._utils import gauss_legendre
 from .base import Solver
+
+# Number of Gauss-Legendre points used by the internal quadrature of this
+# solver
+_NUM_QUADRATURE_POINTS = 4
+
+# Fractional offset from t_next toward t_cur of the fallback probe for the
+# slope-to-bias ratio; matches the innermost node of the 4-point rule
+_RATIO_PROBE_OFFSET = 0.0694318442029737
+
+
+def _nonlinear_weight(
+    t_cur: Float[Tensor, " B"],
+    t_next: Float[Tensor, " B"],
+    bias_fn: Callable[[Tensor], Tensor],
+    bias_int_fn: Callable[[Tensor], Tensor],
+    slope_fn: Callable[[Tensor], Tensor],
+) -> Float[Tensor, " B"]:
+    r"""
+    Compute the exponential-kernel weight of the nonlinear term over one step.
+    """
+    bias_int_next = bias_int_fn(t_next)
+
+    # Finite estimate of the slope-to-bias ratio b / a near t_next: prefer
+    # the endpoint value; when not finite (an indeterminate ratio at a
+    # vanishing noise level, or a zero bias), fall back to a probe point
+    # near t_next, then to zero (pure quadrature)
+    t_star = t_next + _RATIO_PROBE_OFFSET * (t_cur - t_next)
+    ratio_next = slope_fn(t_next) / bias_fn(t_next)
+    ratio_star = slope_fn(t_star) / bias_fn(t_star)
+    ratio = torch.where(torch.isfinite(ratio_next), ratio_next, ratio_star)
+    ratio = torch.where(torch.isfinite(ratio), ratio, torch.zeros_like(ratio))
+
+    def integrand(s: Tensor) -> Tensor:
+        return torch.exp(bias_int_next - bias_int_fn(s)) * (
+            slope_fn(s) - ratio * bias_fn(s)
+        )
+
+    exact_part = ratio * torch.expm1(bias_int_next - bias_int_fn(t_cur))
+    return exact_part + gauss_legendre(integrand, t_cur, t_next, _NUM_QUADRATURE_POINTS)
 
 
 class DPMPlusPlus2M(Solver):
@@ -35,45 +75,61 @@ class DPMPlusPlus2M(Solver):
     step. Use it as a computationally efficient alternative to
     :class:`HeunSolver`, which requires two evaluations per step.
 
-    The solver integrates ODEs that separate the right-hand side into a term
-    that is linear in the state and a remaining nonlinear term:
+    The solver integrates ODEs with an extended semi-linear right-hand side:
 
     .. math::
         \frac{d\mathbf{x}}{dt} = D(\mathbf{x}, t)
-        = A(t) \, \mathbf{x} + N(\mathbf{x}, t)
+        = a(t) \, \mathbf{x} + b(t) \, N(\mathbf{x}, t)
 
-    The ``denoiser`` provides the full right-hand side :math:`D`, while
-    ``linear_fn`` provides :math:`A(t)`. The solver then derives the nonlinear
-    term :math:`N` automatically. A noise scheduler can provide both callables.
+    The ``denoiser`` provides the full right-hand side :math:`D`;
+    ``bias_fn`` and ``bias_int_fn`` provide the bias coefficient
+    :math:`a(t)` and its antiderivative :math:`\mathcal{A}(t)`
+    (:math:`\mathcal{A}'(t) = a(t)`); ``slope_fn`` provides the slope
+    coefficient :math:`b(t)`. A noise scheduler can provide all these
+    callables.
 
     Each step advances the state from the current time :math:`t_n` to the
     target time :math:`t_{n-1}`, with :math:`t_{n+1}` denoting the time of
     the previous step (sampling proceeds from large to small times):
 
     .. math::
-        \mathbf{x}_{n-1} = e^{h A(t_n)} \, \mathbf{x}_n
-        + W_0 \left[ N_n + \frac{1}{2}
+        \mathbf{x}_{n-1} = E_n \, \mathbf{x}_n + J_n \left[ N_n
+        + \frac{1}{2}
         \frac{\lambda(t_{n-1}) - \lambda(t_n)}{\lambda(t_n) - \lambda(t_{n+1})}
         \left( N_n - N_{n+1} \right) \right]
 
-    where :math:`h = t_{n-1} - t_n` is the step size,
-    :math:`W_0 = (e^{h A(t_n)} - 1) / A(t_n)` is the zeroth moment of the
-    exponential kernel over the step.
+    where :math:`E_n = e^{\mathcal{A}(t_{n-1}) - \mathcal{A}(t_n)}` is the
+    exact linear propagator and
+
+    .. math::
+        J_n = \int_{t_n}^{t_{n-1}} e^{\mathcal{A}(t_{n-1}) - \mathcal{A}(s)}
+        \, b(s) \, ds
+
+    is the weight of the nonlinear term.
 
     The function :math:`\lambda(t)`, provided by ``lambda_fn``, is the
-    extrapolation coordinate of the multistep method: the solver extrapolates
+    extrapolation coordinate: the solver extrapolates
     :math:`N` linearly in :math:`\lambda(t)` rather than in :math:`t`.
     The original DPM-Solver++(2M) measures the extrapolation in the log-SNR
     :math:`\lambda(t) = \log(\alpha(t) / \sigma(t))` of the noise schedule.
     The default :math:`\lambda(t) = t` extrapolates in diffusion time.
 
-    The ``linear_fn`` and ``lambda_fn`` callables have the signatures:
+    The ``bias_fn``, ``bias_int_fn``, ``slope_fn``, and ``lambda_fn``
+    callables have the signatures:
 
     .. code-block:: python
 
-        def linear_fn(
-            t: Tensor,  # shape: (B,)
-        ) -> Tensor: ...  # linear coefficient A(t), shape: (B,)
+        def bias_fn(
+            t: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # bias coefficient a(t), same shape as t
+
+        def bias_int_fn(
+            t: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # antiderivative of a(t), same shape as t
+
+        def slope_fn(
+            t: Tensor,  # shape: (B,) or broadcastable
+        ) -> Tensor: ...  # slope coefficient b(t), same shape as t
 
         def lambda_fn(
             t: Tensor,  # shape: (B,)
@@ -81,10 +137,12 @@ class DPMPlusPlus2M(Solver):
 
     .. note::
 
-        This solver is **stateful**: it caches the previous denoiser
+        This solver is **stateful**: it caches the previous predictor-like
         evaluation across calls to :meth:`step`, so a single instance tracks
-        a single trajectory. Call :meth:`reset` before reusing an instance on
-        a new trajectory. String-key selection in
+        a single trajectory. The cache holds one tensor with the same shape
+        as the latent, so the memory footprint is roughly twice the latent
+        state. Call :meth:`reset` before reusing an instance on a new
+        trajectory. String-key selection in
         :func:`~physicsnemo.diffusion.samplers.sample` constructs a fresh
         instance for each call, which is always safe.
 
@@ -96,18 +154,26 @@ class DPMPlusPlus2M(Solver):
         get it from
         :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`,
         but any callable with the correct signature works.
-    linear_fn : Callable[[Tensor], Tensor] | None, optional
-        Linear coefficient :math:`A(t)`. Use the signature above. In most
-        workflows, get it from
+    bias_fn : Callable[[Tensor], Tensor] | None, optional
+        Bias coefficient :math:`a(t)`, with the signature shown above.
+        Requires ``bias_int_fn`` when provided. In most workflows, get all
+        three callbacks from
         :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.get_linear_denoiser`,
-        using the same predictor parameterization as ``denoiser``. The default
-        is ``None``, which corresponds to a zero linear coefficient (classical
-        two-step Adams-Bashforth method).
+        using the same predictor parameterization as ``denoiser``. The
+        default is ``None``, which corresponds to a zero bias.
+    bias_int_fn : Callable[[Tensor], Tensor] | None, optional
+        Antiderivative :math:`\mathcal{A}(t)` of the bias, with the signature
+        shown above. Requires ``bias_fn`` when provided. The default is
+        ``None``, which corresponds to a zero bias.
+    slope_fn : Callable[[Tensor], Tensor] | None, optional
+        Slope coefficient :math:`b(t)` of the nonlinear term, with the
+        signature shown above. The default is ``None``, which uses a constant
+        slope (:math:`b = 1`).
     lambda_fn : Callable[[Tensor], Tensor] | None, optional
-        Extrapolation coordinate :math:`\lambda(t)`. Use the signature above.
-        For DPM-Solver++(2M), pass the schedule's log-SNR:
-        ``lambda t: torch.log(scheduler.alpha(t) / scheduler.sigma(t))``.
-        The default is ``None``, which extrapolates in diffusion time.
+        Extrapolation coordinate :math:`\lambda(t)`, with the signature shown
+        above. For DPM-Solver++(2M), pass the schedule's log-SNR:
+        ``lambda t: torch.log(scheduler.snr(t))``. The default is ``None``,
+        which extrapolates in diffusion time.
 
     Note
     ----
@@ -118,7 +184,7 @@ class DPMPlusPlus2M(Solver):
     --------
 
     This class can express different multistep samplers through its callback
-    configuration. The examples below show a classical Adams-Bashforth baseline
+    configuration. The examples below show a classical Adams-Bashforth solver
     and the original DPM-Solver++(2M) method.
 
     >>> import torch
@@ -137,16 +203,20 @@ class DPMPlusPlus2M(Solver):
     >>> x_next.shape
     torch.Size([1, 3, 8, 8])
 
-    To use DPM-Solver++(2M) instead, provide the scheduler's linear
-    coefficient and use its log-SNR as the extrapolation coordinate:
+    To use DPM-Solver++(2M) instead, provide the scheduler's bias and slope
+    callbacks and use its log-SNR as the extrapolation coordinate:
 
-    >>> # Separate the known linear dynamics from the denoiser output.
-    >>> linear_fn = scheduler.get_linear_denoiser(prediction_type="x0")
+    >>> # Separate the known affine structure from the denoiser output.
+    >>> bias, bias_int, slope = scheduler.get_linear_denoiser(
+    ...     prediction_type="x0"
+    ... )
     >>> # Extrapolation variable is the schedule's log-SNR.
-    >>> log_snr = lambda t: torch.log(scheduler.alpha(t) / scheduler.sigma(t))
+    >>> log_snr = lambda t: torch.log(scheduler.snr(t))
     >>> dpmpp_solver = DPMPlusPlus2M(
     ...     denoiser,
-    ...     linear_fn=linear_fn,
+    ...     bias_fn=bias,
+    ...     bias_int_fn=bias_int,
+    ...     slope_fn=slope,
     ...     lambda_fn=log_snr,
     ... )
     >>> x_mid = dpmpp_solver.step(x_t, torch.tensor([5.0]), torch.tensor([2.5]))
@@ -159,14 +229,26 @@ class DPMPlusPlus2M(Solver):
     def __init__(
         self,
         denoiser: Denoiser,
-        linear_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
+        bias_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
+        bias_int_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
+        slope_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
         lambda_fn: Callable[[Float[Tensor, " B"]], Float[Tensor, " B"]] | None = None,
     ) -> None:
         self.denoiser = denoiser
-        if linear_fn is None:
-            self.linear_fn = lambda t: torch.zeros_like(t)
+        if bias_fn is None and bias_int_fn is None:
+            self.bias_fn = lambda t: torch.zeros_like(t)
+            self.bias_int_fn = lambda t: torch.zeros_like(t)
+        elif bias_fn is not None and bias_int_fn is not None:
+            self.bias_fn = bias_fn
+            self.bias_int_fn = bias_int_fn
         else:
-            self.linear_fn = linear_fn
+            raise ValueError(
+                "bias_fn and bias_int_fn must both be provided or both None."
+            )
+        if slope_fn is None:
+            self.slope_fn = lambda t: torch.ones_like(t)
+        else:
+            self.slope_fn = slope_fn
         if lambda_fn is None:
             self.lambda_fn = lambda t: t
         else:
@@ -180,7 +262,7 @@ class DPMPlusPlus2M(Solver):
 
         Call this method before starting a new trajectory with an existing
         solver instance. The next :meth:`step` call uses a first-order update
-        because no previous denoiser evaluation is available.
+        because no previous predictor-like evaluation is available.
 
         Returns
         -------
@@ -229,23 +311,31 @@ class DPMPlusPlus2M(Solver):
         expected_shape = (-1,) + (1,) * (x.ndim - 1)
         lam_cur_bc = self.lambda_fn(t_cur).reshape(expected_shape)
 
-        h_bc = (t_next - t_cur).reshape(expected_shape)
-
-        # Isolate the nonlinear part of the RHS: N = D - A x
+        # Recover the predictor-like term of the RHS: N = (D - a x) / b; the
+        # zero-slope guard drops the nonlinear term instead of dividing by
+        # zero
         d_cur = self.denoiser(x, t_cur)
-        a_bc = self.linear_fn(t_cur).reshape(expected_shape)
-        n_cur = d_cur - a_bc * x
+        a_bc = self.bias_fn(t_cur).reshape(expected_shape)
+        b_bc = self.slope_fn(t_cur).reshape(expected_shape)
+        b_safe = torch.where(b_bc == 0, torch.ones_like(b_bc), b_bc)
+        inv_b_bc = torch.where(b_bc == 0, torch.zeros_like(b_bc), 1 / b_safe)
+        n_cur = (d_cur - a_bc * x) * inv_b_bc
 
-        # h * phi1(h A) = expm1(h A) / A; the A -> 0 limit equals h
-        z = h_bc * a_bc
-        a_safe = torch.where(a_bc == 0, torch.ones_like(a_bc), a_bc)
-        h_phi1 = torch.where(a_bc == 0, h_bc, torch.expm1(z) / a_safe)
+        # Exact linear propagator from the antiderivative of the bias, and
+        # exponential-kernel weight of the nonlinear term
+        e_bc = torch.exp(
+            (self.bias_int_fn(t_next) - self.bias_int_fn(t_cur)).reshape(expected_shape)
+        )
+        j_bc = _nonlinear_weight(
+            t_cur, t_next, self.bias_fn, self.bias_int_fn, self.slope_fn
+        ).reshape(expected_shape)
 
         if self._n_prev is None or self._lam_prev is None:
             # Seed placeholder history on the first step: the equal previous
-            # lambda zeroes the masked slope below, so the update degenerates
-            # to a first-order exponential Euler step. Later steps update the
-            # caches in place, keeping their storage stable for torch.compile.
+            # lambda zeroes the masked extrapolation below, so the update
+            # degenerates to a first-order exponential Euler step. Later
+            # steps update the caches in place, keeping their storage stable
+            # for torch.compile.
             self._n_prev = n_cur.clone()
             self._lam_prev = lam_cur_bc.clone()
 
@@ -260,10 +350,9 @@ class DPMPlusPlus2M(Solver):
         r_safe = torch.where(ok, num_bc, torch.zeros_like(num_bc)) / torch.where(
             ok, den_bc, torch.ones_like(den_bc)
         )
-        # DPM-Solver++ approximates the first exponential moment of the
-        # slope term by h * phi1(h A) / 2
-        slope_bc = torch.where(ok, h_phi1 / 2 * r_safe, torch.zeros_like(h_bc))
-        x_next = torch.exp(z) * x + h_phi1 * n_cur + slope_bc * (n_cur - self._n_prev)
+        q_half_bc = torch.where(ok, r_safe / 2, torch.zeros_like(r_safe))
+
+        x_next = e_bc * x + j_bc * (n_cur + q_half_bc * (n_cur - self._n_prev))
         self._n_prev.copy_(n_cur)
         self._lam_prev.copy_(lam_cur_bc)
 

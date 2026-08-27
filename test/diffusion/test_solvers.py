@@ -94,19 +94,19 @@ SOLVER_CONFIGS = [
         True,
         1.0,
     ),
-    # EDM schedule with the linear coefficient of the x0-parameterization
+    # EDM schedule with the affine coefficients of the x0-parameterization
     (
         ExponentialEulerSolver,
-        {"_use_linear_fn": True},
+        {"_use_linear_fn": True, "_use_slope_fn": True},
         "exponential_euler",
         False,
         1.0,
     ),
-    # DDIM-like sampler for distilled few-step models: VP schedule with an
+    # DDIM sampler for distilled few-step models: VP schedule with an
     # x0-parameterization
     (
         ExponentialEulerSolver,
-        {"_use_vp_scheduler": True, "_use_linear_fn": True},
+        {"_use_vp_scheduler": True, "_use_linear_fn": True, "_use_slope_fn": True},
         "exponential_euler_ddim",
         False,
         0.1,
@@ -114,7 +114,12 @@ SOLVER_CONFIGS = [
     # EDM-style churn on top of the exponential Euler update
     (
         EDMStochasticExponentialEulerSolver,
-        {"S_churn": 40, "num_steps": 18, "_use_linear_fn": True},
+        {
+            "S_churn": 40,
+            "num_steps": 18,
+            "_use_linear_fn": True,
+            "_use_slope_fn": True,
+        },
         "stoch_exp_euler_churn",
         True,
         1.0,
@@ -127,6 +132,7 @@ SOLVER_CONFIGS = [
             "renoise": 1.0,
             "_use_vp_scheduler": True,
             "_use_linear_fn": True,
+            "_use_slope_fn": True,
             "_use_sigma_fns": True,
         },
         "stoch_exp_euler_renoise",
@@ -138,7 +144,7 @@ SOLVER_CONFIGS = [
     # Original DPM-Solver++(2M): log-SNR extrapolation coordinate
     (
         DPMPlusPlus2M,
-        {"_use_linear_fn": True, "_use_log_snr_lambda": True},
+        {"_use_linear_fn": True, "_use_slope_fn": True, "_use_log_snr_lambda": True},
         "dpmpp_2m",
         False,
         1.0,
@@ -173,12 +179,17 @@ def _make_solver_and_denoiser(
     if kwargs.pop("_use_sigma_fns", False):
         kwargs["sigma_fn"] = scheduler.sigma
         kwargs["sigma_inv_fn"] = scheduler.sigma_inv
+        kwargs["alpha_fn"] = scheduler.alpha
     if kwargs.pop("_use_linear_fn", False):
-        kwargs["linear_fn"] = scheduler.get_linear_denoiser(prediction_type="x0")
+        (
+            kwargs["bias_fn"],
+            kwargs["bias_int_fn"],
+            slope_fn,
+        ) = scheduler.get_linear_denoiser(prediction_type="x0")
+        if kwargs.pop("_use_slope_fn", False):
+            kwargs["slope_fn"] = slope_fn
     if kwargs.pop("_use_log_snr_lambda", False):
-        kwargs["lambda_fn"] = lambda t: torch.log(
-            scheduler.alpha(t) / scheduler.sigma(t)
-        )
+        kwargs["lambda_fn"] = lambda t: torch.log(scheduler.snr(t))
     return solver_cls(denoiser, **kwargs), denoiser
 
 
@@ -251,16 +262,41 @@ class TestExponentialEulerSolverConstructor:
         solver = ExponentialEulerSolver(_identity_denoiser)
         assert solver.denoiser is _identity_denoiser
         assert isinstance(solver, Solver)
-        # Default linear coefficient is zero (explicit Euler)
+        # Default bias and antiderivative are zero and default slope is one
+        # (explicit Euler)
         t = torch.tensor([2.0, 3.0])
-        assert torch.all(solver.linear_fn(t) == 0)
+        assert torch.all(solver.bias_fn(t) == 0)
+        assert torch.all(solver.bias_int_fn(t) == 0)
+        assert torch.all(solver.slope_fn(t) == 1)
 
-    def test_custom_linear_fn(self):
+    def test_custom_bias_and_slope_fns(self):
         def minus_one_coeff(t):
             return -torch.ones_like(t)
 
-        solver = ExponentialEulerSolver(_identity_denoiser, linear_fn=minus_one_coeff)
-        assert solver.linear_fn is minus_one_coeff
+        def minus_t_antideriv(t):
+            return -t
+
+        def two_coeff(t):
+            return 2 * torch.ones_like(t)
+
+        solver = ExponentialEulerSolver(
+            _identity_denoiser,
+            bias_fn=minus_one_coeff,
+            bias_int_fn=minus_t_antideriv,
+            slope_fn=two_coeff,
+        )
+        assert solver.bias_fn is minus_one_coeff
+        assert solver.bias_int_fn is minus_t_antideriv
+        assert solver.slope_fn is two_coeff
+
+    def test_bias_fn_validation(self):
+        def minus_one_coeff(t):
+            return -torch.ones_like(t)
+
+        with pytest.raises(ValueError, match="bias_int_fn"):
+            ExponentialEulerSolver(_identity_denoiser, bias_fn=minus_one_coeff)
+        with pytest.raises(ValueError, match="bias_int_fn"):
+            ExponentialEulerSolver(_identity_denoiser, bias_int_fn=minus_one_coeff)
 
 
 class TestEDMStochasticExponentialEulerSolverConstructor:
@@ -271,7 +307,10 @@ class TestEDMStochasticExponentialEulerSolverConstructor:
         assert solver.S_churn == pytest.approx(0.0)
         assert solver.renoise == pytest.approx(0.0)
         t = torch.tensor([2.0, 3.0])
-        assert torch.all(solver.linear_fn(t) == 0)
+        assert torch.all(solver.bias_fn(t) == 0)
+        assert torch.all(solver.bias_int_fn(t) == 0)
+        assert torch.all(solver.slope_fn(t) == 1)
+        assert torch.all(solver.alpha_fn(t) == 1)
 
     def test_sigma_fn_validation(self):
         def sigma_only(t):
@@ -279,6 +318,15 @@ class TestEDMStochasticExponentialEulerSolverConstructor:
 
         with pytest.raises(ValueError, match="sigma_fn and sigma_inv_fn"):
             EDMStochasticExponentialEulerSolver(_identity_denoiser, sigma_fn=sigma_only)
+
+    def test_bias_fn_validation(self):
+        def minus_one_coeff(t):
+            return -torch.ones_like(t)
+
+        with pytest.raises(ValueError, match="bias_int_fn"):
+            EDMStochasticExponentialEulerSolver(
+                _identity_denoiser, bias_fn=minus_one_coeff
+            )
 
     def test_invalid_renoise(self):
         with pytest.raises(ValueError, match="renoise"):
@@ -294,18 +342,58 @@ class TestDPMPlusPlus2MConstructor:
         solver = DPMPlusPlus2M(_identity_denoiser)
         assert solver.denoiser is _identity_denoiser
         assert isinstance(solver, Solver)
-        # Default linear coefficient is zero (classical two-step method) and
-        # the default extrapolation coordinate is diffusion time
+        # Default bias is zero and default slope is one with antiderivative t
+        # (classical two-step method); the default extrapolation coordinate
+        # is diffusion time
         t = torch.tensor([2.0, 3.0])
-        assert torch.all(solver.linear_fn(t) == 0)
+        assert torch.all(solver.bias_fn(t) == 0)
+        assert torch.all(solver.bias_int_fn(t) == 0)
+        assert torch.all(solver.slope_fn(t) == 1)
         assert torch.all(solver.lambda_fn(t) == t)
 
-    def test_custom_linear_fn(self):
+    def test_custom_bias_and_slope_fns(self):
         def minus_one_coeff(t):
             return -torch.ones_like(t)
 
-        solver = DPMPlusPlus2M(_identity_denoiser, linear_fn=minus_one_coeff)
-        assert solver.linear_fn is minus_one_coeff
+        def minus_t_antideriv(t):
+            return -t
+
+        def two_coeff(t):
+            return 2 * torch.ones_like(t)
+
+        solver = DPMPlusPlus2M(
+            _identity_denoiser,
+            bias_fn=minus_one_coeff,
+            bias_int_fn=minus_t_antideriv,
+            slope_fn=two_coeff,
+        )
+        assert solver.bias_fn is minus_one_coeff
+        assert solver.bias_int_fn is minus_t_antideriv
+        assert solver.slope_fn is two_coeff
+
+    def test_bias_only_slope_default(self):
+        """Without a slope callback, the solver uses a constant slope."""
+
+        def minus_one_coeff(t):
+            return -torch.ones_like(t)
+
+        def minus_t_antideriv(t):
+            return -t
+
+        solver = DPMPlusPlus2M(
+            _identity_denoiser,
+            bias_fn=minus_one_coeff,
+            bias_int_fn=minus_t_antideriv,
+        )
+        t = torch.tensor([2.0, 3.0])
+        assert torch.all(solver.slope_fn(t) == 1)
+
+    def test_bias_fn_validation(self):
+        def minus_one_coeff(t):
+            return -torch.ones_like(t)
+
+        with pytest.raises(ValueError, match="bias_int_fn"):
+            DPMPlusPlus2M(_identity_denoiser, bias_fn=minus_one_coeff)
 
     def test_custom_lambda_fn(self):
         def neg_log_coord(t):
