@@ -414,7 +414,10 @@ There are two ways to use solvers:
   Stochastic solver for distilled few-step and consistency models.
 - ``"dpmpp_2m"`` ---
   :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2M`.
-  Efficient second-order solver for high-quality sampling.
+  Efficient second-order DPM-Solver++(2M) solver for high-quality sampling.
+- ``"dpmpp_2m_unic2"`` ---
+  :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2MUniC2`.
+  Third-order UniC2 predictor-corrector built on DPM-Solver++(2M).
 
 **Custom solvers** can be defined by implementing the
 :class:`~physicsnemo.diffusion.samplers.Solver` protocol: any object
@@ -531,6 +534,14 @@ Solvers
 ^^^^^^^^^^^^^^^^^^^^^
 
 .. autoclass:: physicsnemo.diffusion.samplers.DPMPlusPlus2M
+    :show-inheritance:
+    :members:
+    :exclude-members: __init__
+
+:code:`DPMPlusPlus2MUniC2`
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. autoclass:: physicsnemo.diffusion.samplers.DPMPlusPlus2MUniC2
     :show-inheritance:
     :members:
     :exclude-members: __init__

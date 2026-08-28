@@ -31,6 +31,7 @@ from physicsnemo.domain_parallel.shard_tensor import scatter_tensor
 
 from .base import Solver
 from .dpmpp_2m import DPMPlusPlus2M
+from .dpmpp_2m_unic2 import DPMPlusPlus2MUniC2
 from .edm_stochastic_euler import EDMStochasticEulerSolver
 from .edm_stochastic_exponential_euler import EDMStochasticExponentialEulerSolver
 from .edm_stochastic_heun import EDMStochasticHeunSolver
@@ -46,6 +47,7 @@ SOLVERS: Dict[str, type[Solver]] = {
     "exponential_euler": ExponentialEulerSolver,
     "edm_stochastic_exponential_euler": EDMStochasticExponentialEulerSolver,
     "dpmpp_2m": DPMPlusPlus2M,
+    "dpmpp_2m_unic2": DPMPlusPlus2MUniC2,
 }
 
 # Required constructor arguments (those without defaults, besides the
@@ -106,6 +108,7 @@ def sample(
         "exponential_euler",
         "edm_stochastic_exponential_euler",
         "dpmpp_2m",
+        "dpmpp_2m_unic2",
     ]
     | Solver = "heun",
     time_steps: Float[Tensor, " N_plus_1"] | None = None,
@@ -258,6 +261,11 @@ def sample(
           that reuses the previous data prediction and requires one denoiser
           evaluation per step. See
           :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2M`.
+
+        * ``"dpmpp_2m_unic2"``: DPM-Solver++(2M) with the UniC-2 corrector, a
+          third-order predictor-corrector that requires one denoiser evaluation
+          per step. See
+          :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2MUniC2`.
 
     time_steps : Tensor | None, default=None
         Optional 1D tensor of shape :math:`(N + 1,)` containing explicit

@@ -25,6 +25,7 @@ from physicsnemo.diffusion.noise_schedulers import (
 )
 from physicsnemo.diffusion.samplers import (
     DPMPlusPlus2M,
+    DPMPlusPlus2MUniC2,
     EDMStochasticEulerSolver,
     EDMStochasticExponentialEulerSolver,
     EDMStochasticHeunSolver,
@@ -146,6 +147,17 @@ SOLVER_CONFIGS = [
         DPMPlusPlus2M,
         {"_use_linear_fn": True, "_use_slope_fn": True, "_use_log_snr_lambda": True},
         "dpmpp_2m",
+        False,
+        1.0,
+    ),
+    # Corrected two-step Adams-Bashforth: default callbacks
+    (DPMPlusPlus2MUniC2, {}, "dpmpp_2m_unic2_default", False, 1.0),
+    # DPM-Solver++(2M) with the UniC-2 corrector: log-SNR extrapolation
+    # coordinate
+    (
+        DPMPlusPlus2MUniC2,
+        {"_use_linear_fn": True, "_use_slope_fn": True, "_use_log_snr_lambda": True},
+        "dpmpp_2m_unic2",
         False,
         1.0,
     ),
@@ -400,6 +412,74 @@ class TestDPMPlusPlus2MConstructor:
             return -torch.log(t)
 
         solver = DPMPlusPlus2M(_identity_denoiser, lambda_fn=neg_log_coord)
+        assert solver.lambda_fn is neg_log_coord
+
+
+class TestDPMPlusPlus2MUniC2Constructor:
+    """Tests for DPMPlusPlus2MUniC2 constructor."""
+
+    def test_default_attributes(self):
+        solver = DPMPlusPlus2MUniC2(_identity_denoiser)
+        assert solver.denoiser is _identity_denoiser
+        assert isinstance(solver, Solver)
+        # Default bias is zero and default slope is one with antiderivative t
+        # (corrected classical two-step method); the default extrapolation
+        # coordinate is diffusion time
+        t = torch.tensor([2.0, 3.0])
+        assert torch.all(solver.bias_fn(t) == 0)
+        assert torch.all(solver.bias_int_fn(t) == 0)
+        assert torch.all(solver.slope_fn(t) == 1)
+        assert torch.all(solver.lambda_fn(t) == t)
+
+    def test_custom_bias_and_slope_fns(self):
+        def minus_one_coeff(t):
+            return -torch.ones_like(t)
+
+        def minus_t_antideriv(t):
+            return -t
+
+        def two_coeff(t):
+            return 2 * torch.ones_like(t)
+
+        solver = DPMPlusPlus2MUniC2(
+            _identity_denoiser,
+            bias_fn=minus_one_coeff,
+            bias_int_fn=minus_t_antideriv,
+            slope_fn=two_coeff,
+        )
+        assert solver.bias_fn is minus_one_coeff
+        assert solver.bias_int_fn is minus_t_antideriv
+        assert solver.slope_fn is two_coeff
+
+    def test_bias_only_slope_default(self):
+        """Without a slope callback, the solver uses a constant slope."""
+
+        def minus_one_coeff(t):
+            return -torch.ones_like(t)
+
+        def minus_t_antideriv(t):
+            return -t
+
+        solver = DPMPlusPlus2MUniC2(
+            _identity_denoiser,
+            bias_fn=minus_one_coeff,
+            bias_int_fn=minus_t_antideriv,
+        )
+        t = torch.tensor([2.0, 3.0])
+        assert torch.all(solver.slope_fn(t) == 1)
+
+    def test_bias_fn_validation(self):
+        def minus_one_coeff(t):
+            return -torch.ones_like(t)
+
+        with pytest.raises(ValueError, match="bias_int_fn"):
+            DPMPlusPlus2MUniC2(_identity_denoiser, bias_fn=minus_one_coeff)
+
+    def test_custom_lambda_fn(self):
+        def neg_log_coord(t):
+            return -torch.log(t)
+
+        solver = DPMPlusPlus2MUniC2(_identity_denoiser, lambda_fn=neg_log_coord)
         assert solver.lambda_fn is neg_log_coord
 
 

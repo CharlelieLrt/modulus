@@ -16,6 +16,7 @@
 
 from .base import Solver  # noqa: F401
 from .dpmpp_2m import DPMPlusPlus2M  # noqa: F401
+from .dpmpp_2m_unic2 import DPMPlusPlus2MUniC2  # noqa: F401
 from .edm_stochastic_euler import EDMStochasticEulerSolver  # noqa: F401
 from .edm_stochastic_exponential_euler import (  # noqa: F401
     EDMStochasticExponentialEulerSolver,

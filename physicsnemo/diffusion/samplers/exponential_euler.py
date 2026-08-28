@@ -124,18 +124,17 @@ class ExponentialEulerSolver(Solver):
     Parameters
     ----------
     denoiser : Denoiser
-        Right-hand side of the ODE to integrate, following the
-        :class:`~physicsnemo.diffusion.Denoiser` interface. In most workflows,
-        get it from
+        Right-hand side :math:`D(x, t)` of the ODE to integrate, following
+        the :class:`~physicsnemo.diffusion.Denoiser` interface. Typically from
         :meth:`~physicsnemo.diffusion.noise_schedulers.NoiseScheduler.get_denoiser`,
         but any callable with the correct signature works.
     bias_fn : Callable[[Tensor], Tensor] | None, optional
         Bias coefficient :math:`a(t)`, with the signature shown above.
-        Requires ``bias_int_fn``. In most workflows, get all three callbacks
-        from
-        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.get_linear_denoiser`,
-        using the same predictor parameterization as ``denoiser``. The
-        default is ``None``, which uses a zero bias.
+        Requires ``bias_int_fn``. Typically from
+        :meth:`~physicsnemo.diffusion.noise_schedulers.LinearGaussianNoiseScheduler.get_linear_denoiser`
+        with the same predictor parameterization as ``denoiser``; any
+        callable with the correct signature works. The default is ``None``,
+        which uses a zero bias.
     bias_int_fn : Callable[[Tensor], Tensor] | None, optional
         Antiderivative :math:`\mathcal{A}(t)` of the bias, with the signature
         shown above. Requires ``bias_fn``. The default is ``None``, which

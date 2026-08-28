@@ -157,6 +157,16 @@ SAMPLER_CONFIGS = [
         "dpmpp_2m",
         False,
     ),
+    # Corrected two-step Adams-Bashforth: default callbacks
+    ("dpmpp_2m_unic2", {}, "dpmpp_2m_unic2_default", False),
+    # DPM-Solver++(2M) with the UniC-2 corrector: log-SNR extrapolation
+    # coordinate
+    (
+        "dpmpp_2m_unic2",
+        {"_use_linear_fn": True, "_use_slope_fn": True, "_use_log_snr_lambda": True},
+        "dpmpp_2m_unic2",
+        False,
+    ),
 ]
 
 TIME_EVAL_INDICES = [0, 1]
