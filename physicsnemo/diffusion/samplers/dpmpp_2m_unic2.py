@@ -215,7 +215,7 @@ class DPMPlusPlus2MUniC2(Solver):
 
     This class can express different predictor-corrector samplers through
     its callback configuration. The examples below add a UniC-2 corrector
-    stage to two predictors: a classical two-step Adams-Bashforth baseline,
+    stage to two predictors: a classical two-step Adams-Bashforth scheme,
     and the original DPM-Solver++(2M).
 
     >>> import torch
