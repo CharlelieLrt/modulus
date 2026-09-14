@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `PHYSICSNEMO_DIST_TIMEOUT_S`; unset or empty configuration keeps PyTorch's
   backend default. Invalid timeouts are rejected before initialization state
   changes, allowing corrected configuration to be retried.
+- `physicsnemo.nn.FLARE` accepts a new optional `context_dim` constructor
+  argument and an optional `context` forward argument. These enable a
+  cross-attention read of an external context sequence at the latent
+  bottleneck (between the encode and decode attention passes). Reading the
+  context from the `n_global_queries` latent tokens instead of the `N` point
+  tokens reduces the context-attention cost by a factor `n_global_queries / N`.
+  Defaults leave the layer unchanged.
 
 ### Changed
 
