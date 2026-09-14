@@ -28,7 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bottleneck (between the encode and decode attention passes). Reading the
   context from the `n_global_queries` latent tokens instead of the `N` point
   tokens reduces the context-attention cost by a factor `n_global_queries / N`.
-  Defaults leave the layer unchanged.
+  The `physicsnemo.nn.GALE_FA` layer gains the same capability through two
+  independent constructor options. Setting `context_placement="latents"`
+  relocates its context read from the point features to the FLARE latent
+  tokens. Setting `context_source_dims` splits the context channel-wise into
+  sources read with shared attention scores, per-source value projections,
+  and a learned per-source, per-channel softmax gate. Defaults leave both
+  layers unchanged.
 
 ### Changed
 

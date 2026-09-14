@@ -35,6 +35,103 @@ from .physics_attention import _project_input
 te = OptionalImport("transformer_engine.pytorch")
 
 
+def _flare_encode(
+    x_mid: Float[torch.Tensor, "B H N D"],
+    q_global: nn.Parameter,
+    self_k: nn.Module,
+    self_v: nn.Module,
+    scale: float,
+) -> tuple[
+    Float[torch.Tensor, "B H N D"],
+    Float[torch.Tensor, "B H S D"],
+    Float[torch.Tensor, "B H S D"],
+]:
+    r"""FLARE encode pass: gather token values into the global slots.
+
+    First half of :func:`_flare_self_attention`, exposed separately so
+    callers can transform the latent slots between the encode and decode
+    passes (e.g. a latent-bottleneck context read). The matching decode
+    pass is ``F.scaled_dot_product_attention(k, G, z, scale=scale)``.
+
+    Parameters
+    ----------
+    x_mid : torch.Tensor
+        Projected input of shape :math:`(B, H, N, D)`.
+    q_global : nn.Parameter
+        Learned global queries of shape :math:`(1, H, S, D)`.
+    self_k : nn.Module
+        Key projection applied to ``x_mid``.
+    self_v : nn.Module
+        Value projection applied to ``x_mid``.
+    scale : float
+        Attention scale factor.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        Projected keys of shape :math:`(B, H, N, D)`, expanded global
+        queries of shape :math:`(B, H, S, D)`, and latent slots of shape
+        :math:`(B, H, S, D)`.
+    """
+    G = q_global.to(dtype=x_mid.dtype).expand(x_mid.shape[0], -1, -1, -1)
+    k = self_k(x_mid)
+    v = self_v(x_mid)
+    z = F.scaled_dot_product_attention(G, k, v, scale=scale)
+    return k, G, z
+
+
+def _flare_encode_te(
+    x_mid: Float[torch.Tensor, "B H N D"],
+    q_global: nn.Parameter,
+    self_k: nn.Module,
+    self_v: nn.Module,
+    attn_fn: nn.Module,
+    heads: int,
+) -> tuple[
+    Float[torch.Tensor, "B N H D"],
+    Float[torch.Tensor, "B S H D"],
+    Float[torch.Tensor, "B S H D"],
+]:
+    r"""FLARE encode pass on the Transformer Engine backend.
+
+    Same computation as :func:`_flare_encode`, with the keys, global
+    queries, and latent slots returned in the ``bshd`` layout consumed by
+    the Transformer Engine ``DotProductAttention`` decode call
+    ``attn_fn(k, G, z)``.
+
+    Parameters
+    ----------
+    x_mid : torch.Tensor
+        Projected input of shape :math:`(B, H, N, D)`.
+    q_global : nn.Parameter
+        Learned global queries of shape :math:`(1, H, S, D)`.
+    self_k : nn.Module
+        Key projection applied to ``x_mid``.
+    self_v : nn.Module
+        Value projection applied to ``x_mid``.
+    attn_fn : nn.Module
+        Transformer Engine ``DotProductAttention`` module configured with
+        ``qkv_format="bshd"`` and ``attention_type="cross"``.
+    heads : int
+        Number of attention heads :math:`H`, used to un-flatten the
+        attention output.
+
+    Returns
+    -------
+    tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        Projected keys of shape :math:`(B, N, H, D)`, expanded global
+        queries of shape :math:`(B, S, H, D)`, and latent slots of shape
+        :math:`(B, S, H, D)`.
+    """
+    G = q_global.to(dtype=x_mid.dtype).expand(x_mid.shape[0], -1, -1, -1)
+    G = rearrange(G, "b h s d -> b s h d")
+    k = rearrange(self_k(x_mid), "b h n d -> b n h d")
+    v = rearrange(self_v(x_mid), "b h n d -> b n h d")
+    z = attn_fn(G, k, v)
+    z = rearrange(z, "b s (h d) -> b s h d", h=heads)
+    return k, G, z
+
+
 def _flare_self_attention(
     x_mid: Float[torch.Tensor, "B H N D"],
     q_global: nn.Parameter,
@@ -83,10 +180,7 @@ def _flare_self_attention(
     torch.Tensor
         Self-attended output of shape :math:`(B, H, N, D)`.
     """
-    G = q_global.to(dtype=x_mid.dtype).expand(x_mid.shape[0], -1, -1, -1)
-    k = self_k(x_mid)
-    v = self_v(x_mid)
-    z = F.scaled_dot_product_attention(G, k, v, scale=scale)
+    k, G, z = _flare_encode(x_mid, q_global, self_k, self_v, scale)
     if context is not None:
         z = z + F.scaled_dot_product_attention(
             cross_q(z), cross_k(context), cross_v(context), scale=scale
@@ -150,12 +244,7 @@ def _flare_self_attention_te(
     torch.Tensor
         Self-attended output of shape :math:`(B, H, N, D)`.
     """
-    G = q_global.to(dtype=x_mid.dtype).expand(x_mid.shape[0], -1, -1, -1)
-    G = rearrange(G, "b h s d -> b s h d")
-    k = rearrange(self_k(x_mid), "b h n d -> b n h d")
-    v = rearrange(self_v(x_mid), "b h n d -> b n h d")
-    z = attn_fn(G, k, v)
-    z = rearrange(z, "b s (h d) -> b s h d", h=heads)
+    k, G, z = _flare_encode_te(x_mid, q_global, self_k, self_v, attn_fn, heads)
     if context is not None:
         k_ctx = rearrange(cross_k(context), "b h s d -> b s h d")
         v_ctx = rearrange(cross_v(context), "b h s d -> b s h d")
