@@ -33,8 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   relocates its context read from the point features to the FLARE latent
   tokens. Setting `context_source_dims` splits the context channel-wise into
   sources read with shared attention scores, per-source value projections,
-  and a learned per-source, per-channel softmax gate. Defaults leave both
-  layers unchanged.
+  and a learned per-source, per-channel softmax gate. Both options are also
+  exposed on `physicsnemo.nn.GALEBlock` and on the production
+  `physicsnemo.models.geotransolver.GeoTransolver` constructor when
+  `attention_type="GALE_FA"`, plumbed through to the underlying `GALE_FA`.
+  Defaults leave all layers and models unchanged.
 
 ### Changed
 

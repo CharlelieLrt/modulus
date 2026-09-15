@@ -716,3 +716,119 @@ def test_gale_block_concat_project(device, attention_type):
     assert len(outputs) == 1
     assert outputs[0].shape == (batch_size, n_tokens, hidden_dim)
     assert not torch.isnan(outputs[0]).any()
+
+
+def test_gale_block_context_options_forward(device):
+    """Test that GALEBlock forwards the context options to its GALE_FA attention."""
+    torch.manual_seed(42)
+    block_default = GALEBlock(
+        num_heads=4,
+        hidden_dim=64,
+        dropout=0.0,
+        slice_num=8,
+        context_dim=16,
+        attention_type="GALE_FA",
+    ).to(device)
+    torch.manual_seed(42)
+    block_latents = GALEBlock(
+        num_heads=4,
+        hidden_dim=64,
+        dropout=0.0,
+        slice_num=8,
+        context_dim=16,
+        attention_type="GALE_FA",
+        context_placement="latents",
+        context_source_dims=(10, 6),
+    ).to(device)
+    block_default.eval()
+    block_latents.eval()
+
+    assert block_latents.Attn.context_placement == "latents"
+    assert block_latents.Attn.context_source_dims == (10, 6)
+
+    x = torch.randn(2, 100, 64).to(device)
+    context = torch.randn(2, 4, 8, 16).to(device)
+    out_default = block_default((x,), global_context=context)
+    out_latents = block_latents((x,), global_context=context)
+    assert out_latents[0].shape == (2, 100, 64)
+    assert not torch.isnan(out_latents[0]).any()
+    assert not torch.allclose(out_default[0], out_latents[0])
+
+
+def test_gale_block_context_options_default_unchanged(device):
+    """Test that omitting the context options leaves GALEBlock unchanged."""
+    torch.manual_seed(42)
+    block_implicit = GALEBlock(
+        num_heads=4,
+        hidden_dim=64,
+        dropout=0.0,
+        slice_num=8,
+        context_dim=16,
+        attention_type="GALE_FA",
+    ).to(device)
+    torch.manual_seed(42)
+    block_explicit = GALEBlock(
+        num_heads=4,
+        hidden_dim=64,
+        dropout=0.0,
+        slice_num=8,
+        context_dim=16,
+        attention_type="GALE_FA",
+        context_placement="points",
+        context_source_dims=None,
+    ).to(device)
+    block_implicit.eval()
+    block_explicit.eval()
+
+    implicit_state = block_implicit.state_dict()
+    explicit_state = block_explicit.state_dict()
+    assert set(implicit_state) == set(explicit_state)
+    for name, tensor in implicit_state.items():
+        assert torch.equal(tensor, explicit_state[name])
+
+    x = torch.randn(2, 100, 64).to(device)
+    context = torch.randn(2, 4, 8, 16).to(device)
+    assert torch.equal(
+        block_implicit((x,), global_context=context)[0],
+        block_explicit((x,), global_context=context)[0],
+    )
+
+
+def test_gale_block_context_options_invalid():
+    """Test that GALEBlock rejects context options with GALE and propagates GALE_FA errors."""
+    with pytest.raises(ValueError, match="GALE_FA"):
+        GALEBlock(
+            num_heads=4,
+            hidden_dim=64,
+            dropout=0.0,
+            context_dim=16,
+            attention_type="GALE",
+            context_placement="latents",
+        )
+    with pytest.raises(ValueError, match="GALE_FA"):
+        GALEBlock(
+            num_heads=4,
+            hidden_dim=64,
+            dropout=0.0,
+            context_dim=16,
+            attention_type="GALE",
+            context_source_dims=(8, 8),
+        )
+    with pytest.raises(ValueError, match="context_placement"):
+        GALEBlock(
+            num_heads=4,
+            hidden_dim=64,
+            dropout=0.0,
+            context_dim=16,
+            attention_type="GALE_FA",
+            context_placement="global",
+        )
+    with pytest.raises(ValueError, match="must sum to context_dim"):
+        GALEBlock(
+            num_heads=4,
+            hidden_dim=64,
+            dropout=0.0,
+            context_dim=16,
+            attention_type="GALE_FA",
+            context_source_dims=(10, 4),
+        )

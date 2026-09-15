@@ -1072,6 +1072,17 @@ class GALEBlock(nn.Module):
         a learnable sigmoid-gated weighted sum. ``"concat_project"``
         concatenates the two along the head dimension and projects back with a
         linear layer. Default is ``"weighted"``.
+    context_placement : {"points", "latents"}, optional
+        Forwarded to :class:`GALE_FA`: where its context cross-attention
+        queries come from, either the point features or the FLARE latent
+        tokens. Requires ``attention_type="GALE_FA"``. Default is
+        ``"points"``.
+    context_source_dims : tuple[int, ...] | None, optional
+        Forwarded to :class:`GALE_FA`: channel widths of the context sources
+        for the per-source gated blend; must sum to ``context_dim``. Requires
+        ``attention_type="GALE_FA"``. The validated combination is
+        ``context_placement="latents"`` with ``context_source_dims`` set.
+        Default is ``None``.
 
     Forward
     -------
@@ -1128,6 +1139,8 @@ class GALEBlock(nn.Module):
         attention_type: str = "GALE",
         concrete_dropout: bool = False,
         state_mixing_mode: str = "weighted",
+        context_placement: Literal["points", "latents"] = "points",
+        context_source_dims: tuple[int, ...] | None = None,
     ) -> None:
         super().__init__()
 
@@ -1143,6 +1156,13 @@ class GALEBlock(nn.Module):
         # First match on attention backend, then on spatial shape
         match attention_type:
             case "GALE":
+                if context_placement != "points" or context_source_dims is not None:
+                    raise ValueError(
+                        f"context_placement and context_source_dims require "
+                        f"attention_type='GALE_FA'; got attention_type='GALE' "
+                        f"with context_placement={context_placement!r} and "
+                        f"context_source_dims={context_source_dims!r}"
+                    )
                 if spatial_shape is None:
                     self.Attn = GALE(
                         hidden_dim,
@@ -1201,6 +1221,8 @@ class GALEBlock(nn.Module):
                     context_dim=context_dim,
                     concrete_dropout=concrete_dropout,
                     state_mixing_mode=state_mixing_mode,
+                    context_placement=context_placement,
+                    context_source_dims=context_source_dims,
                 )
             case _:
                 raise ValueError(
