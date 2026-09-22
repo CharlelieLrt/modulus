@@ -265,10 +265,13 @@ class TestLinearGaussianNoiseScheduler:
             return x * 0.9
 
         denoiser = s.get_denoiser(x0_predictor=pred, denoising_type="ode")
+        denoiser_upper = s.get_denoiser(x0_predictor=pred, denoising_type="ODE")
         x = make_input((2, 3, 8, 8), seed=4, device=device)
         t = torch.tensor([1.0, 1.0], device=device)
         out = denoiser(x, t)
+        out_upper = denoiser_upper(x, t)
         assert out.shape == x.shape
+        torch.testing.assert_close(out_upper, out)
 
     def test_concrete_get_linear_denoiser(self, device):
         s = _MinimalScheduler()
@@ -280,6 +283,12 @@ class TestLinearGaussianNoiseScheduler:
         assert torch.allclose(bias(t), 1 / t, atol=1e-7)
         assert torch.allclose(bias_int(t), torch.log(t), atol=1e-7)
         assert torch.allclose(slope(t), -1 / t, atol=1e-7)
+        bias_upper, bias_int_upper, slope_upper = s.get_linear_denoiser(
+            prediction_type="x0", denoising_type="ODE"
+        )
+        torch.testing.assert_close(bias_upper(t), bias(t))
+        torch.testing.assert_close(bias_int_upper(t), bias_int(t))
+        torch.testing.assert_close(slope_upper(t), slope(t))
         bias, bias_int, slope = s.get_linear_denoiser(prediction_type="score")
         assert torch.allclose(bias(t), torch.zeros_like(t), atol=1e-7)
         assert torch.allclose(bias_int(t), torch.zeros_like(t), atol=1e-7)
@@ -724,6 +733,8 @@ class TestSpatialMethodNonRegression:
             s.get_denoiser()
         with pytest.raises(ValueError, match="denoising_type"):
             s.get_denoiser(x0_predictor=pred, denoising_type="bad")
+        with pytest.raises(ValueError, match="denoising_type"):
+            s.get_linear_denoiser(denoising_type="bad")
         with pytest.raises(ValueError, match="prediction_type"):
             s.get_linear_denoiser(prediction_type="bad")
 

@@ -821,8 +821,9 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         Raises
         ------
         ValueError
-            If not exactly one of ``score_predictor``, ``x0_predictor``, or
-            ``epsilon_predictor`` is provided.
+            If the caller does not provide exactly one of ``score_predictor``,
+            ``x0_predictor``, or ``epsilon_predictor``, or if
+            ``denoising_type`` is not ``"ode"`` or ``"sde"``.
 
         Examples
         --------
@@ -858,6 +859,13 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         >>> dx_dt.shape
         torch.Size([2, 3, 8, 8])
         """
+        denoising_type_input = denoising_type
+        denoising_type = denoising_type.lower()
+        if denoising_type not in ("ode", "sde"):
+            raise ValueError(
+                f"denoising_type must be 'ode' or 'sde', got '{denoising_type_input}'"
+            )
+
         # Validate: exactly one predictor must be provided
         provided = sum(
             p is not None for p in (score_predictor, x0_predictor, epsilon_predictor)
@@ -911,7 +919,7 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
 
             return ode_denoiser
 
-        elif denoising_type == "sde":
+        else:
 
             def sde_denoiser(
                 x: Float[Tensor, " B *dims"],
@@ -926,11 +934,6 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
                 return dx_dt
 
             return sde_denoiser
-
-        else:
-            raise ValueError(
-                f"denoising_type must be 'ode' or 'sde', got '{denoising_type}'"
-            )
 
     def get_linear_denoiser(
         self,
@@ -983,7 +986,8 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         ------
         ValueError
             If ``prediction_type`` is not ``"x0"``, ``"score"``, or
-            ``"epsilon"``.
+            ``"epsilon"``, or if ``denoising_type`` is not ``"ode"`` or
+            ``"sde"``.
 
         Examples
         --------
@@ -1007,6 +1011,13 @@ class LinearGaussianNoiseScheduler(ABC, NoiseScheduler):
         >>> nonlinear.shape
         torch.Size([2, 3, 8, 8])
         """
+        denoising_type_input = denoising_type
+        denoising_type = denoising_type.lower()
+        if denoising_type not in ("ode", "sde"):
+            raise ValueError(
+                f"denoising_type must be 'ode' or 'sde', got '{denoising_type_input}'"
+            )
+
         # Capture methods as local variables to avoid referencing self
         alpha = self.alpha
         alpha_dot = self.alpha_dot
