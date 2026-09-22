@@ -408,16 +408,24 @@ There are two ways to use solvers:
   Second-order with configurable stochastic noise injection.
 - ``"exponential_euler"`` ---
   :class:`~physicsnemo.diffusion.samplers.ExponentialEulerSolver`.
-  First-order solver for DDIM-like sampling and distilled few-step models.
+  Generalized first-order semi-linear integration encompassing explicit Euler,
+  the first-order DPM-Solver, and DDIM-like sampling for distilled few-step
+  models.
 - ``"edm_stochastic_exponential_euler"`` ---
   :class:`~physicsnemo.diffusion.samplers.EDMStochasticExponentialEulerSolver`.
-  Stochastic solver for distilled few-step and consistency models.
+  Generalized stochastic exponential integration encompassing EDM-style
+  churn, stochastic DDIM, and related re-noising methods for distilled
+  few-step and consistency models.
 - ``"dpmpp_2m"`` ---
   :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2M`.
-  Efficient second-order DPM-Solver++(2M) solver for high-quality sampling.
+  Generalized second-order integration encompassing classical
+  Adams-Bashforth-2 and ``DPM-Solver++(2M)`` for efficient high-quality
+  sampling.
 - ``"dpmpp_2m_unic2"`` ---
   :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2MUniC2`.
-  Third-order UniC2 predictor-corrector built on DPM-Solver++(2M).
+  Generalized predictor-corrector integration encompassing corrected
+  Adams-Bashforth-2 and ``DPM-Solver++(2M)`` with the UniC-2 corrector for
+  higher-order sampling.
 
 **Custom solvers** can be defined by implementing the
 :class:`~physicsnemo.diffusion.samplers.Solver` protocol: any object

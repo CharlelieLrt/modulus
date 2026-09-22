@@ -17,6 +17,7 @@
 """Diffusion model sampling interface."""
 
 import inspect
+import warnings
 from typing import Any, Dict, List, Literal, Tuple
 
 import torch
@@ -63,6 +64,43 @@ _REQUIRED_SOLVER_ARGS: Dict[str, Tuple[str, ...]] = {
         not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
     )
     for key, cls in SOLVERS.items()
+}
+
+_NAMED_SOLVER_CONFIGURATIONS: Dict[str, Tuple[Tuple[str, ...], str]] = {
+    "exponential_euler": (
+        ("bias_fn", "bias_int_fn", "slope_fn"),
+        "With no callbacks, ExponentialEulerSolver constructs plain explicit "
+        "Euler. To construct the classical first-order DPM-Solver or DDIM-like "
+        "exponential Euler method, pass bias_fn, bias_int_fn, and slope_fn "
+        "defining the semi-linear decomposition through solver_options.",
+    ),
+    "edm_stochastic_exponential_euler": (
+        ("bias_fn", "bias_int_fn", "slope_fn"),
+        "Without the semi-linear callbacks, "
+        "EDMStochasticExponentialEulerSolver constructs an "
+        "explicit-Euler-based sampler; with S_churn=0 and renoise=0, it is "
+        "plain explicit Euler. To construct the classical EDM stochastic "
+        "exponential Euler method, pass bias_fn, bias_int_fn, and slope_fn "
+        "defining the semi-linear decomposition and configure S_churn. For "
+        "stochastic DDIM, also configure renoise=1.0, sigma_fn, sigma_inv_fn, "
+        "and alpha_fn through solver_options.",
+    ),
+    "dpmpp_2m": (
+        ("bias_fn", "bias_int_fn", "slope_fn", "lambda_fn"),
+        "With no callbacks, DPMPlusPlus2M constructs classical "
+        "Adams-Bashforth-2 in diffusion time. To construct the classical "
+        "DPM-Solver++(2M) method, pass bias_fn, bias_int_fn, and slope_fn "
+        "defining the semi-linear decomposition, plus a log-SNR lambda_fn, "
+        "through solver_options.",
+    ),
+    "dpmpp_2m_unic2": (
+        ("bias_fn", "bias_int_fn", "slope_fn", "lambda_fn"),
+        "With no callbacks, DPMPlusPlus2MUniC2 constructs an AB2 predictor "
+        "with a UniC-2 corrector in diffusion time. To construct the classical "
+        "DPM-Solver++(2M) method with the UniC-2 corrector, pass bias_fn, "
+        "bias_int_fn, and slope_fn defining the semi-linear decomposition, "
+        "plus a log-SNR lambda_fn, through solver_options.",
+    ),
 }
 
 
@@ -249,22 +287,35 @@ def sample(
 
         * ``"exponential_euler"``: First-order exponential integrator for
           semi-linear ODEs. It supports DDIM-like sampling and distilled
-          few-step models. See
+          few-step models. With default options, it reduces to explicit Euler.
+          To recover the DDIM-like method, pass ``bias_fn``, ``bias_int_fn``,
+          and ``slope_fn`` defining the semi-linear decomposition through
+          ``solver_options``. See
           :class:`~physicsnemo.diffusion.samplers.ExponentialEulerSolver`.
 
         * ``"edm_stochastic_exponential_euler"``: Exponential Euler with
           stochastic noise injection for distilled few-step and consistency
-          models. See
+          models. With default options, it reduces to explicit Euler. Pass the
+          same semi-linear callbacks as ``"exponential_euler"`` and configure
+          ``S_churn`` for EDM-style churn. For stochastic DDIM, configure
+          ``renoise=1.0``, ``sigma_fn``, ``sigma_inv_fn``, and ``alpha_fn``.
+          See
           :class:`~physicsnemo.diffusion.samplers.EDMStochasticExponentialEulerSolver`.
 
         * ``"dpmpp_2m"``: DPM-Solver++(2M), a second-order multistep solver
           that reuses the previous data prediction and requires one denoiser
-          evaluation per step. See
+          evaluation per step. With default options, it constructs classical
+          Adams-Bashforth-2 in diffusion time. To recover DPM-Solver++(2M),
+          pass the semi-linear callbacks and a log-SNR ``lambda_fn`` through
+          ``solver_options``. See
           :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2M`.
 
         * ``"dpmpp_2m_unic2"``: DPM-Solver++(2M) with the UniC-2 corrector, a
           third-order predictor-corrector that requires one denoiser evaluation
-          per step. See
+          per step. With default options, it constructs an AB2 predictor with a
+          UniC-2 corrector in diffusion time. Pass the same callbacks and
+          log-SNR ``lambda_fn`` as ``"dpmpp_2m"`` to recover the named method.
+          See
           :class:`~physicsnemo.diffusion.samplers.DPMPlusPlus2MUniC2`.
 
     time_steps : Tensor | None, default=None
@@ -407,7 +458,7 @@ def sample(
 
     # Validate and instantiate solver
     if isinstance(solver, str):
-        if solver not in SOLVERS:
+        if not torch.compiler.is_compiling() and solver not in SOLVERS:
             available = ", ".join(f'"{k}"' for k in SOLVERS.keys())
             raise ValueError(
                 f"Unknown solver '{solver}'. Available solvers: {available}."
@@ -416,9 +467,19 @@ def sample(
         # Pop the required constructor arguments from a copy of
         # solver_options and report missing ones by name
         options = dict(solver_options)
+        configuration = _NAMED_SOLVER_CONFIGURATIONS.get(solver)
+        if not torch.compiler.is_compiling() and configuration is not None:
+            callback_options, message = configuration
+            if not any(name in options for name in callback_options):
+                warnings.warn(
+                    f"solver='{solver}' was selected without callback options. "
+                    f"{message}",
+                    UserWarning,
+                    stacklevel=2,
+                )
         required_args = {}
         for name in _REQUIRED_SOLVER_ARGS[solver]:
-            if name not in options:
+            if not torch.compiler.is_compiling() and name not in options:
                 raise ValueError(
                     f"Missing required solver option '{name}' for solver "
                     f"'{solver_cls.__name__}'."
@@ -427,7 +488,7 @@ def sample(
         solver_ = solver_cls(denoiser, **required_args, **options)
     else:
         # Assume solver is a Solver-like object with a step method
-        if solver_options:
+        if not torch.compiler.is_compiling() and solver_options:
             raise ValueError(
                 "solver_options must be None when solver is a Solver instance."
             )
@@ -458,7 +519,7 @@ def sample(
     x = xN
     n_steps = len(t_steps) - 1  # Last element is 0 (final time)
 
-    if time_eval is not None:
+    if not torch.compiler.is_compiling() and time_eval is not None:
         out_of_range = [i for i in time_eval if i < 0 or i >= n_steps]
         if out_of_range:
             raise ValueError(
