@@ -104,7 +104,8 @@ class ExponentialEulerSolver(Solver):
         Slope coefficient :math:`b(t)` of the nonlinear term, with the
         signature shown above. The default is ``None``, which uses a constant
         slope (:math:`b = 1`) and treats the full nonlinear term as the frozen
-        quantity.
+        quantity. A zero value disables the nonlinear term; use it only when
+        the denoiser is fully described by the linear bias.
 
     Note
     ----

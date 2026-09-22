@@ -123,7 +123,8 @@ class DPMPlusPlus2MUniC2(Solver):
     slope_fn : Callable[[Tensor], Tensor] | None, optional
         Slope coefficient :math:`b(t)` of the nonlinear term, with the
         signature shown above. The default is ``None``, which uses a constant
-        slope (:math:`b = 1`).
+        slope (:math:`b = 1`). A zero value disables the nonlinear term; use it
+        only when the denoiser is fully described by the linear bias.
     lambda_fn : Callable[[Tensor], Tensor] | None, optional
         Extrapolation coordinate :math:`\lambda(t)`, with the signature shown
         above. For the classical diffusion method, pass the schedule's
@@ -322,6 +323,7 @@ class DPMPlusPlus2MUniC2(Solver):
             # finite (for example the recovery of N at a vanishing noise
             # level)
             n_pred = torch.where(torch.isfinite(n_pred), n_pred, n_cur)
+            n_pred = torch.where(at_zero_bc, n_cur, n_pred)
             self._n_old = n_cur
             self._lam_old = lam_cur_bc.clone()
             self._n_cur = n_pred
@@ -380,11 +382,11 @@ class DPMPlusPlus2MUniC2(Solver):
             + c_new_bc * (n_pred - n_cur)
         )
 
-        # Rebind immutable history instead of mutating graph-connected
-        # tensors in place. Clone only the batch-sized lambda value so a
-        # callback returning its input cannot alias caller-owned storage.
-        self._n_old = n_cur
-        self._lam_old = lam_cur_bc.clone()
-        self._n_cur = n_pred
+        # Keep each batch element's history unchanged after its terminal step.
+        # Otherwise n_pred contains a state/time-mismatched fallback evaluated
+        # at t_cur rather than a valid endpoint value at t_next.
+        self._n_old = torch.where(at_zero_bc, n_old, n_cur)
+        self._lam_old = torch.where(at_zero_bc, self._lam_old, lam_cur_bc).clone()
+        self._n_cur = torch.where(at_zero_bc, n_cur, n_pred)
 
         return x_next

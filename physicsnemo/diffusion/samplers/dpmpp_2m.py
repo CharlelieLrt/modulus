@@ -126,7 +126,8 @@ class DPMPlusPlus2M(Solver):
     slope_fn : Callable[[Tensor], Tensor] | None, optional
         Slope coefficient :math:`b(t)` of the nonlinear term, with the
         signature shown above. The default is ``None``, which uses a constant
-        slope (:math:`b = 1`).
+        slope (:math:`b = 1`). A zero value disables the nonlinear term; use it
+        only when the denoiser is fully described by the linear bias.
     lambda_fn : Callable[[Tensor], Tensor] | None, optional
         Extrapolation coordinate :math:`\lambda(t)`, with the signature shown
         above. For DPM-Solver++(2M), pass the schedule's log-SNR:

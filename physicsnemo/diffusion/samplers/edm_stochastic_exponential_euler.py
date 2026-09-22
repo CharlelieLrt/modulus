@@ -135,7 +135,8 @@ class EDMStochasticExponentialEulerSolver(Solver):
     slope_fn : Callable[[Tensor], Tensor] | None, optional
         Slope coefficient :math:`b(t)` of the nonlinear term with the signature
         shown above. The default is ``None``, which uses a constant slope
-        (:math:`b = 1`).
+        (:math:`b = 1`). A zero value disables the nonlinear term; use it only
+        when the denoiser is fully described by the linear bias.
     S_churn : float, optional
         Controls the amount of noise added at each step. Higher values add
         more stochasticity. By default 0 (no churn), in which case this
