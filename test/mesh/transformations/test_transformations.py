@@ -40,10 +40,6 @@ from physicsnemo.mesh.transformations.geometric import (
     translate,
 )
 
-pv = pytest.importorskip("pyvista", minversion="0.46.4")
-
-from physicsnemo.mesh.io.io_pyvista import from_pyvista, to_pyvista  # noqa: E402
-
 ###############################################################################
 # Helper Functions
 ###############################################################################
@@ -164,6 +160,29 @@ def test_point_normals_cache_correct_under_shear():
     )
 
 
+def test_cached_normals_remain_unit_after_large_scale_transform(device):
+    """Small inverse-transformed normals retain their direction and unit length."""
+    mesh = Mesh(
+        points=torch.tensor(
+            [[0.0, 0.0], [1.0, 0.25], [1.5, 1.5]],
+            dtype=torch.float64,
+            device=device,
+        ),
+        cells=torch.tensor([[0, 1], [1, 2]], device=device),
+    )
+    _ = mesh.cell_normals
+    _ = mesh.point_normals
+    matrix = torch.diag(torch.tensor([1.0e14, 2.0e14], device=device).double())
+
+    transformed = mesh.transform(matrix, assume_invertible=True)
+    fresh = Mesh(points=transformed.points, cells=transformed.cells)
+
+    for association in ("cell", "point"):
+        cached = transformed._cache[association, "normals"]
+        torch.testing.assert_close(cached, getattr(fresh, f"{association}_normals"))
+        torch.testing.assert_close(cached.norm(dim=-1), torch.ones_like(cached[:, 0]))
+
+
 def assert_on_device(tensor: torch.Tensor, expected_device: str) -> None:
     """Assert tensor is on expected device."""
     actual_device = tensor.device.type
@@ -184,6 +203,9 @@ class TestTranslation:
 
     def test_translate_against_pyvista(self, device):
         """Cross-validate against PyVista translate."""
+        pv = pytest.importorskip("pyvista", minversion="0.46.4")
+        from physicsnemo.mesh.io.io_pyvista import from_pyvista, to_pyvista
+
         pv_mesh = pv.examples.load_airplane()
         tm_mesh = from_pyvista(pv_mesh)
         tm_mesh = Mesh(
@@ -297,6 +319,9 @@ class TestRotation:
     @pytest.mark.parametrize("axis_idx,angle", [(0, 45.0), (1, 30.0), (2, 60.0)])
     def test_rotate_against_pyvista(self, axis_idx, angle, device):
         """Cross-validate against PyVista rotation."""
+        pv = pytest.importorskip("pyvista", minversion="0.46.4")
+        from physicsnemo.mesh.io.io_pyvista import from_pyvista, to_pyvista
+
         pv_mesh = pv.examples.load_airplane()
         tm_mesh = from_pyvista(pv_mesh)
         tm_mesh = Mesh(
@@ -421,6 +446,9 @@ class TestScale:
 
     def test_scale_against_pyvista(self, device):
         """Cross-validate against PyVista scale."""
+        pv = pytest.importorskip("pyvista", minversion="0.46.4")
+        from physicsnemo.mesh.io.io_pyvista import from_pyvista, to_pyvista
+
         pv_mesh = pv.examples.load_airplane()
         tm_mesh = from_pyvista(pv_mesh)
         tm_mesh = Mesh(
