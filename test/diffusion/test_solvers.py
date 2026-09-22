@@ -163,6 +163,17 @@ SOLVER_CONFIGS = [
     ),
 ]
 
+SOLVER_ORDERS = {
+    EulerSolver: 1.0,
+    HeunSolver: 2.0,
+    EDMStochasticEulerSolver: 1.0,
+    EDMStochasticHeunSolver: 2.0,
+    ExponentialEulerSolver: 1.0,
+    EDMStochasticExponentialEulerSolver: 1.0,
+    DPMPlusPlus2M: 2.0,
+    DPMPlusPlus2MUniC2: 3.0,
+}
+
 
 def _identity_denoiser(x, t):
     return x
@@ -615,16 +626,14 @@ class TestStepNonRegression:
     SOLVER_CONFIGS,
     ids=[c[2] for c in SOLVER_CONFIGS],
 )
-@pytest.mark.parametrize(
-    "spatial_name,shape,predictor_cls,predictor_kwargs",
-    SPATIAL_CONFIGS,
-    ids=[c[0] for c in SPATIAL_CONFIGS],
-)
-class TestStepConsistency:
-    """Consistency of a single step against the known solution of a trivial
-    linear ODE, exercising the solvers alone (no noise schedule, no golden
-    files)."""
+class TestConsistency:
+    """Golden-free consistency tests against exactly solvable ODEs."""
 
+    @pytest.mark.parametrize(
+        "spatial_name,shape,predictor_cls,predictor_kwargs",
+        SPATIAL_CONFIGS,
+        ids=[c[0] for c in SPATIAL_CONFIGS],
+    )
     @pytest.mark.parametrize("t_end_frac", [1e-3, 0.5], ids=["large_step", "half_step"])
     def test_single_step_matches_exact_solution(
         self,
@@ -684,6 +693,69 @@ class TestStepConsistency:
 
         x_next = solver.step(x, t_cur, t_next)
         compare_outputs(x_next, t_end_frac * x, **tolerances)
+
+    def test_empirical_order(
+        self,
+        solver_cls,
+        solver_kwargs,
+        solver_name,
+        uses_rng,
+        time_scale,
+    ):
+        """Measure convergence on a non-trivial semi-linear ODE."""
+
+        def denoiser(x, t):
+            t_bc = t[:, None]  # (B, 1)
+            return torch.cos(t_bc)
+
+        def exact_solution(t):
+            return 1 + torch.sin(t) - torch.sin(torch.ones_like(t))
+
+        errors = []
+        step_sizes = []
+        for num_steps in (8, 16, 32, 64):
+            kwargs = dict(solver_kwargs)
+            kwargs.pop("_use_vp_scheduler", False)
+            kwargs.pop("_use_edm_sigma_fns", False)
+            kwargs.pop("_use_sigma_fns", False)
+            if uses_rng:
+                # Measure deterministic integration order without SDE noise.
+                if "S_churn" in kwargs:
+                    kwargs["S_churn"] = 0
+                if "renoise" in kwargs:
+                    kwargs["renoise"] = 0
+            if kwargs.pop("_use_linear_fn", False):
+                kwargs["bias_fn"] = lambda t: torch.zeros_like(t)
+                kwargs["bias_int_fn"] = lambda t: torch.zeros_like(t)
+                if kwargs.pop("_use_slope_fn", False):
+                    kwargs["slope_fn"] = lambda t: torch.ones_like(t)
+            if kwargs.pop("_use_log_snr_lambda", False):
+                kwargs["lambda_fn"] = lambda t: -torch.log(t)
+
+            solver = solver_cls(denoiser, **kwargs)
+            x = torch.ones((1, 1), dtype=torch.float64)
+            times = torch.linspace(1.0, 0.5, num_steps + 1, dtype=torch.float64)
+            for i, (t_cur, t_next) in enumerate(zip(times[:-1], times[1:])):
+                x = solver.step(x, t_cur[None], t_next[None])
+                if i == 0:
+                    # Multistep methods require an order-matched starting value.
+                    x = exact_solution(t_next) * torch.ones_like(x)
+
+            errors.append((x - exact_solution(times[-1])).abs().max())
+            step_sizes.append(0.5 / num_steps)
+
+        log_h = torch.log(torch.tensor(step_sizes, dtype=torch.float64))
+        log_error = torch.log(torch.stack(errors))
+        log_h_centered = log_h - log_h.mean()
+        measured_order = torch.sum(
+            log_h_centered * (log_error - log_error.mean())
+        ) / torch.sum(log_h_centered**2)
+        expected_order = SOLVER_ORDERS[solver_cls]
+
+        assert measured_order > expected_order - 0.2, (
+            f"{solver_name} measured order {measured_order:.2f}, "
+            f"expected approximately {expected_order:.0f}"
+        )
 
 
 # =============================================================================
