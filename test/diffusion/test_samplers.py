@@ -44,6 +44,7 @@ from .helpers import (
     gpu_rng_roundtrip,
     instantiate_model_deterministic,
     load_or_create_reference,
+    make_differentiable_solver_options,
     make_input,
 )
 
@@ -55,6 +56,7 @@ REF_PREFIX = "test_samplers_"
 BATCH = 2
 NUM_STEPS = 2
 NUM_STEPS_SHORT = 2
+NUM_STEPS_GRAD = 3
 
 # Sampler non-regression tolerances: looser than single-op tests, since errors
 # accumulate over solver steps and across CPU ISAs.
@@ -1051,7 +1053,7 @@ class TestGradientFlow:
             predictor_cls,
             predictor_kwargs,
             device,
-            num_steps=NUM_STEPS_SHORT,
+            num_steps=NUM_STEPS_GRAD,
             predictor_type=predictor_type,
         )
         solver_arg, opts = _make_solver_arg(
@@ -1066,17 +1068,112 @@ class TestGradientFlow:
             denoiser,
             xN,
             scheduler,
-            NUM_STEPS_SHORT,
+            NUM_STEPS_GRAD,
             solver=solver_arg,
             solver_options=opts,
         )
         x0.sum().backward()
 
-        has_grad = any(
-            p.grad is not None and not torch.isnan(p.grad).any()
-            for p in model.parameters()
+        for name, param in model.named_parameters():
+            assert param.grad is not None, f"{name} has no gradient"
+            assert torch.isfinite(param.grad).all(), f"{name} has a non-finite gradient"
+            assert torch.count_nonzero(param.grad) > 0, (
+                f"{name} has only zero gradients"
+            )
+
+    @pytest.mark.parametrize("predictor_type", PREDICTOR_TYPES, ids=PREDICTOR_TYPES)
+    @pytest.mark.parametrize(
+        "solver_key,solver_options,sampler_name,uses_rng",
+        SAMPLER_CONFIGS,
+        ids=[c[2] for c in SAMPLER_CONFIGS],
+    )
+    def test_input_gradient_flow(
+        self,
+        deterministic_settings,
+        device,
+        spatial_name,
+        shape,
+        predictor_cls,
+        predictor_kwargs,
+        sched_cls,
+        sched_kwargs,
+        sched_name,
+        predictor_type,
+        solver_key,
+        solver_options,
+        sampler_name,
+        uses_rng,
+    ):
+        scheduler, model, denoiser, xN = _make_sampling_components(
+            sched_cls,
+            sched_kwargs,
+            shape,
+            predictor_cls,
+            predictor_kwargs,
+            device,
+            num_steps=NUM_STEPS_GRAD,
+            predictor_type=predictor_type,
         )
-        assert has_grad
+        xN = xN.detach().requires_grad_()
+        time_steps = (
+            scheduler.timesteps(
+                NUM_STEPS_GRAD + 1,
+                device=device,
+                dtype=xN.dtype,
+            )[:-1]
+            .detach()
+            .requires_grad_()
+        )
+        if solver_key == "_custom_euler":
+            solver_arg = _CustomEulerSolver(denoiser)
+            opts = None
+            option_leaves = {}
+            nonzero_option_names = set()
+        else:
+            solver_arg = solver_key
+            opts, option_leaves, nonzero_option_names = (
+                make_differentiable_solver_options(
+                    sampler_name,
+                    solver_options,
+                    scheduler,
+                    predictor_type,
+                    device,
+                )
+            )
+
+        x0 = sample(
+            denoiser,
+            xN,
+            scheduler,
+            NUM_STEPS_GRAD,
+            solver=solver_arg,
+            solver_options=opts,
+            time_steps=time_steps,
+        )
+        x0.square().mean().backward()
+
+        assert xN.grad is not None
+        assert torch.isfinite(xN.grad).all()
+        assert torch.count_nonzero(xN.grad) == xN.grad.numel()
+
+        assert time_steps.grad is not None
+        assert torch.isfinite(time_steps.grad).all()
+        assert torch.count_nonzero(time_steps.grad) == time_steps.grad.numel()
+
+        for name, parameter in model.named_parameters():
+            assert parameter.grad is not None, f"{name} has no gradient"
+            assert torch.isfinite(parameter.grad).all(), (
+                f"{name} has a non-finite gradient"
+            )
+            assert torch.count_nonzero(parameter.grad) == parameter.grad.numel(), (
+                f"{name} contains zero gradients"
+            )
+
+        for name, option in option_leaves.items():
+            assert option.grad is not None, f"{name} has no gradient"
+            assert torch.isfinite(option.grad), f"{name} has a non-finite gradient"
+            if name in nonzero_option_names:
+                assert option.grad != 0, f"{name} has a zero gradient"
 
     @pytest.mark.parametrize("guidance_config", GUIDANCE_CONFIGS, ids=GUIDANCE_CONFIGS)
     def test_backward_through_guided_sampling(

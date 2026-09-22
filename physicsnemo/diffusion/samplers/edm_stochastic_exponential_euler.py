@@ -291,9 +291,10 @@ class EDMStochasticExponentialEulerSolver(Solver):
         if not 0 <= renoise <= 1:
             raise ValueError(f"renoise must be in [0, 1], got {renoise}")
         self.renoise = renoise
+        self._has_renoise = bool(renoise != 0)
         # Noise level kept by the deterministic stage, so that the renewed
         # noise restores the exact arrival level
-        self._kept_fraction = math.sqrt(1 - renoise**2)
+        self._kept_fraction = (1 - renoise**2) ** 0.5
         if sigma_fn is None and sigma_inv_fn is None:
             self.sigma_fn = lambda t: t
             self.sigma_inv_fn = lambda sigma: sigma
@@ -315,7 +316,7 @@ class EDMStochasticExponentialEulerSolver(Solver):
         # Bind the deterministic-stage target at construction: renoise=0
         # skips the noise-level round-trip so that it matches the churn-only
         # path exactly
-        if renoise == 0:
+        if not self._has_renoise:
             self._t_dn_fn = lambda t_next: t_next
         else:
             sigma_fn = self.sigma_fn
@@ -375,10 +376,17 @@ class EDMStochasticExponentialEulerSolver(Solver):
         # Noise scale: sqrt(sigma_hat^2 - sigma_cur^2) * S_noise * g(x,t) / sqrt(2*t)
         g_sq_bc = self.diffusion_fn(x, t_cur)
         safe_t_cur_bc = torch.where(t_cur_bc == 0, torch.ones_like(t_cur_bc), t_cur_bc)
-        noise_scale_bc = (
-            (sigma_hat_bc**2 - sigma_cur_bc**2).clamp(min=0).sqrt()
+        has_churn_bc = gamma_bc > 0
+        noise_variance_bc = (sigma_hat_bc**2 - sigma_cur_bc**2).clamp(min=0)
+        safe_noise_variance_bc = torch.where(
+            has_churn_bc, noise_variance_bc, torch.ones_like(noise_variance_bc)
+        )
+        noise_scale_bc = torch.where(
+            has_churn_bc,
+            safe_noise_variance_bc.sqrt()
             * self.S_noise
-            * (g_sq_bc / (2 * safe_t_cur_bc)).sqrt()
+            * (g_sq_bc / (2 * safe_t_cur_bc)).sqrt(),
+            torch.zeros_like(noise_variance_bc),
         )
         noise_scale_bc = torch.where(
             t_cur_bc == 0, torch.zeros_like(noise_scale_bc), noise_scale_bc
@@ -416,7 +424,7 @@ class EDMStochasticExponentialEulerSolver(Solver):
         # The zero-renoise branch skips the fresh draw so that renoise=0
         # consumes the same random sequence as the churn-only sampler, which
         # keeps seeded trajectories reproducible across the two
-        if self.renoise != 0:
+        if self._has_renoise:
             sigma_next_bc = self.sigma_fn(t_next).reshape(expected_shape)
             # Restore the signal coefficient from the reduced arrival level
             # to t_next before renewing the noise; the ratio is one for

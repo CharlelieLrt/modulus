@@ -314,9 +314,7 @@ class DPMPlusPlus2MUniC2(Solver):
         if self._n_cur is None or self._n_old is None or self._lam_old is None:
             # First step: exponential Euler, then seed the history with the
             # endpoint evaluation so that the corrector can start on the
-            # second step with one new denoiser evaluation per step. Later
-            # steps update the caches in place, keeping their storage stable
-            # for torch.compile.
+            # second step with one new denoiser evaluation per step.
             n_cur = self._predictor_value(x, t_cur, expected_shape)
             x_next = e_bc * x + j0_bc * n_cur
             n_pred = self._predictor_value(x_next, t_eval, expected_shape)
@@ -324,9 +322,9 @@ class DPMPlusPlus2MUniC2(Solver):
             # finite (for example the recovery of N at a vanishing noise
             # level)
             n_pred = torch.where(torch.isfinite(n_pred), n_pred, n_cur)
-            self._n_old = n_cur.clone()
+            self._n_old = n_cur
             self._lam_old = lam_cur_bc.clone()
-            self._n_cur = n_pred.clone()
+            self._n_cur = n_pred
             return x_next
 
         # Steady state: the current predictor-like value is the endpoint
@@ -381,8 +379,12 @@ class DPMPlusPlus2MUniC2(Solver):
             + c_old_bc * (n_old - n_cur)
             + c_new_bc * (n_pred - n_cur)
         )
-        self._n_old.copy_(n_cur)
-        self._lam_old.copy_(lam_cur_bc)
-        self._n_cur.copy_(n_pred)
+
+        # Rebind immutable history instead of mutating graph-connected
+        # tensors in place. Clone only the batch-sized lambda value so a
+        # callback returning its input cannot alias caller-owned storage.
+        self._n_old = n_cur
+        self._lam_old = lam_cur_bc.clone()
+        self._n_cur = n_pred
 
         return x_next

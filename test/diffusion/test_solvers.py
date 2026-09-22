@@ -44,6 +44,7 @@ from .helpers import (
     gpu_rng_roundtrip,
     instantiate_model_deterministic,
     load_or_create_reference,
+    make_differentiable_solver_options,
     make_input,
 )
 
@@ -214,6 +215,39 @@ def _make_solver_and_denoiser(
     if kwargs.pop("_use_log_snr_lambda", False):
         kwargs["lambda_fn"] = lambda t: torch.log(scheduler.snr(t))
     return solver_cls(denoiser, **kwargs), denoiser
+
+
+def _make_differentiable_solver(
+    solver_cls,
+    solver_kwargs,
+    solver_name,
+    shape,
+    predictor_cls,
+    predictor_kwargs,
+    device,
+):
+    """Create a solver whose continuous options are differentiable tensors."""
+    kwargs = dict(solver_kwargs)
+    if kwargs.pop("_use_vp_scheduler", False):
+        scheduler = VPNoiseScheduler()
+    else:
+        scheduler = EDMNoiseScheduler()
+
+    model = instantiate_model_deterministic(
+        predictor_cls,
+        seed=0,
+        **predictor_kwargs,
+    ).to(device)
+    denoiser = scheduler.get_denoiser(x0_predictor=model, denoising_type="ode")
+    kwargs, leaves, nonzero_names = make_differentiable_solver_options(
+        solver_name,
+        kwargs,
+        scheduler,
+        "x0",
+        device,
+    )
+    solver = solver_cls(denoiser, **kwargs)
+    return solver, model, leaves, nonzero_names
 
 
 # =============================================================================
@@ -671,8 +705,8 @@ class TestConsistency:
         if kwargs.pop("_use_edm_sigma_fns", False):
             kwargs["sigma_fn"] = lambda t: t
             kwargs["sigma_inv_fn"] = lambda sigma: sigma
-            kwargs["diffusion_fn"] = lambda x, t: 2 * t.reshape(
-                (-1,) + (1,) * (x.ndim - 1)
+            kwargs["diffusion_fn"] = lambda x, t: (
+                2 * t.reshape((-1,) + (1,) * (x.ndim - 1))
             )
         if kwargs.pop("_use_sigma_fns", False):
             kwargs["sigma_fn"] = lambda t: t
@@ -756,6 +790,160 @@ class TestConsistency:
             f"{solver_name} measured order {measured_order:.2f}, "
             f"expected approximately {expected_order:.0f}"
         )
+
+
+# =============================================================================
+# Gradient Tests
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    "solver_cls,solver_kwargs,solver_name,uses_rng,time_scale",
+    SOLVER_CONFIGS,
+    ids=[c[2] for c in SOLVER_CONFIGS],
+)
+@pytest.mark.parametrize(
+    "spatial_name,shape,predictor_cls,predictor_kwargs",
+    SPATIAL_CONFIGS,
+    ids=[c[0] for c in SPATIAL_CONFIGS],
+)
+class TestGradientFlow:
+    """Gradient tests for every solver configuration and spatial rank."""
+
+    def test_gradient_flow(
+        self,
+        deterministic_settings,
+        device,
+        solver_cls,
+        solver_kwargs,
+        solver_name,
+        uses_rng,
+        time_scale,
+        spatial_name,
+        shape,
+        predictor_cls,
+        predictor_kwargs,
+    ):
+        solver, model, option_leaves, nonzero_option_names = (
+            _make_differentiable_solver(
+                solver_cls,
+                solver_kwargs,
+                solver_name,
+                shape,
+                predictor_cls,
+                predictor_kwargs,
+                device,
+            )
+        )
+        x = make_input(shape, seed=100, device=device).requires_grad_()
+        x_initial = x
+        times = (
+            torch.tensor(
+                [0.9, 0.75, 0.6, 0.45],
+                device=device,
+            )
+            * time_scale
+        ).requires_grad_()
+
+        for t_cur, t_next in zip(times[:-1], times[1:]):
+            t_cur_batch = t_cur.expand(shape[0])
+            t_next_batch = t_next.expand(shape[0])
+            x = solver.step(x, t_cur_batch, t_next_batch)
+        x.square().mean().backward()
+
+        assert x_initial.grad is not None
+        assert torch.isfinite(x_initial.grad).all()
+        assert torch.count_nonzero(x_initial.grad) == x_initial.grad.numel()
+
+        assert times.grad is not None
+        assert torch.isfinite(times.grad).all()
+        assert torch.count_nonzero(times.grad) == times.grad.numel()
+
+        for name, parameter in model.named_parameters():
+            assert parameter.grad is not None, f"{name} has no gradient"
+            assert torch.isfinite(parameter.grad).all(), (
+                f"{name} has a non-finite gradient"
+            )
+            assert torch.count_nonzero(parameter.grad) == parameter.grad.numel(), (
+                f"{name} contains zero gradients"
+            )
+
+        for name, option in option_leaves.items():
+            assert option.grad is not None, f"{name} has no gradient"
+            assert torch.isfinite(option.grad), f"{name} has a non-finite gradient"
+            if name in nonzero_option_names:
+                assert option.grad != 0, f"{name} has a zero gradient"
+
+    def test_compiled_gradient_flow(
+        self,
+        nop_compile,
+        deterministic_settings,
+        device,
+        solver_cls,
+        solver_kwargs,
+        solver_name,
+        uses_rng,
+        time_scale,
+        spatial_name,
+        shape,
+        predictor_cls,
+        predictor_kwargs,
+    ):
+        """Compile the trajectory and reuse its steady-state graph in backward."""
+        torch._dynamo.config.error_on_recompile = False
+        solver, model, option_leaves, nonzero_option_names = (
+            _make_differentiable_solver(
+                solver_cls,
+                solver_kwargs,
+                solver_name,
+                shape,
+                predictor_cls,
+                predictor_kwargs,
+                device,
+            )
+        )
+        compiled_step = torch.compile(solver.step, fullgraph=True)
+
+        x = make_input(shape, seed=100, device=device).requires_grad_()
+        x_initial = x
+        times = (
+            torch.tensor(
+                [0.9, 0.75, 0.6, 0.45],
+                device=device,
+            )
+            * time_scale
+        ).requires_grad_()
+
+        for index, (t_cur, t_next) in enumerate(zip(times[:-1], times[1:])):
+            if index == 2:
+                torch._dynamo.config.error_on_recompile = True
+            t_cur_batch = t_cur.expand(shape[0])
+            t_next_batch = t_next.expand(shape[0])
+            x = compiled_step(x, t_cur_batch, t_next_batch)
+        x.square().mean().backward()
+
+        assert x_initial.grad is not None
+        assert torch.isfinite(x_initial.grad).all()
+        assert torch.count_nonzero(x_initial.grad) == x_initial.grad.numel()
+
+        assert times.grad is not None
+        assert torch.isfinite(times.grad).all()
+        assert torch.count_nonzero(times.grad) == times.grad.numel()
+
+        for name, parameter in model.named_parameters():
+            assert parameter.grad is not None, f"{name} has no gradient"
+            assert torch.isfinite(parameter.grad).all(), (
+                f"{name} has a non-finite gradient"
+            )
+            assert torch.count_nonzero(parameter.grad) == parameter.grad.numel(), (
+                f"{name} contains zero gradients"
+            )
+
+        for name, option in option_leaves.items():
+            assert option.grad is not None, f"{name} has no gradient"
+            assert torch.isfinite(option.grad), f"{name} has a non-finite gradient"
+            if name in nonzero_option_names:
+                assert option.grad != 0, f"{name} has a zero gradient"
 
 
 # =============================================================================

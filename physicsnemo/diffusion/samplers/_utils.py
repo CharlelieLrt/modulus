@@ -115,11 +115,21 @@ def _nonlinear_weight(
     # the endpoint value; when not finite (an indeterminate ratio at a
     # vanishing noise level, or a zero bias), fall back to a probe point
     # near t_next, then to zero (pure quadrature)
+    def safe_ratio(t: Tensor) -> tuple[Tensor, Tensor]:
+        bias = bias_fn(t)
+        slope = slope_fn(t)
+        valid = torch.isfinite(bias) & torch.isfinite(slope) & (bias != 0)
+        denominator = torch.where(valid, bias, torch.ones_like(bias))
+        return slope / denominator, valid
+
     t_star = t_next + _RATIO_PROBE_OFFSET * (t_cur - t_next)
-    ratio_next = slope_fn(t_next) / bias_fn(t_next)
-    ratio_star = slope_fn(t_star) / bias_fn(t_star)
-    ratio = torch.where(torch.isfinite(ratio_next), ratio_next, ratio_star)
-    ratio = torch.where(torch.isfinite(ratio), ratio, torch.zeros_like(ratio))
+    ratio_next, valid_next = safe_ratio(t_next)
+    ratio_star, valid_star = safe_ratio(t_star)
+    ratio = torch.where(
+        valid_next,
+        ratio_next,
+        torch.where(valid_star, ratio_star, torch.zeros_like(ratio_star)),
+    )
 
     def integrand(s: Tensor) -> Tensor:
         return torch.exp(bias_int_next - bias_int_fn(s)) * (
