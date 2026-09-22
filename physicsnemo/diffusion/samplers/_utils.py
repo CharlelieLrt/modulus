@@ -16,6 +16,7 @@
 
 """Private numerical utilities shared by the diffusion solvers."""
 
+import math
 from typing import Callable
 
 import numpy as np
@@ -24,6 +25,8 @@ from jaxtyping import Float
 from torch import Tensor
 
 _MAX_NUM_POINTS = 8
+_NUM_QUADRATURE_POINTS = 4
+_RATIO_PROBE_OFFSET = 0.0694318442029737
 
 
 def _build_gauss_legendre_rules(
@@ -94,3 +97,65 @@ def gauss_legendre(
     points = midpoint + half_interval * nodes_bc
 
     return half_interval * torch.sum(weights_bc * fun(points), dim=0)
+
+
+def _nonlinear_weight(
+    t_cur: Float[Tensor, " B"],
+    t_next: Float[Tensor, " B"],
+    bias_fn: Callable[[Tensor], Tensor],
+    bias_int_fn: Callable[[Tensor], Tensor],
+    slope_fn: Callable[[Tensor], Tensor],
+) -> Float[Tensor, " B"]:
+    r"""
+    Compute the exponential-kernel weight of the nonlinear term over one step.
+    """
+    bias_int_next = bias_int_fn(t_next)
+
+    # Finite estimate of the slope-to-bias ratio b / a near t_next: prefer
+    # the endpoint value; when not finite (an indeterminate ratio at a
+    # vanishing noise level, or a zero bias), fall back to a probe point
+    # near t_next, then to zero (pure quadrature)
+    t_star = t_next + _RATIO_PROBE_OFFSET * (t_cur - t_next)
+    ratio_next = slope_fn(t_next) / bias_fn(t_next)
+    ratio_star = slope_fn(t_star) / bias_fn(t_star)
+    ratio = torch.where(torch.isfinite(ratio_next), ratio_next, ratio_star)
+    ratio = torch.where(torch.isfinite(ratio), ratio, torch.zeros_like(ratio))
+
+    def integrand(s: Tensor) -> Tensor:
+        return torch.exp(bias_int_next - bias_int_fn(s)) * (
+            slope_fn(s) - ratio * bias_fn(s)
+        )
+
+    exact_part = ratio * torch.expm1(bias_int_next - bias_int_fn(t_cur))
+    return exact_part + gauss_legendre(integrand, t_cur, t_next, _NUM_QUADRATURE_POINTS)
+
+
+def _nonlinear_moment(
+    order: int,
+    t_cur: Float[Tensor, " B"],
+    t_next: Float[Tensor, " B"],
+    lam_cur: Float[Tensor, " B"],
+    bias_int_fn: Callable[[Tensor], Tensor],
+    slope_fn: Callable[[Tensor], Tensor],
+    lambda_fn: Callable[[Tensor], Tensor],
+) -> Float[Tensor, " B"]:
+    r"""
+    Compute a propagator-weighted moment of the nonlinear term over one step:
+
+    .. math::
+        J_{k} = \int_{t_n}^{t_{n-1}}
+        e^{\mathcal{A}(t_{n-1}) - \mathcal{A}(s)} \, b(s)
+        \frac{[\lambda(s) - \lambda(t_n)]^k}{k!} \, ds
+
+    The higher moments (:math:`k = 1, 2`) provide the derivative information
+    that the UniC-2 corrector needs without differentiating the predictor.
+    """
+    bias_int_next = bias_int_fn(t_next)
+    factorial = float(math.factorial(order))
+
+    def integrand(s: Tensor) -> Tensor:
+        kernel = torch.exp(bias_int_next - bias_int_fn(s))
+        dz = lambda_fn(s) - lam_cur
+        return kernel * slope_fn(s) * dz**order / factorial
+
+    return gauss_legendre(integrand, t_cur, t_next, _NUM_QUADRATURE_POINTS)
