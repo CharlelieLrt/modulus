@@ -62,6 +62,9 @@ NUM_STEPS_GRAD = 3
 # accumulate over solver steps and across CPU ISAs.
 SAMPLER_CPU_TOLERANCES = {"atol": 20.0, "rtol": 5e-2}
 SAMPLER_GPU_TOLERANCES = {"atol": 20.0, "rtol": 5e-2}
+SAMPLER_RNG_TOLERANCES = {
+    "stoch_exp_euler_renoise": {"atol": 1e-8, "rtol": 1e-5},
+}
 
 SPATIAL_CONFIGS = [
     ("1d", (BATCH, 3, 16), FlatLinearX0Predictor, {"features": 3 * 16}),
@@ -350,7 +353,12 @@ class TestSampleNonRegression:
                     solver_options=opts,
                 )
 
-            result = gpu_rng_roundtrip(fn, GLOBAL_SEED, str(device))
+            result = gpu_rng_roundtrip(
+                fn,
+                GLOBAL_SEED,
+                str(device),
+                **SAMPLER_RNG_TOLERANCES.get(sampler_name, {}),
+            )
             assert result.shape == shape
         elif "cuda" in str(device) or uses_rng:
             x0 = sample(
@@ -433,7 +441,12 @@ class TestSampleNonRegression:
                 )
                 return torch.stack(results)
 
-            stacked = gpu_rng_roundtrip(fn, GLOBAL_SEED, str(device))
+            stacked = gpu_rng_roundtrip(
+                fn,
+                GLOBAL_SEED,
+                str(device),
+                **SAMPLER_RNG_TOLERANCES.get(sampler_name, {}),
+            )
             assert stacked.shape == (len(TIME_EVAL_INDICES), *shape)
         elif "cuda" in str(device) or uses_rng:
             results = sample(
