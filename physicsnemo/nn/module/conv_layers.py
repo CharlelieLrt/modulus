@@ -437,9 +437,13 @@ class Conv3D(Module):
     def forward(
         self, x: Float[torch.Tensor, "B C_in D H W"]
     ) -> Float[torch.Tensor, "B C_out D_out H_out W_out"]:
-        w = self.weight
-        b = self.bias
-        f = self.resample_filter
+        w = self.weight.to(x.dtype) if self.weight is not None else None
+        b = self.bias.to(x.dtype) if self.bias is not None else None
+        f = (
+            self.resample_filter.to(x.dtype)
+            if self.resample_filter is not None
+            else None
+        )
         w_pad = w.shape[-1] // 2 if w is not None else 0
         f_pad = (f.shape[-1] - 1) // 2 if f is not None else 0
 

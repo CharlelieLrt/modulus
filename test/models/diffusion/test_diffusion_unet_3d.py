@@ -23,7 +23,7 @@ import torch
 import torch._dynamo
 from tensordict import TensorDict
 
-from physicsnemo.models.diffusion_unets import DiffusionUNet3D
+from physicsnemo.models import DiffusionUNet3D
 from test.models.diffusion._helpers import (
     GLOBAL_SEED,
     compare_outputs,
@@ -125,14 +125,14 @@ def _generate_batch_data(
     return x, t, condition
 
 
-@pytest.mark.parametrize(
-    "config_name,model_kwargs,x_shape",
-    ARCH_CONFIGS,
-    ids=[config[0] for config in ARCH_CONFIGS],
-)
 class TestConstructor:
     """Tests model construction and public attributes."""
 
+    @pytest.mark.parametrize(
+        "config_name,model_kwargs,x_shape",
+        ARCH_CONFIGS,
+        ids=[config[0] for config in ARCH_CONFIGS],
+    )
     def test_attributes(self, config_name, model_kwargs, x_shape):
         model = DiffusionUNet3D(**model_kwargs)
 
@@ -145,6 +145,22 @@ class TestConstructor:
         assert model.emb_channels == model_kwargs["model_channels"] * model_kwargs.get(
             "channel_mult_emb", 4
         )
+        assert all(
+            module.amp_mode is True
+            for module in model.modules()
+            if hasattr(module, "amp_mode")
+        )
+
+    def test_default_attributes(self):
+        model = DiffusionUNet3D(x_channels=2)
+
+        assert model.x_channels == 2
+        assert model.vol_cond_channels == 0
+        assert model.vec_cond_dim == 0
+        assert model.num_levels == 4
+        assert model.embedding_type == "positional"
+        assert model.checkpoint_level == 0
+        assert model.emb_channels == 128 * 4
         assert all(
             module.amp_mode is True
             for module in model.modules()

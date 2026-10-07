@@ -133,12 +133,14 @@ class GroupNorm3D(Module):
             x = torch.nn.functional.group_norm(
                 x,
                 num_groups=self.num_groups,
-                weight=self.weight,
-                bias=self.bias,
+                weight=self.weight.to(x.dtype),
+                bias=self.bias.to(x.dtype),
                 eps=self.eps,
             )
         else:
             # Preserve the established corrected-variance inference calculation.
+            dtype = x.dtype
+            x = x.float()
             x = rearrange(x, "b (g c) d h w -> b g c d h w", g=self.num_groups)
             mean = x.mean(dim=[2, 3, 4, 5], keepdim=True)
             var = x.var(dim=[2, 3, 4, 5], keepdim=True)
@@ -147,6 +149,7 @@ class GroupNorm3D(Module):
             x = x * rearrange(self.weight, "c -> 1 c 1 1 1") + rearrange(
                 self.bias, "c -> 1 c 1 1 1"
             )
+            x = x.to(dtype)
         return x
 
 
