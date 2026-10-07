@@ -50,12 +50,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     functions in `LinearGaussianNoiseScheduler` (`x0_to_flow` / `flow_to_x0`
     / `score_to_flow` / `flow_to_score`) and the corresponding conversion
     callbacks everywhere conversions between prediction types are necessary.
-- Promotes the volumetric `DiffusionUNet3D` and its reusable `Conv3D`,
-  `GroupNorm3D`, `UNetAttention3D`, and `UNetBlock3D` layers from experimental
-  to stable production APIs in `physicsnemo.models.diffusion_unets` and
-  `physicsnemo.nn`. The promoted APIs now carry backward-compatibility
-  guarantees and output/checkpoint non-regression coverage. Existing
-  experimental import paths remain as deprecated compatibility shims.
 
 ### Changed
 
@@ -99,6 +93,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Sampling, centroid conversion, geometric transformations, subdivision and
   GLOBE use the mesh-owned measure API. Point measures carry their represented
   dimension so geometric scaling preserves their physical units.
+- Promotes the volumetric `DiffusionUNet3D` and its reusable `Conv3D`,
+  `GroupNorm3D`, `UNetAttention3D`, and `UNetBlock3D` layers from experimental
+  to stable production APIs in `physicsnemo.models.diffusion_unets` and
+  `physicsnemo.nn`. The promoted APIs now carry backward-compatibility
+  guarantees and output/checkpoint non-regression coverage. Existing
+  experimental import paths remain as deprecated compatibility shims.
 
   **Migration from 2.2.x:** meshes saved with `cell_data["_measure_weights"]`
   must be regenerated or converted once before integration:
