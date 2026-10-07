@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `physicsnemo.experimental.guardrails.embedded.GuardedGeoTransolver` (or
   `attach_ood_guard`) to enable out-of-distribution guarding. PhysicsNeMo removes
   the  `guard_config` model argument.
+- Promotes the volumetric `DiffusionUNet3D` and its reusable `Conv3D`,
+  `GroupNorm3D`, `UNetAttention3D`, and `UNetBlock3D` layers from experimental
+  to stable production APIs in `physicsnemo.models.diffusion_unets` and
+  `physicsnemo.nn`. The promoted APIs now carry backward-compatibility
+  guarantees and output/checkpoint non-regression coverage. Existing
+  experimental import paths remain as deprecated compatibility shims.
 - Adds `zenith_azimuth_angles` and `zenith_azimuth_angles_from_timestamp` to
   `physicsnemo.utils.zenith_angle`, returning
   `(sin_zenith, cos_zenith, sin_azimuth, cos_azimuth)` alongside the existing
@@ -661,11 +667,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end-to-end training and sampling of epsilon-parameterized models.
   Losses gain an `epsilon_to_x0_fn` kwarg used for the epsilon-to-x0
   conversion required during DSM training.
-- Adds `DiffusionUNet3D` 3D U-Net diffusion backbone for volumetric data at
-  `physicsnemo.experimental.models.diffusion_unets`. Implements the
-  `DiffusionModel` protocol. Exposes reusable 3D building blocks
-  (`Conv3D`, `GroupNorm3D`, `UNetAttention3D`, `UNetBlock3D`) at
-  `physicsnemo.experimental.nn`.
 - Added support for Batched radius search, which enables Domino
   and GeoTransolver with local features and batch size > 1.
 - Added the underfill recipe.
