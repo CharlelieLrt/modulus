@@ -63,7 +63,7 @@ NUM_STEPS_GRAD = 3
 SAMPLER_CPU_TOLERANCES = {"atol": 20.0, "rtol": 5e-2}
 SAMPLER_GPU_TOLERANCES = {"atol": 20.0, "rtol": 5e-2}
 SAMPLER_RNG_TOLERANCES = {
-    "stoch_exp_euler_renoise": {"atol": 1e-8, "rtol": 1e-5},
+    "stoch_exp_euler_renoise": {"atol": 1e-9, "rtol": 1e-7},
 }
 
 SPATIAL_CONFIGS = [
