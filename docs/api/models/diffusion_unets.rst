@@ -7,7 +7,7 @@ This page documents the UNet family of backbone architectures for diffusion and
 flow matching models.
 These built-in architectures support structured 2D domains (images and
 spatial fields) and 3D volumetric domains. For other domains or architectures,
-see the :ref:`DiT backbone <dit_model>`, or use any model from the
+refer to the :ref:`DiT backbone <dit_model>`, or use any model from the
 :doc:`PhysicsNeMo model zoo <../../api_models>` or external libraries as
 described in :ref:`Model Backbones <diffusion_model_backbones>`.
 
