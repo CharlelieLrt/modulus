@@ -22,11 +22,10 @@ using offset-indices encoding, commonly used in graph and mesh processing.
 
 import torch
 from jaxtyping import Int
-from tensordict import tensorclass
+from tensordict import TensorClass
 
 
-@tensorclass
-class Adjacency:
+class Adjacency(TensorClass):
     """Ragged adjacency list stored with offset-indices encoding.
 
     This structure efficiently represents variable-length neighbor lists using two

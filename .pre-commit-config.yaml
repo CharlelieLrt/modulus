@@ -46,20 +46,20 @@ repos:
       entry: python test/ci_tests/header_check.py
       language: python
       additional_dependencies: ['GitPython']
-      files: \.(py|yaml|ci|release)$|Dockerfile$
+      files: \.(py|yaml|yml|ci|release)$|Dockerfile$
       exclude: ^(physicsnemo/internal/|docs/)
 
 -   repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v3.4.0
+    rev: v6.0.0
     hooks:
     - id: check-added-large-files
       args: [--maxkb=5000]
 
 -   repo: https://github.com/seddonym/import-linter
-    rev: v2.11
+    rev: v2.15
     hooks:
     - id: import-linter
       language: python
       additional_dependencies:
-      - packaging==26.0
+      - packaging==26.3
       args: [--verbose]

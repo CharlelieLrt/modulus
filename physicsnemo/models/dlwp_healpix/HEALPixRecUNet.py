@@ -27,16 +27,23 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, Sequence
 
-import pandas as pd
 import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from physicsnemo.core.meta import ModelMetaData
 from physicsnemo.core.module import Module
+from physicsnemo.core.version_check import OptionalImport
 from physicsnemo.nn.module.hpx import HEALPixFoldFaces, HEALPixUnfoldFaces
 
-from .layers import _legacy_hydra_targets_warning, _remap_obj
+from .layers import (
+    _backward_compat_dlesym_v1_args,
+    _dlesym_v02_version_mismatch_warning,
+    _legacy_hydra_targets_warning,
+    _remap_obj,
+)
+
+pd = OptionalImport("pandas")
 
 logger = logging.getLogger(__name__)
 
@@ -120,9 +127,10 @@ class HEALPixRecUNet(Module):
 
     """
 
-    __model_checkpoint_version__ = "0.2.0"
+    __model_checkpoint_version__ = "0.3.0"
     __supported_model_checkpoint_version__ = {
         "0.1.0": _legacy_hydra_targets_warning,
+        "0.2.0": _dlesym_v02_version_mismatch_warning,
     }
 
     @classmethod
@@ -145,10 +153,11 @@ class HEALPixRecUNet(Module):
             Updated arguments dictionary compatible with the current version.
         """
         args = super()._backward_compat_arg_mapper(version, args)
-        if version != "0.1.0":
-            return args
-
-        return _remap_obj(args)
+        if version == "0.1.0":
+            args = _remap_obj(args)
+        if version in ("0.1.0", "0.2.0"):
+            args = _backward_compat_dlesym_v1_args(args)
+        return args
 
     def __init__(
         self,
