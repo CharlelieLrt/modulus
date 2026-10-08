@@ -244,6 +244,43 @@ class EDMStochasticExponentialEulerSolver(Solver):
     >>> x_tm1 = solver.step(x_t, torch.tensor([5.0]), torch.tensor([2.5]))
     >>> x_tm1.shape
     torch.Size([1, 3, 8, 8])
+
+    For domain-parallel stochastic DDIM, use
+    :class:`~physicsnemo.diffusion.noise_schedulers.DomainParallelNoiseScheduler`
+    for distributed scheduler operations and get coefficient callbacks
+    from its ``inner_scheduler``. Given an initialized ``domain_mesh``:
+
+    .. code-block:: python
+
+        from physicsnemo.diffusion.noise_schedulers import (
+            DomainParallelNoiseScheduler,
+            EDMNoiseScheduler,
+        )
+        from physicsnemo.diffusion.samplers import (
+            EDMStochasticExponentialEulerSolver,
+        )
+
+        scheduler = DomainParallelNoiseScheduler(
+            EDMNoiseScheduler(), domain_mesh, shard_dim=2
+        )
+        x0_pred = lambda x, t: x * 0.1  # Toy x0-predictor
+
+        # A plain scheduler provides callbacks directly; the domain-parallel
+        # wrapper keeps these scalar functions on its inner scheduler.
+        inner = scheduler.inner_scheduler
+        bias, bias_int, slope = inner.get_linear_denoiser(
+            prediction_type="x0"
+        )
+        solver = EDMStochasticExponentialEulerSolver(
+            scheduler.get_denoiser(x0_predictor=x0_pred),
+            bias_fn=bias,
+            bias_int_fn=bias_int,
+            slope_fn=slope,
+            sigma_fn=inner.sigma,
+            sigma_inv_fn=inner.sigma_inv,
+            alpha_fn=inner.alpha,
+            renoise=1.0,
+        )
     """
 
     def __init__(

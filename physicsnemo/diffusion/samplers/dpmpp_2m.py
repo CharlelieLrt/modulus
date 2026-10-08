@@ -183,6 +183,40 @@ class DPMPlusPlus2M(Solver):
     >>> x_next.shape
     torch.Size([1, 3, 8, 8])
     >>> dpmpp_solver.reset()  # Before reusing it on a new trajectory
+
+    For domain-parallel DPM-Solver++(2M), use
+    :class:`~physicsnemo.diffusion.noise_schedulers.DomainParallelNoiseScheduler`
+    for distributed scheduler operations and get the scalar callbacks from
+    its ``inner_scheduler``. Given an initialized ``domain_mesh``:
+
+    .. code-block:: python
+
+        from physicsnemo.diffusion.noise_schedulers import (
+            DomainParallelNoiseScheduler,
+            EDMNoiseScheduler,
+        )
+        from physicsnemo.diffusion.samplers import DPMPlusPlus2M
+
+        scheduler = DomainParallelNoiseScheduler(
+            EDMNoiseScheduler(), domain_mesh, shard_dim=2
+        )
+        x0_pred = lambda x, t: x * 0.1  # Toy x0-predictor
+        denoiser = scheduler.get_denoiser(x0_predictor=x0_pred)
+
+        # A plain scheduler provides callbacks directly; the domain-parallel
+        # wrapper keeps these scalar functions on its inner scheduler.
+        inner = scheduler.inner_scheduler
+        bias, bias_int, slope = inner.get_linear_denoiser(
+            prediction_type="x0"
+        )
+        log_snr = lambda t: torch.log(inner.snr(t))
+        solver = DPMPlusPlus2M(
+            denoiser,
+            bias_fn=bias,
+            bias_int_fn=bias_int,
+            slope_fn=slope,
+            lambda_fn=log_snr,
+        )
     """
 
     def __init__(
