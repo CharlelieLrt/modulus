@@ -756,6 +756,48 @@ class TestConsistency:
         x_next = solver.step(x, t_cur, t_next)
         compare_outputs(x_next, t_end_frac * x, **tolerances)
 
+    def test_cold_start_trajectory_error(
+        self,
+        solver_cls,
+        solver_kwargs,
+        solver_name,
+        uses_rng,
+        time_scale,
+        expected_nfe,
+    ):
+        num_steps = 4
+
+        def denoiser(x, t):
+            return t[:, None].expand_as(x)
+
+        kwargs = dict(solver_kwargs)
+        kwargs.pop("_use_vp_scheduler", False)
+        kwargs.pop("_use_edm_sigma_fns", False)
+        kwargs.pop("_use_sigma_fns", False)
+        kwargs.pop("_use_linear_fn", False)
+        kwargs.pop("_use_slope_fn", False)
+        kwargs.pop("_use_log_snr_lambda", False)
+        if "S_churn" in kwargs:
+            kwargs["S_churn"] = 0
+        if "renoise" in kwargs:
+            kwargs["renoise"] = 0
+
+        solver = solver_cls(denoiser, **kwargs)
+        x = torch.zeros((1, 1), dtype=torch.float64)
+        times = torch.linspace(1.0, 0.5, num_steps + 1, dtype=torch.float64)
+        for t_cur, t_next in zip(times[:-1], times[1:]):
+            x = solver.step(x, t_cur[None], t_next[None])
+
+        exact = (0.5**2 - 1.0) / 2
+        error = x.item() - exact
+        if solver_cls in (HeunSolver, EDMStochasticHeunSolver):
+            expected_error = 0.0
+        else:
+            cold_start_order = min(SOLVER_ORDERS[solver_cls], 2.0)
+            expected_error = -1.0 / (8.0 * num_steps**cold_start_order)
+
+        assert error == pytest.approx(expected_error, rel=1e-10, abs=1e-12)
+
     def test_empirical_order(
         self,
         solver_cls,
