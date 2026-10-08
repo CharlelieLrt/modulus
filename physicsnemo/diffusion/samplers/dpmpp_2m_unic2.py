@@ -389,6 +389,9 @@ class DPMPlusPlus2MUniC2(Solver):
 
         # DPM-Solver++(2M) predictor and its endpoint evaluation
         x_pred = e_bc * x + j0_bc * (n_cur + q_half_bc * (n_cur - n_old))
+        # Run the full batch for mixed terminal and nonterminal times. Masks
+        # drop n_pred from terminal updates while avoiding data-dependent
+        # control flow, which keeps this path compatible with torch.compile.
         n_pred = self._predictor_value(x_pred, t_eval, expected_shape)
         n_pred = torch.where(torch.isfinite(n_pred), n_pred, n_cur)
 
