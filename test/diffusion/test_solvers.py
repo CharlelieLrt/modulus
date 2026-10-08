@@ -61,25 +61,34 @@ SPATIAL_CONFIGS = [
     ("3d", (BATCH, 2, 4, 4, 4), Conv3dX0Predictor, {"channels": 2}),
 ]
 
-# (solver_cls, solver_kwargs, solver_name, uses_rng, time_scale)
+# (solver_cls, solver_kwargs, solver_name, uses_rng, time_scale, expected_nfe)
 # The solver constructor receives solver_kwargs after `denoiser`. The
 # "_use_*" keys are sentinels resolved by _make_solver_and_denoiser: they
 # select the noise scheduler of the config and the schedule callbacks built
 # from it. time_scale scales the step times, so that the tests stay within
-# the valid time range of bounded schedules (VP).
+# the valid time range of bounded schedules (VP). expected_nfe is the total
+# number of denoiser evaluations over four solver steps.
 # The configs of the exponential and DPM-Solver++(2M) solvers mirror the
 # docstring examples of their classes.
 SOLVER_CONFIGS = [
-    (EulerSolver, {}, "euler", False, 1.0),
-    (HeunSolver, {}, "heun", False, 1.0),
-    (HeunSolver, {"alpha": 0.5}, "heun_midpoint", False, 1.0),
-    (EDMStochasticEulerSolver, {"S_churn": 0}, "stoch_euler_nochurn", False, 1.0),
+    (EulerSolver, {}, "euler", False, 1.0, 4),
+    (HeunSolver, {}, "heun", False, 1.0, 8),
+    (HeunSolver, {"alpha": 0.5}, "heun_midpoint", False, 1.0, 8),
+    (
+        EDMStochasticEulerSolver,
+        {"S_churn": 0},
+        "stoch_euler_nochurn",
+        False,
+        1.0,
+        4,
+    ),
     (
         EDMStochasticEulerSolver,
         {"S_churn": 40, "num_steps": 10},
         "stoch_euler_churn",
         True,
         1.0,
+        4,
     ),
     (
         EDMStochasticEulerSolver,
@@ -87,14 +96,23 @@ SOLVER_CONFIGS = [
         "stoch_euler_sigmafns",
         True,
         1.0,
+        4,
     ),
-    (EDMStochasticHeunSolver, {"S_churn": 0}, "stoch_heun_nochurn", False, 1.0),
+    (
+        EDMStochasticHeunSolver,
+        {"S_churn": 0},
+        "stoch_heun_nochurn",
+        False,
+        1.0,
+        8,
+    ),
     (
         EDMStochasticHeunSolver,
         {"S_churn": 40, "num_steps": 10},
         "stoch_heun_churn",
         True,
         1.0,
+        8,
     ),
     # EDM schedule with the affine coefficients of the x0-parameterization
     (
@@ -103,6 +121,7 @@ SOLVER_CONFIGS = [
         "exponential_euler",
         False,
         1.0,
+        4,
     ),
     # DDIM sampler for distilled few-step models: VP schedule with an
     # x0-parameterization
@@ -112,6 +131,7 @@ SOLVER_CONFIGS = [
         "exponential_euler_ddim",
         False,
         0.1,
+        4,
     ),
     # EDM-style churn on top of the exponential Euler update
     (
@@ -125,6 +145,7 @@ SOLVER_CONFIGS = [
         "stoch_exp_euler_churn",
         True,
         1.0,
+        4,
     ),
     # Stochastic DDIM (full noise renewal) for distilled few-step and
     # consistency models: VP schedule with its noise-level callbacks
@@ -140,9 +161,10 @@ SOLVER_CONFIGS = [
         "stoch_exp_euler_renoise",
         True,
         0.1,
+        4,
     ),
     # Classical two-step Adams-Bashforth: default callbacks
-    (DPMPlusPlus2M, {}, "dpmpp_2m_ab2", False, 1.0),
+    (DPMPlusPlus2M, {}, "dpmpp_2m_ab2", False, 1.0, 4),
     # Original DPM-Solver++(2M): log-SNR extrapolation coordinate
     (
         DPMPlusPlus2M,
@@ -150,9 +172,10 @@ SOLVER_CONFIGS = [
         "dpmpp_2m",
         False,
         1.0,
+        4,
     ),
     # Corrected two-step Adams-Bashforth: default callbacks
-    (DPMPlusPlus2MUniC2, {}, "dpmpp_2m_unic2_default", False, 1.0),
+    (DPMPlusPlus2MUniC2, {}, "dpmpp_2m_unic2_default", False, 1.0, 5),
     # DPM-Solver++(2M) with the UniC-2 corrector: log-SNR extrapolation
     # coordinate
     (
@@ -161,6 +184,7 @@ SOLVER_CONFIGS = [
         "dpmpp_2m_unic2",
         False,
         1.0,
+        5,
     ),
 ]
 
@@ -534,7 +558,7 @@ class TestDPMPlusPlus2MUniC2Constructor:
 
 
 @pytest.mark.parametrize(
-    "solver_cls,solver_kwargs,solver_name,uses_rng,time_scale",
+    "solver_cls,solver_kwargs,solver_name,uses_rng,time_scale,expected_nfe",
     SOLVER_CONFIGS,
     ids=[c[2] for c in SOLVER_CONFIGS],
 )
@@ -556,6 +580,7 @@ class TestStepNonRegression:
         solver_name,
         uses_rng,
         time_scale,
+        expected_nfe,
         spatial_name,
         shape,
         predictor_cls,
@@ -595,6 +620,7 @@ class TestStepNonRegression:
         solver_name,
         uses_rng,
         time_scale,
+        expected_nfe,
         spatial_name,
         shape,
         predictor_cls,
@@ -623,6 +649,7 @@ class TestStepNonRegression:
         solver_name,
         uses_rng,
         time_scale,
+        expected_nfe,
         spatial_name,
         shape,
         predictor_cls,
@@ -656,12 +683,12 @@ class TestStepNonRegression:
 
 
 @pytest.mark.parametrize(
-    "solver_cls,solver_kwargs,solver_name,uses_rng,time_scale",
+    "solver_cls,solver_kwargs,solver_name,uses_rng,time_scale,expected_nfe",
     SOLVER_CONFIGS,
     ids=[c[2] for c in SOLVER_CONFIGS],
 )
 class TestConsistency:
-    """Golden-free consistency tests against exactly solvable ODEs."""
+    """Golden-free solver behavior tests."""
 
     @pytest.mark.parametrize(
         "spatial_name,shape,predictor_cls,predictor_kwargs",
@@ -679,6 +706,7 @@ class TestConsistency:
         solver_name,
         uses_rng,
         time_scale,
+        expected_nfe,
         spatial_name,
         shape,
         predictor_cls,
@@ -735,6 +763,7 @@ class TestConsistency:
         solver_name,
         uses_rng,
         time_scale,
+        expected_nfe,
     ):
         """Measure convergence on a non-trivial semi-linear ODE."""
 
@@ -791,6 +820,43 @@ class TestConsistency:
             f"expected approximately {expected_order:.0f}"
         )
 
+    def test_denoiser_evaluation_count(
+        self,
+        solver_cls,
+        solver_kwargs,
+        solver_name,
+        uses_rng,
+        time_scale,
+        expected_nfe,
+    ):
+        num_evaluations = 0
+
+        def counting_denoiser(x, t):
+            nonlocal num_evaluations
+            num_evaluations += 1
+            return torch.zeros_like(x)
+
+        kwargs = dict(solver_kwargs)
+        kwargs.pop("_use_vp_scheduler", False)
+        kwargs.pop("_use_edm_sigma_fns", False)
+        kwargs.pop("_use_sigma_fns", False)
+        if kwargs.pop("_use_linear_fn", False):
+            kwargs["bias_fn"] = lambda t: torch.zeros_like(t)
+            kwargs["bias_int_fn"] = lambda t: torch.zeros_like(t)
+            if kwargs.pop("_use_slope_fn", False):
+                kwargs["slope_fn"] = lambda t: torch.ones_like(t)
+        if kwargs.pop("_use_log_snr_lambda", False):
+            kwargs["lambda_fn"] = lambda t: t
+
+        solver = solver_cls(counting_denoiser, **kwargs)
+        x = torch.ones((1, 1))
+        times = torch.linspace(1.0, 0.5, 5) * time_scale
+
+        for t_cur, t_next in zip(times[:-1], times[1:]):
+            x = solver.step(x, t_cur[None], t_next[None])
+
+        assert num_evaluations == expected_nfe
+
 
 # =============================================================================
 # Gradient Tests
@@ -798,7 +864,7 @@ class TestConsistency:
 
 
 @pytest.mark.parametrize(
-    "solver_cls,solver_kwargs,solver_name,uses_rng,time_scale",
+    "solver_cls,solver_kwargs,solver_name,uses_rng,time_scale,expected_nfe",
     SOLVER_CONFIGS,
     ids=[c[2] for c in SOLVER_CONFIGS],
 )
@@ -819,6 +885,7 @@ class TestGradientFlow:
         solver_name,
         uses_rng,
         time_scale,
+        expected_nfe,
         spatial_name,
         shape,
         predictor_cls,
@@ -884,6 +951,7 @@ class TestGradientFlow:
         solver_name,
         uses_rng,
         time_scale,
+        expected_nfe,
         spatial_name,
         shape,
         predictor_cls,
@@ -952,7 +1020,7 @@ class TestGradientFlow:
 
 
 @pytest.mark.parametrize(
-    "solver_cls,solver_kwargs,solver_name,uses_rng,time_scale",
+    "solver_cls,solver_kwargs,solver_name,uses_rng,time_scale,expected_nfe",
     SOLVER_CONFIGS,
     ids=[c[2] for c in SOLVER_CONFIGS],
 )
@@ -974,6 +1042,7 @@ class TestStepCompile:
         solver_name,
         uses_rng,
         time_scale,
+        expected_nfe,
         spatial_name,
         shape,
         predictor_cls,
