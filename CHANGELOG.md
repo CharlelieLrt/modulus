@@ -104,6 +104,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Sampling, centroid conversion, geometric transformations, subdivision and
   GLOBE use the mesh-owned measure API. Point measures carry their represented
   dimension so geometric scaling preserves their physical units.
+- Promotes the volumetric `DiffusionUNet3D` and its reusable `Conv3D`,
+  `GroupNorm3D`, `UNetAttention3D`, and `UNetBlock3D` layers from experimental
+  to stable production APIs in `physicsnemo.models.diffusion_unets` and
+  `physicsnemo.nn`. The promoted APIs now carry backward-compatibility
+  guarantees and output/checkpoint non-regression coverage. Existing
+  experimental import paths remain as deprecated compatibility shims.
 
   **Migration from 2.2.x:** meshes saved with `cell_data["_measure_weights"]`
   must be regenerated or converted once before integration:
@@ -134,6 +140,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and multistep solvers. `snr` exposes the schedule's signal-to-noise ratio,
   used as the multistep extrapolation coordinate by `DPMPlusPlus2M` and
   `DPMPlusPlus2MUniC2`.
+
+- `translate`, `rotate`, `scale` and their `DomainMesh` and datapipe
+  counterparts no longer synchronize CUDA for Python-number arguments, string
+  axes, rotations and scalar scales, so they return without waiting for queued
+  GPU work. `transform` gains `assume_similarity` and `rotate` gains
+  `assume_valid_axis`, to skip the remaining runtime checks for general
+  matrices and device-tensor axes. Cached normals are mapped with one small
+  inverse instead of `solve_ex` with millions of right-hand sides, whose slow
+  path for pivoting matrices made `RandomRotateMesh(mode="uniform")` take 1.3 s
+  on the 17.7M-triangle DrivAerML surface (6.5 ms now, on a GB300).
+
+- The `tolerance` of `sample_data_at_points`, `find_containing_cells` and
+  `find_all_containing_cells` is now relative. Barycentric coordinates must
+  still be `>= -tolerance`, but the distance from a point to a cell's affine
+  hull and the BVH box padding are now limited to `tolerance` times the
+  largest absolute coordinate of the mesh, instead of `tolerance` in mesh
+  units. Results no longer depend on the mesh's length unit and are identical
+  when the mesh and query points are scaled by a power of two.
 
 ### Deprecated
 
@@ -169,6 +193,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- GLOBE DrivAerML postprocessing reports correct Cd, Cl, and Cs on subsampled
+  surfaces. Before, they shrank with the fraction of cells kept.
+- The unified external aero recipe documents how surface subsampling affects
+  force integration.
 - Checkpoint loading resolves model weights at the selected training checkpoint's
   filename index, preventing resumes that mix epochs. Missing required weights
   raise before any model or training state is restored. Distributed loads validate
@@ -212,6 +240,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `torch.distributions.Uniform` instantiates.
 - `RenameMeshFields` and `DropMeshFields` also apply to a `DomainMesh`'s
   domain-level `global_data`.
+- `sample_data_at_points` and `find_containing_cells` find on-surface points
+  of float32 surface meshes in large length units. A torus scaled to
+  `|x| ~ 1300` (millimetres) previously found 0.4% of its on-surface points
+  and returned NaN for the rest, because float32 rounding (about
+  `1.2e-7 * |x|`) exceeded the absolute `1e-6` distance tolerance.
 - `BVH.from_mesh` and `ClusterTree.from_points` compute Morton codes for 1-3
   spatial dimensions by spreading each coordinate's bits with a few
   shift-and-mask steps. CUDA no longer materializes every bit as int64 (about
@@ -304,8 +337,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a portable `funcol` path and an intra-node symmetric-memory (CUDA-IPC) path.
 - Extends `halo_scatter` with `pack_halo_routing(cap=)` fixed-shape routing (for compiled
   `dynamic=False` runs), an in-place `scatter_add_` / `index_add_` dispatch handler, and
-  node-locality routing in `select_halo_backend` (single-node uses symm-mem, multi-node falls
-  back to `funcol`).
+  node-locality routing in `select_halo_backend` (single-node uses symm-mem, multi-node
+  falls back to `funcol`).
 - Adds a `ShardTensor.grad_dtype` property override (returns the local tensor's dtype)
   so a newer-PyTorch `grad_dtype` read during Dynamo fake conversion doesn't fall back
   to a non-leaf DTensor and break compile. Mirrors the `grad_fn` / `is_leaf` / `grad`
@@ -993,11 +1026,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   end-to-end training and sampling of epsilon-parameterized models.
   Losses gain an `epsilon_to_x0_fn` kwarg used for the epsilon-to-x0
   conversion required during DSM training.
-- Adds `DiffusionUNet3D` 3D U-Net diffusion backbone for volumetric data at
-  `physicsnemo.experimental.models.diffusion_unets`. Implements the
-  `DiffusionModel` protocol. Exposes reusable 3D building blocks
-  (`Conv3D`, `GroupNorm3D`, `UNetAttention3D`, `UNetBlock3D`) at
-  `physicsnemo.experimental.nn`.
 - Added support for Batched radius search, which enables Domino
   and GeoTransolver with local features and batch size > 1.
 - Added the underfill recipe.
@@ -1110,7 +1138,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   implementation. Use `torch.nn.init.trunc_normal_` directly.
 - Deprecates the CorrDiff example (`examples/weather/corrdiff`), which no longer
   receives maintenance, bug fixes, or new features. Use the regional
-  high-resolution weather model example (`examples/weather/regional_weather_diffusion`) instead.
+  high-resolution weather model example
+  (`examples/weather/regional_weather_diffusion`) instead.
   That example unifies regional diffusion-based weather models, and covers the
   CorrDiff downscaling setting alongside other diffusion-based settings.
 
@@ -1127,8 +1156,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same key ordering as the benchmark runner.
 - Fixed graph break caused by `FunctionSpec` dispatch (`max(key=)` is not supported by `torch.compile`)
 - Fixed bug in Pangu, FengWu attention window shift for asymmetric longitudes
-- Fixed a bug in `mesh.sampling.find_nearest_cells`, where a mixup between L2 and L-inf norms
-  could cause slightly incorrect nearest-neighbor assignments in highly skewed meshes.
+- Fixed a bug in `mesh.sampling.find_nearest_cells`, where a mixup between L2 and L-inf
+  norms could cause slightly incorrect nearest-neighbor assignments in highly skewed
+  meshes.
 - Fixed TensorDict key-ordering bug in GLOBE's Barnes-Hut kernel that caused
   incorrect results when `tensordict >= 0.12` reordered leaves during
   TensorDict construction from dict literals mixing plain and nested keys.
