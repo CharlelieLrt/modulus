@@ -707,6 +707,21 @@ class TestSampleValidation:
                 solver_options={"alpha": 0.5},
             )
 
+    def test_none_callback_options_warn(self, device):
+        shape = (BATCH, 3, 8, 6)
+        scheduler, _, denoiser, xN = _make_sampling_components(
+            EDMNoiseScheduler, {}, shape, Conv2dX0Predictor, {"channels": 3}, device
+        )
+        with pytest.warns(UserWarning, match="selected without callback options"):
+            sample(
+                denoiser,
+                xN,
+                scheduler,
+                NUM_STEPS,
+                solver="exponential_euler",
+                solver_options={"bias_fn": None, "slope_fn": None},
+            )
+
     def test_unknown_solver_string_raises(self, device):
         shape = (BATCH, 3, 8, 6)
         scheduler, _, denoiser, xN = _make_sampling_components(

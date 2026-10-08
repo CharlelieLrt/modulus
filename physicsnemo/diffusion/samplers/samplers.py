@@ -470,7 +470,7 @@ def sample(
         configuration = _NAMED_SOLVER_CONFIGURATIONS.get(solver)
         if not torch.compiler.is_compiling() and configuration is not None:
             callback_options, message = configuration
-            if not any(name in options for name in callback_options):
+            if not any(options.get(name) is not None for name in callback_options):
                 warnings.warn(
                     f"solver='{solver}' was selected without callback options. "
                     f"{message}",
